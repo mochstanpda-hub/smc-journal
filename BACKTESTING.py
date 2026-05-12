@@ -60,11 +60,9 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.0.0"
+VERSION = "1.0.89"
 
-# ↓↓↓ SEM VLOŽ svoji GitHub raw URL po vytvoření repozitáře ↓↓↓
-UPDATE_URL = "https://raw.githubusercontent.com/TVUJ_USERNAME/TVUJ_REPOZITAR/main/BACKTESTING.py"
-# Příklad: "https://raw.githubusercontent.com/jannovak/smc-journal/main/BACKTESTING.py"
+UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
 def check_for_updates(silent=False):
     """
