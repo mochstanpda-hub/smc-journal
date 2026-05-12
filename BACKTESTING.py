@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.0.85"
+VERSION = "1.0.0001"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -112,44 +112,38 @@ def check_for_updates(silent=False):
         import subprocess
 
         if getattr(sys, 'frozen', False):
-            # ── Běžíme jako EXE (nainstalovaný) ─────────────────────────────
-            # Stáhni nové EXE z GitHub releases
-            exe_url = UPDATE_URL.replace('BACKTESTING.py', 'SMC_Journal_PRO.exe').replace(
-                'raw.githubusercontent.com', 'github.com').replace('/main/', '/releases/latest/download/')
-            # Fallback: pokud releases není nastaveno, zkus raw URL pro EXE
-            exe_dl_url = f"https://github.com/mochstanpda-hub/smc-journal/releases/latest/download/SMC_Journal_PRO.exe"
-
-            exe_path  = sys.executable
-            new_exe   = exe_path + '.new'
-            bat_path  = exe_path + '_update.bat'
+            # ── Běžíme jako launcher.exe ──────────────────────────────────────
+            # Stáhni nový BACKTESTING.py ze GitHubu a ulož ho vedle EXE
+            py_path = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
+            tmp_path = py_path + '.new'
 
             try:
                 messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
-                req2 = urllib.request.Request(exe_dl_url, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-                with urllib.request.urlopen(req2, timeout=120) as r:
-                    with open(new_exe, 'wb') as f:
-                        f.write(r.read())
+                req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+                with urllib.request.urlopen(req2, timeout=60) as r:
+                    new_content = r.read().decode('utf-8')
             except Exception as dl_err:
                 messagebox.showerror("Chyba stahování",
                     f"Nepodařilo se stáhnout novou verzi:\n{dl_err}\n\n"
-                    f"Stáhni ji ručně na:\ngithub.com/mochstanpda-hub/smc-journal/releases")
+                    f"Zkontroluj připojení k internetu.")
                 return
 
-            # Batch soubor který po zavření EXE nahradí soubor a restartuje
-            bat = (
-                "@echo off\n"
-                "timeout /t 2 /nobreak >nul\n"
-                f'move /y "{new_exe}" "{exe_path}"\n'
-                f'start "" "{exe_path}"\n'
-                'del "%~f0"\n'
-            )
-            with open(bat_path, 'w') as f:
-                f.write(bat)
+            # Záloha a zápis nového BACKTESTING.py
+            if os.path.exists(py_path):
+                backup = py_path + f'.backup_{VERSION}'
+                shutil.copy2(py_path, backup)
 
-            messagebox.showinfo("✅ Připraveno",
-                f"Aktualizace {remote_ver} je stažena.\n"
-                f"Program se restartuje a nainstaluje novou verzi.")
-            subprocess.Popen(['cmd', '/c', bat_path],
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            # Atomická záměna
+            if os.path.exists(py_path):
+                os.remove(py_path)
+            os.rename(tmp_path, py_path)
+
+            messagebox.showinfo("✅ Aktualizace dokončena",
+                f"Aktualizováno na verzi {remote_ver}.\n"
+                f"Program se restartuje...")
+            subprocess.Popen([sys.executable],
                              creationflags=subprocess.CREATE_NO_WINDOW)
             try: root.destroy()
             except: pass
