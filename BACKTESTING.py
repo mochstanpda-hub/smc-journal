@@ -71,7 +71,7 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
     win.resizable(False, False)
     win.grab_set()
     win.configure(bg=DT_BG)
-    w, h = 440, 270
+    w, h = 440, 310
     try:
         cx = max(0, root.winfo_rootx() + (root.winfo_width() - w) // 2)
         cy = max(0, root.winfo_rooty() + (root.winfo_height() - h) // 2)
@@ -3540,11 +3540,8 @@ if __name__ == "__main__":
         apply_dark_theme(root)
         root.protocol("WM_DELETE_WINDOW", on_close)
         root.after(100, show_intro_screen)
-        # Tiše zkontroluj aktualizace 4 sekundy po startu (v pozadí, neobtěžuje)
-        def _silent_update_check():
-            import threading
-            threading.Thread(target=lambda: check_for_updates(silent=True), daemon=True).start()
-        root.after(4000, _silent_update_check)
+        # Tiše zkontroluj aktualizace 4 sekundy po startu — na hlavním threadu (ne v background threadu!)
+        root.after(4000, lambda: check_for_updates(silent=True))
         root.mainloop()
     except Exception as e:
         if 'root' in locals(): messagebox.showerror("Fatální chyba", str(e))
