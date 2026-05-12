@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.2"
+VERSION = "1.4.4"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -213,6 +213,14 @@ def check_for_updates(silent=False):
                 except Exception as dl_err:
                     messagebox.showerror("Chyba stahování", f"Nepodařilo se stáhnout:\n{dl_err}")
                     return
+                # Ověř že stažený soubor je platný Python — ochrana před poškozeným stažením
+                try:
+                    compile(new_content, 'BACKTESTING.py', 'exec')
+                except SyntaxError as se:
+                    messagebox.showerror("Chyba aktualizace",
+                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\n"
+                        f"Aktualizace zrušena — starý soubor zůstává.\n\nZkus to za chvíli znovu.")
+                    return
                 if os.path.exists(py_path):
                     shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
                 with open(tmp_path, 'w', encoding='utf-8') as f:
@@ -226,6 +234,14 @@ def check_for_updates(silent=False):
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
                 with urllib.request.urlopen(req2, timeout=30) as r:
                     new_content = r.read().decode('utf-8')
+                # Ověř platnost před přepsáním
+                try:
+                    compile(new_content, 'BACKTESTING.py', 'exec')
+                except SyntaxError as se:
+                    messagebox.showerror("Chyba aktualizace",
+                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\n"
+                        f"Aktualizace zrušena — starý soubor zůstává.\n\nZkus to za chvíli znovu.")
+                    return
                 current_path = os.path.abspath(__file__)
                 shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
                 with open(current_path, 'w', encoding='utf-8') as f:
