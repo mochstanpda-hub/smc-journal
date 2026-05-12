@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.0.0001"
+VERSION = "1.0.2"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -96,7 +96,11 @@ def check_for_updates(silent=False):
 
         if ver_tuple(remote_ver) <= ver_tuple(VERSION):
             if not silent:
-                messagebox.showinfo("Aktualizace", f"Máš nejnovější verzi ({VERSION}).")
+                messagebox.showinfo("Aktualizace",
+                    f"Máš nejnovější verzi.\n\n"
+                    f"Tvoje verze:  {VERSION}\n"
+                    f"Na GitHubu:   {remote_ver}\n\n"
+                    f"URL:  {UPDATE_URL}")
             return
 
         # ── Nová verze dostupná ──────────────────────────────────────────────
