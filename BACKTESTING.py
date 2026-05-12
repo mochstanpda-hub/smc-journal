@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -69,15 +69,10 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
     win = tk.Toplevel(root)
     win.title("Aktualizace")
     win.resizable(False, False)
-    win.grab_set()
     win.configure(bg=DT_BG)
-    w, h = 440, 310
-    try:
-        cx = max(0, root.winfo_rootx() + (root.winfo_width() - w) // 2)
-        cy = max(0, root.winfo_rooty() + (root.winfo_height() - h) // 2)
-        win.geometry(f"{w}x{h}+{cx}+{cy}")
-    except Exception:
-        win.geometry(f"{w}x{h}")
+    win.geometry("440x320")
+    win.lift()
+    win.focus_set()
 
     # ── Hlavička s GitHub indikátorem ──────────────────────────────────────
     hdr = tk.Frame(win, bg='#2c3e50', pady=10)
@@ -139,15 +134,39 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
         tk.Button(bf, text="Zavřít", bg=DT_BTN, fg=DT_TEXT,
                   font=('Segoe UI', 10), padx=18, pady=6, relief='flat',
                   cursor='hand2', command=win.destroy).pack(side='right')
-    win.wait_window()
 
 
 def check_for_updates(silent=False):
     """
     Zkontroluje GitHub pro novou verzi programu.
-    silent=True → neinformuje pokud je verze aktuální (ale ukáže dialog při nové verzi).
+    silent=True → vůbec žádný dialog (ani při nové verzi). Uživatel musí kliknout UPDATE ručně.
     """
     if "TVUJ_USERNAME" in UPDATE_URL:
+        return
+    if silent:
+        # Tichý režim — žádné dialogy, žádná okna
+        try:
+            import re, urllib.request
+            req = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+            with urllib.request.urlopen(req, timeout=6) as response:
+                header_bytes = response.read(4096).decode('utf-8', errors='ignore')
+            m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', header_bytes, re.MULTILINE)
+            if m:
+                remote_ver = m.group(1).strip()
+                def _vt(v):
+                    try: return tuple(int(x) for x in str(v).strip().split('.'))
+                    except: return (0,)
+                if _vt(remote_ver) > _vt(VERSION):
+                    # Je dostupná nová verze — rozsvítíme UPDATE tlačítko (pokud existuje)
+                    try:
+                        for w in root.winfo_children():
+                            for ww in (w.winfo_children() if hasattr(w, 'winfo_children') else []):
+                                if hasattr(ww, 'cget') and 'UPDATE' in str(ww.cget('text') if ww.winfo_class() == 'Button' else ''):
+                                    ww.configure(bg='#e74c3c', text=f"🔴 UPDATE  {remote_ver}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         return
 
     def ver_tuple(v):
