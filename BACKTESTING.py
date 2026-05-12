@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.0.89"
+VERSION = "1.0.85"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -109,65 +109,165 @@ def check_for_updates(silent=False):
         if not answer:
             return
 
-        # Stáhni celý soubor
-        req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-        with urllib.request.urlopen(req2, timeout=30) as response:
-            new_content = response.read().decode('utf-8')
-
-        # Záloha starého souboru
-        current_path = os.path.abspath(__file__)
-        backup_path  = current_path + f'.backup_{VERSION}'
-        shutil.copy2(current_path, backup_path)
-
-        # Zápis nové verze
-        with open(current_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-
-        messagebox.showinfo(
-            "✅ Aktualizace dokončena",
-            f"Aktualizováno na verzi {remote_ver}.\n"
-            f"Záloha uložena: {os.path.basename(backup_path)}\n\n"
-            f"Program se restartuje..."
-        )
-
-        # Restart
         import subprocess
-        subprocess.Popen([sys.executable, current_path])
-        try: root.destroy()
-        except: pass
-        sys.exit(0)
+
+        if getattr(sys, 'frozen', False):
+            # ── Běžíme jako EXE (nainstalovaný) ─────────────────────────────
+            # Stáhni nové EXE z GitHub releases
+            exe_url = UPDATE_URL.replace('BACKTESTING.py', 'SMC_Journal_PRO.exe').replace(
+                'raw.githubusercontent.com', 'github.com').replace('/main/', '/releases/latest/download/')
+            # Fallback: pokud releases není nastaveno, zkus raw URL pro EXE
+            exe_dl_url = f"https://github.com/mochstanpda-hub/smc-journal/releases/latest/download/SMC_Journal_PRO.exe"
+
+            exe_path  = sys.executable
+            new_exe   = exe_path + '.new'
+            bat_path  = exe_path + '_update.bat'
+
+            try:
+                messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
+                req2 = urllib.request.Request(exe_dl_url, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+                with urllib.request.urlopen(req2, timeout=120) as r:
+                    with open(new_exe, 'wb') as f:
+                        f.write(r.read())
+            except Exception as dl_err:
+                messagebox.showerror("Chyba stahování",
+                    f"Nepodařilo se stáhnout novou verzi:\n{dl_err}\n\n"
+                    f"Stáhni ji ručně na:\ngithub.com/mochstanpda-hub/smc-journal/releases")
+                return
+
+            # Batch soubor který po zavření EXE nahradí soubor a restartuje
+            bat = (
+                "@echo off\n"
+                "timeout /t 2 /nobreak >nul\n"
+                f'move /y "{new_exe}" "{exe_path}"\n'
+                f'start "" "{exe_path}"\n'
+                'del "%~f0"\n'
+            )
+            with open(bat_path, 'w') as f:
+                f.write(bat)
+
+            messagebox.showinfo("✅ Připraveno",
+                f"Aktualizace {remote_ver} je stažena.\n"
+                f"Program se restartuje a nainstaluje novou verzi.")
+            subprocess.Popen(['cmd', '/c', bat_path],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            try: root.destroy()
+            except: pass
+            sys.exit(0)
+
+        else:
+            # ── Běžíme jako .py skript ───────────────────────────────────────
+            req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+            with urllib.request.urlopen(req2, timeout=30) as response:
+                new_content = response.read().decode('utf-8')
+
+            current_path = os.path.abspath(__file__)
+            backup_path  = current_path + f'.backup_{VERSION}'
+            shutil.copy2(current_path, backup_path)
+
+            with open(current_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+
+            messagebox.showinfo(
+                "✅ Aktualizace dokončena",
+                f"Aktualizováno na verzi {remote_ver}.\n"
+                f"Záloha: {os.path.basename(backup_path)}\n\n"
+                f"Program se restartuje..."
+            )
+            subprocess.Popen([sys.executable, current_path])
+            try: root.destroy()
+            except: pass
+            sys.exit(0)
 
     except Exception as e:
         if not silent:
             messagebox.showerror("Chyba aktualizace", f"Nepodařilo se zkontrolovat aktualizaci:\n{e}")
 
 # ==============================================================================
-# THEME — výchozí Tkinter/Windows styl
+# MOTIVY (THEMES)
 # ==============================================================================
-DT_BG      = "#f0f0f0"
-DT_PANEL   = "#f0f0f0"
-DT_SURFACE = "#e8e8e8"
-DT_TEXT    = "#000000"
-DT_SUBTEXT = "#555555"
-DT_ACCENT  = "#000000"
-DT_WIN_BG  = "#d4edda"
-DT_WIN_FG  = "darkgreen"
-DT_LOSS_BG = "#f8d7da"
-DT_LOSS_FG = "darkred"
-DT_BE_BG   = "#fff3cd"
-DT_BE_FG   = "darkorange"
-DT_BTN     = "#f0f0f0"
-DT_ENTRY   = "#ffffff"
-DT_BORDER  = "#aaaaaa"
+THEMES = {
+    "Klasický": {
+        "BG":"#f0f0f0","PANEL":"#f0f0f0","SURFACE":"#e0e0e0",
+        "TEXT":"#1a1a1a","SUBTEXT":"#555555","ACCENT":"#0078d4",
+        "WIN_BG":"#d4edda","WIN_FG":"#155724",
+        "LOSS_BG":"#f8d7da","LOSS_FG":"#721c24",
+        "BE_BG":"#fff3cd","BE_FG":"#856404",
+        "BTN":"#e0e0e0","ENTRY":"#ffffff","BORDER":"#aaaaaa",
+        "SELECT_COLOR":"#ffffff","ttk":"vista",
+    },
+    "Šedý profesionál": {
+        "BG":"#eaecee","PANEL":"#dde1e4","SURFACE":"#cfd4d8",
+        "TEXT":"#1c2833","SUBTEXT":"#566573","ACCENT":"#2e86c1",
+        "WIN_BG":"#d5f5e3","WIN_FG":"#1e8449",
+        "LOSS_BG":"#fadbd8","LOSS_FG":"#922b21",
+        "BE_BG":"#fef9e7","BE_FG":"#9a7d0a",
+        "BTN":"#cfd4d8","ENTRY":"#f4f6f6","BORDER":"#aab7b8",
+        "SELECT_COLOR":"#f4f6f6","ttk":"vista",
+    },
+    "Světlý elegantní": {
+        "BG":"#ffffff","PANEL":"#f8f9fa","SURFACE":"#e9ecef",
+        "TEXT":"#212529","SUBTEXT":"#6c757d","ACCENT":"#0d6efd",
+        "WIN_BG":"#d1e7dd","WIN_FG":"#0a3622",
+        "LOSS_BG":"#f8d7da","LOSS_FG":"#58151c",
+        "BE_BG":"#fff3cd","BE_FG":"#664d03",
+        "BTN":"#e9ecef","ENTRY":"#ffffff","BORDER":"#ced4da",
+        "SELECT_COLOR":"#ffffff","ttk":"vista",
+    },
+}
+THEME_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys,'frozen',False) else os.path.dirname(sys.executable), 'projects', 'theme.txt')
+
+def load_theme_name():
+    try:
+        if os.path.exists(THEME_FILE):
+            t = open(THEME_FILE, encoding='utf-8').read().strip()
+            if t in THEMES: return t
+    except: pass
+    return "Klasický"
+
+def save_theme_name(name):
+    try:
+        os.makedirs('projects', exist_ok=True)
+        open(THEME_FILE, 'w', encoding='utf-8').write(name)
+    except: pass
+
+def apply_theme(name):
+    """Aplikuje motiv — aktualizuje globální DT_ proměnné."""
+    global DT_BG, DT_PANEL, DT_SURFACE, DT_TEXT, DT_SUBTEXT, DT_ACCENT
+    global DT_WIN_BG, DT_WIN_FG, DT_LOSS_BG, DT_LOSS_FG, DT_BE_BG, DT_BE_FG
+    global DT_BTN, DT_ENTRY, DT_BORDER
+    t = THEMES.get(name, THEMES["Klasický"])
+    DT_BG=t["BG"]; DT_PANEL=t["PANEL"]; DT_SURFACE=t["SURFACE"]
+    DT_TEXT=t["TEXT"]; DT_SUBTEXT=t["SUBTEXT"]; DT_ACCENT=t["ACCENT"]
+    DT_WIN_BG=t["WIN_BG"]; DT_WIN_FG=t["WIN_FG"]
+    DT_LOSS_BG=t["LOSS_BG"]; DT_LOSS_FG=t["LOSS_FG"]
+    DT_BE_BG=t["BE_BG"]; DT_BE_FG=t["BE_FG"]
+    DT_BTN=t["BTN"]; DT_ENTRY=t["ENTRY"]; DT_BORDER=t["BORDER"]
+    save_theme_name(name)
+
+# Načti motiv při startu
+apply_theme(load_theme_name())
 
 def apply_dark_theme(root):
+    t = THEMES.get(load_theme_name(), THEMES["Klasický"])
     style = ttk.Style(root)
-    try: style.theme_use('vista')
+    try: style.theme_use(t.get("ttk","default"))
     except:
-        try: style.theme_use('winnative')
+        try: style.theme_use('default')
         except: pass
-    style.configure('Treeview', rowheight=22, font=('Arial', 9))
-    style.configure('Treeview.Heading', font=('Arial', 9, 'bold'))
+    style.configure('Treeview', rowheight=22, font=('Arial', 9),
+                    background=DT_ENTRY, foreground=DT_TEXT,
+                    fieldbackground=DT_ENTRY)
+    style.configure('Treeview.Heading', font=('Arial', 9, 'bold'),
+                    background=DT_SURFACE, foreground=DT_TEXT)
+    style.map('Treeview', background=[('selected', DT_ACCENT)],
+              foreground=[('selected', '#ffffff')])
+    style.configure('TNotebook', background=DT_PANEL)
+    style.configure('TNotebook.Tab', background=DT_SURFACE, foreground=DT_TEXT, padding=[8,4])
+    style.map('TNotebook.Tab', background=[('selected', DT_BG)], foreground=[('selected', DT_ACCENT)])
+    style.configure('TCombobox', fieldbackground=DT_ENTRY, background=DT_SURFACE,
+                    foreground=DT_TEXT, selectbackground=DT_ACCENT)
+    root.configure(bg=DT_BG)
     root.option_add('*Listbox.BorderWidth', 1)
     root.option_add('*Button.Relief', 'flat')
     root.option_add('*Button.BorderWidth', 0)
@@ -175,23 +275,39 @@ def apply_dark_theme(root):
     root.option_add('*Radiobutton.Background', DT_BG)
     root.option_add('*Radiobutton.Foreground', DT_TEXT)
     root.option_add('*Radiobutton.activeBackground', DT_BG)
-    root.option_add('*Radiobutton.selectColor', DT_ACCENT)
+    root.option_add('*Radiobutton.selectColor', t["SELECT_COLOR"])
     root.option_add('*Checkbutton.Background', DT_PANEL)
     root.option_add('*Checkbutton.Foreground', DT_TEXT)
     root.option_add('*Checkbutton.activeBackground', DT_PANEL)
-    root.option_add('*Checkbutton.selectColor', DT_ACCENT)
+    root.option_add('*Checkbutton.selectColor', t["SELECT_COLOR"])
     root.option_add('*Menu.Background', DT_PANEL)
     root.option_add('*Menu.Foreground', DT_TEXT)
     root.option_add('*Menu.ActiveBackground', DT_SURFACE)
     root.option_add('*Menu.ActiveForeground', DT_ACCENT)
     root.option_add('*Canvas.HighlightThickness', 0)
+    root.option_add('*Entry.Background', DT_ENTRY)
+    root.option_add('*Entry.Foreground', DT_TEXT)
+    root.option_add('*Label.Background', DT_BG)
+    root.option_add('*Label.Foreground', DT_TEXT)
+    root.option_add('*Frame.Background', DT_BG)
+    root.option_add('*Listbox.Background', DT_ENTRY)
+    root.option_add('*Listbox.Foreground', DT_TEXT)
 
-# Hlavní složky
-BASE_DIR = 'projects'
+# ── Kořenový adresář aplikace ───────────────────────────────────────────
+# .py skript → adresář kde leží skript
+# .exe (PyInstaller) → adresář kde leží EXE
+if getattr(sys, 'frozen', False):
+    _APP_DIR = os.path.dirname(sys.executable)
+else:
+    try:    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    except: _APP_DIR = os.getcwd()
+
+# Hlavní složky (absolutní cesty — funguje jak ze skriptu, tak z EXE/instalátoru)
+BASE_DIR    = os.path.join(_APP_DIR, 'projects')
 DIR_BACKTEST = os.path.join(BASE_DIR, 'BACKTEST')
-DIR_REAL = os.path.join(BASE_DIR, 'REAL')
-DIR_JOURNAL = os.path.join(BASE_DIR, 'JOURNAL')
-DIR_BACKUPS = 'backups' 
+DIR_REAL     = os.path.join(BASE_DIR, 'REAL')
+DIR_JOURNAL  = os.path.join(BASE_DIR, 'JOURNAL')
+DIR_BACKUPS  = os.path.join(_APP_DIR, 'backups')
 
 # Soubory a proměnné
 DATA_FILE = ''
@@ -2525,8 +2641,9 @@ def show_screenshot_dialog(prefill_callback):
         win.destroy()
         prefill_callback(out)
 
-    tk.Button(win, text="✅  POUŽÍT — VYPLNIT FORMULÁŘ", bg=DT_BTN, fg='white',
-              font=('Segoe UI',11,'bold'), pady=10, relief='flat',
+    tk.Button(win, text="✅  POUŽÍT — VYPLNIT FORMULÁŘ", bg='#27ae60', fg='white',
+              font=('Segoe UI',11,'bold'), pady=10, relief='flat', cursor='hand2',
+              activebackground='#219a52', activeforeground='white',
               command=apply).pack(fill='x', padx=24, pady=(14,4))
     tk.Button(win, text="Zrušit", bg=DT_SURFACE, fg=DT_SUBTEXT,
               font=('Segoe UI',9), relief='flat',
@@ -3003,55 +3120,84 @@ def show_main_screen(p_name):
     tk.Button(hb_right, text="⚙ SLOUPCE", command=open_column_config, font=('Arial', 8), bg="#34495e", fg="white").pack(side='left')
 
     # === MULTI-FILTR PANEL ===
-    filter_outer = tk.Frame(top_pane, bg=DT_PANEL, pady=6, padx=8); filter_outer.pack(fill='x', pady=(4,0))
-    tk.Label(filter_outer, text="FILTRY", bg=DT_PANEL, fg=DT_ACCENT, font=('Segoe UI',8,'bold')).pack(side='left', padx=(0,10))
-    # Řádek 1 – Symbol, Výsledek, Seance, Tag
-    r1 = tk.Frame(filter_outer, bg=DT_PANEL); r1.pack(side='left')
-    tk.Label(r1, text="Symbol:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=0,column=0,sticky='w',padx=(0,2))
-    cb_sym = ttk.Combobox(r1, textvariable=filter_symbol_var, values=["VŠE"]+PAIRS, width=9, state='readonly')
-    cb_sym.grid(row=0,column=1,padx=(0,8))
-    cb_sym.bind('<<ComboboxSelected>>', lambda e: apply_filter())
-    tk.Label(r1, text="Výsl.:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=0,column=2,sticky='w',padx=(0,2))
-    cb_res = ttk.Combobox(r1, textvariable=filter_result_var, values=["VŠE","Win","Loss","BE"], width=6, state='readonly')
-    cb_res.grid(row=0,column=3,padx=(0,8))
-    cb_res.bind('<<ComboboxSelected>>', lambda e: apply_filter())
-    tk.Label(r1, text="Seance:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=0,column=4,sticky='w',padx=(0,2))
-    cb_ses = ttk.Combobox(r1, textvariable=filter_session_var, values=["VŠE"]+SESSIONS_LIST, width=8, state='readonly')
-    cb_ses.grid(row=0,column=5,padx=(0,8))
-    cb_ses.bind('<<ComboboxSelected>>', lambda e: apply_filter())
-    tk.Label(r1, text="Tag:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=0,column=6,sticky='w',padx=(0,2))
-    tag_e = tk.Entry(r1, textvariable=filter_tag_var, width=10, bg=DT_ENTRY, fg=DT_TEXT, insertbackground=DT_ACCENT)
-    tag_e.grid(row=0,column=7,padx=(0,8))
-    tag_e.bind('<Return>', lambda e: apply_filter())
-    # Řádek 2 – datum od/do + uložené filtry
-    tk.Label(r1, text="Od:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=1,column=0,sticky='w',pady=(3,0))
-    df_e = tk.Entry(r1, textvariable=filter_date_from_var, width=11, bg=DT_ENTRY, fg=DT_TEXT, insertbackground=DT_ACCENT)
-    df_e.grid(row=1,column=1,pady=(3,0))
-    tk.Label(r1, text="Do:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=1,column=2,sticky='w',pady=(3,0))
-    dt_e = tk.Entry(r1, textvariable=filter_date_to_var, width=11, bg=DT_ENTRY, fg=DT_TEXT, insertbackground=DT_ACCENT)
-    dt_e.grid(row=1,column=3,pady=(3,0))
-    df_e.bind('<Return>', lambda e: apply_filter())
-    dt_e.bind('<Return>', lambda e: apply_filter())
-    tk.Label(r1, text="RRR≥:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=1,column=4,sticky='w',pady=(3,0))
-    rrr_min_e = tk.Entry(r1, textvariable=filter_rrr_min_var, width=5, bg=DT_ENTRY, fg=DT_TEXT, insertbackground=DT_ACCENT)
-    rrr_min_e.grid(row=1,column=5,pady=(3,0),padx=(0,4))
-    rrr_min_e.bind('<Return>', lambda e: apply_filter())
-    tk.Label(r1, text="RRR≤:", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8)).grid(row=1,column=6,sticky='w',pady=(3,0))
-    rrr_max_e = tk.Entry(r1, textvariable=filter_rrr_max_var, width=5, bg=DT_ENTRY, fg=DT_TEXT, insertbackground=DT_ACCENT)
-    rrr_max_e.grid(row=1,column=7,pady=(3,0),padx=(0,4))
-    rrr_max_e.bind('<Return>', lambda e: apply_filter())
-    # Uložené filtry
+    # ── FILTER BAR ──────────────────────────────────────────────────────────
+    filter_outer = tk.Frame(top_pane, bg='#2c3e50')
+    filter_outer.pack(fill='x', pady=(4, 0))
+
+    # Skrývací tělo
+    flt_body = tk.Frame(top_pane, bg='#eaecee', pady=4, padx=6)
+    flt_body.pack(fill='x')
+
+    _flt_vis = [True]
+    def _toggle_flt():
+        if _flt_vis[0]:
+            flt_body.pack_forget(); _toggle_flt_btn.config(text="▼")
+        else:
+            flt_body.pack(fill='x', before=_flt_anchor); _toggle_flt_btn.config(text="▲")
+        _flt_vis[0] = not _flt_vis[0]
+
+    tk.Label(filter_outer, text="  🔍 FILTRY", bg='#2c3e50', fg='white',
+             font=('Segoe UI', 8, 'bold')).pack(side='left', pady=3)
+    _toggle_flt_btn = tk.Button(filter_outer, text="▲", command=_toggle_flt,
+                                bg='#34495e', fg='white', font=('Segoe UI', 8),
+                                bd=0, padx=8, cursor='hand2')
+    _toggle_flt_btn.pack(side='right', padx=4, pady=2)
+    tk.Button(filter_outer, text="Uložit", command=lambda: save_current_filter(saved_combo_flt),
+              bg='#8e44ad', fg='white', font=('Segoe UI', 8), bd=0, padx=8, cursor='hand2'
+              ).pack(side='right', padx=2, pady=2)
+    tk.Button(filter_outer, text="Reset", command=reset_filter,
+              bg='#e74c3c', fg='white', font=('Segoe UI', 8), bd=0, padx=8, cursor='hand2'
+              ).pack(side='right', padx=2, pady=2)
+    tk.Button(filter_outer, text="Použít", command=apply_filter,
+              bg='#27ae60', fg='white', font=('Segoe UI', 8, 'bold'), bd=0, padx=10, cursor='hand2'
+              ).pack(side='right', padx=2, pady=2)
+
+    # Řádek s filtry — jako chipsy
+    row_a = tk.Frame(flt_body, bg='#eaecee'); row_a.pack(fill='x', pady=(2, 1))
+
+    def chip(parent, lbl, widget):
+        """Bílý rámeček s popiskem + widgetem."""
+        f = tk.Frame(parent, bg='white', relief='solid', bd=1)
+        f.pack(side='left', padx=3, pady=1, ipady=2)
+        tk.Label(f, text=lbl, bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
+        widget(f).pack(side='left', padx=(0, 5))
+
+    chip(row_a, "Symbol",    lambda f: ttk.Combobox(f, textvariable=filter_symbol_var, values=["VŠE"]+PAIRS, width=10, state='readonly'))
+    chip(row_a, "Výsledek",  lambda f: ttk.Combobox(f, textvariable=filter_result_var, values=["VŠE","Win","Loss","BE"], width=7, state='readonly'))
+    chip(row_a, "Seance",    lambda f: ttk.Combobox(f, textvariable=filter_session_var, values=["VŠE"]+SESSIONS_LIST, width=9, state='readonly'))
+    chip(row_a, "Tag",       lambda f: tk.Entry(f, textvariable=filter_tag_var, width=10, bg='white', relief='flat'))
+    chip(row_a, "Od",        lambda f: tk.Entry(f, textvariable=filter_date_from_var, width=11, bg='white', relief='flat'))
+    chip(row_a, "Do",        lambda f: tk.Entry(f, textvariable=filter_date_to_var, width=11, bg='white', relief='flat'))
+
+    # RRR chip
+    rrr_f = tk.Frame(row_a, bg='white', relief='solid', bd=1)
+    rrr_f.pack(side='left', padx=3, pady=1, ipady=2)
+    tk.Label(rrr_f, text="RRR", bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
+    rrr_min_e = tk.Entry(rrr_f, textvariable=filter_rrr_min_var, width=4, bg='white', relief='flat'); rrr_min_e.pack(side='left')
+    tk.Label(rrr_f, text="–", bg='white', fg='#888').pack(side='left')
+    rrr_max_e = tk.Entry(rrr_f, textvariable=filter_rrr_max_var, width=4, bg='white', relief='flat'); rrr_max_e.pack(side='left', padx=(0, 4))
+
+    # Uložené filtry chip
     saved_flt_var = tk.StringVar()
-    saved_combo_flt = ttk.Combobox(r1, textvariable=saved_flt_var, width=12, state='readonly')
+    sf = tk.Frame(row_a, bg='white', relief='solid', bd=1)
+    sf.pack(side='left', padx=3, pady=1, ipady=2)
+    tk.Label(sf, text="💾 Uložené", bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
+    saved_combo_flt = ttk.Combobox(sf, textvariable=saved_flt_var, width=12, state='readonly')
     saved_flt_data = load_saved_filters()
     saved_combo_flt['values'] = list(saved_flt_data.keys())
-    saved_combo_flt.grid(row=1,column=4,columnspan=2,padx=(0,4),pady=(3,0))
+    saved_combo_flt.pack(side='left', padx=(0, 4))
+
+    # Bind events
+    for w in row_a.winfo_children():
+        for child in w.winfo_children():
+            if isinstance(child, ttk.Combobox): child.bind('<<ComboboxSelected>>', lambda e: apply_filter())
+            if isinstance(child, tk.Entry): child.bind('<Return>', lambda e: apply_filter())
+    rrr_min_e.bind('<Return>', lambda e: apply_filter())
+    rrr_max_e.bind('<Return>', lambda e: apply_filter())
     saved_combo_flt.bind('<<ComboboxSelected>>', lambda e: apply_saved_filter_by_name(saved_flt_var.get(), saved_combo_flt) or None)
-    # Tlačítka
-    btns = tk.Frame(filter_outer, bg=DT_PANEL); btns.pack(side='left', padx=(10,0))
-    tk.Button(btns, text="🔍", command=apply_filter, bg='#2980b9', fg='white', font=('Segoe UI',9,'bold'), padx=8, pady=2).pack(pady=(0,2))
-    tk.Button(btns, text="✕", command=reset_filter, bg='#c0392b', fg='white', font=('Segoe UI',9), padx=8, pady=2).pack(pady=(0,2))
-    tk.Button(btns, text="💾", command=lambda: save_current_filter(saved_combo_flt), bg='#8e44ad', fg='white', font=('Segoe UI',9), padx=8, pady=2).pack()
+
+    # Anchor pro toggle (musí být za flt_body)
+    _flt_anchor = tk.Frame(top_pane, height=0, bg=DT_PANEL); _flt_anchor.pack(fill='x')
 
     tree_frame = tk.Frame(top_pane); tree_frame.pack(fill='both', expand=True, pady=5)
     cfg = load_scoring_config(); current_cols = cfg.get("columns", DEFAULT_SCORING["columns"])
@@ -3198,11 +3344,45 @@ def show_global_rules_screen():
     main = tk.Frame(root, padx=20, pady=20); main.pack(fill="both", expand=True)
     setup_rules_ui(main)
 
+APP_TITLE_FILE = os.path.join(_APP_DIR, 'projects', 'app_title.txt')
+
+def load_app_title():
+    try:
+        if os.path.exists(APP_TITLE_FILE):
+            t = open(APP_TITLE_FILE, encoding='utf-8').read().strip()
+            if t: return t
+    except: pass
+    return "SMC ANALYTICS PRO 2026"
+
+def save_app_title(title):
+    try:
+        os.makedirs('projects', exist_ok=True)
+        open(APP_TITLE_FILE, 'w', encoding='utf-8').write(title)
+    except: pass
+
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
     main_container = tk.Frame(root, bg="#ecf0f1"); main_container.pack(fill="both", expand=True)
-    tk.Label(main_container, text="SMC ANALYTICS PRO 2026", bg="#ecf0f1", font=('Arial', 24, 'bold'), fg="#2c3e50").pack(pady=40)
+
+    # Název — kliknutím na ✏️ se dá přepsat
+    title_frame = tk.Frame(main_container, bg="#ecf0f1"); title_frame.pack(pady=(35, 5))
+    title_var = tk.StringVar(value=load_app_title())
+    title_lbl = tk.Label(title_frame, textvariable=title_var, bg="#ecf0f1",
+                         font=('Arial', 24, 'bold'), fg="#2c3e50")
+    title_lbl.pack(side='left')
+
+    def edit_title():
+        new = simpledialog.askstring("Změnit název", "Zadej nový název aplikace:",
+                                     initialvalue=title_var.get(), parent=root)
+        if new and new.strip():
+            title_var.set(new.strip())
+            save_app_title(new.strip())
+            root.title(new.strip())
+
+    tk.Button(title_frame, text="✏️", command=edit_title, bg="#ecf0f1", fg="#95a5a6",
+              relief='flat', font=('Arial', 14), cursor='hand2',
+              activebackground="#ecf0f1").pack(side='left', padx=(8, 0))
     grid_frame = tk.Frame(main_container, bg="#ecf0f1"); grid_frame.pack(expand=True)
     
     f1 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f1.grid(row=0, column=0, padx=20, pady=20); f1.pack_propagate(False)
@@ -3230,7 +3410,37 @@ def show_intro_screen():
     tk.Label(f3, text="Psychologie a emoce.", bg="white", fg="gray", pady=10).pack()
     tk.Label(f3, text="📅", font=('Arial', 50), bg="white").pack(pady=30)
     tk.Button(f3, text="OTEVŘÍT DENÍK", command=show_journal_screen, bg="#8e44ad", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
-    tk.Label(main_container, text="Pro 2026", bg="#ecf0f1", fg="gray").pack(side="bottom", pady=10)
+    # ── Přepínač motivů ─────────────────────────────────────────────────────
+    theme_bar = tk.Frame(main_container, bg="#ecf0f1")
+    theme_bar.pack(side="bottom", pady=12)
+    tk.Label(theme_bar, text="🎨 MOTIV:", bg="#ecf0f1", fg="#555",
+             font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(0, 8))
+
+    # Barvy náhledu pro každý motiv (BTN_BG, BTN_FG)
+    _theme_colors = {
+        "Klasický":          ("#0078d4", "#ffffff"),
+        "Šedý profesionál":  ("#2e86c1", "#ffffff"),
+        "Světlý elegantní":  ("#0d6efd", "#ffffff"),
+    }
+    current_theme = load_theme_name()
+
+    def _switch_theme(name):
+        apply_theme(name)
+        apply_dark_theme(root)
+        show_intro_screen()
+
+    for tname, (tbg, tfg) in _theme_colors.items():
+        is_active = (tname == current_theme)
+        btn = tk.Button(
+            theme_bar, text=("✔  " if is_active else "  ") + tname,
+            bg=tbg, fg=tfg,
+            font=('Segoe UI', 9, 'bold' if is_active else 'normal'),
+            relief='solid' if is_active else 'flat',
+            bd=2 if is_active else 0,
+            padx=14, pady=5, cursor='hand2',
+            command=lambda n=tname: _switch_theme(n)
+        )
+        btn.pack(side='left', padx=5)
 
     f4 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f4.grid(row=0, column=3, padx=20, pady=20); f4.pack_propagate(False)
     tk.Label(f4, text="📋 STRATEGIE", font=('Arial', 16, 'bold'), bg="#e67e22", fg="white", pady=10).pack(fill="x")
@@ -3284,7 +3494,7 @@ def open_project(lb, mode):
 
 if __name__ == "__main__":
     try:
-        root = tk.Tk(); root.title("SMC Journal PRO 2026"); root.geometry("1400x900")
+        root = tk.Tk(); root.title(load_app_title()); root.geometry("1400x900")
         root.tk.call('encoding', 'system', 'utf-8')
         root.minsize(1100, 700)
         apply_dark_theme(root)
