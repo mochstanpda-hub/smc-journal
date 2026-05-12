@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -85,6 +85,25 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
              font=('Segoe UI', 9, 'bold')).pack(side='right', padx=16)
 
     # ── Tělo ───────────────────────────────────────────────────────────────
+    # Tlacitka packujeme PRVNI s side='bottom' -- jinak body s expand=True je pohltí
+    bf = tk.Frame(win, bg=DT_BG, padx=24, pady=10)
+    bf.pack(fill='x', side='bottom')
+    if on_update:
+        def _do():
+            win.destroy(); on_update()
+        tk.Button(bf, text="⬇  STÁHNOUT A NAINSTALOVAT", bg='#27ae60', fg='white',
+                  font=('Segoe UI', 10, 'bold'), padx=14, pady=8, relief='flat',
+                  cursor='hand2', activebackground='#219a52', activeforeground='white',
+                  command=_do).pack(side='left')
+        tk.Button(bf, text="Później", bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 9), padx=10, pady=8, relief='flat',
+                  cursor='hand2', command=win.destroy).pack(side='left', padx=(10, 0))
+    else:
+        tk.Button(bf, text="Zavřít", bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 10), padx=18, pady=8, relief='flat',
+                  cursor='hand2', command=win.destroy).pack(side='right')
+
+    # Telo -- packujeme PO tlacitkach
     body = tk.Frame(win, bg=DT_BG, padx=24, pady=14)
     body.pack(fill='both', expand=True)
 
@@ -117,23 +136,6 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
             tk.Label(body, text="Máš nejnovější verzi.", bg=DT_BG,
                      fg=DT_SUBTEXT, font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 6))
 
-    # ── Tlačítka ───────────────────────────────────────────────────────────
-    bf = tk.Frame(win, bg=DT_BG, padx=24, pady=(0, 14))
-    bf.pack(fill='x')
-    if on_update:
-        def _do():
-            win.destroy(); on_update()
-        tk.Button(bf, text="⬇  STÁHNOUT A NAINSTALOVAT", bg='#27ae60', fg='white',
-                  font=('Segoe UI', 10, 'bold'), padx=14, pady=6, relief='flat',
-                  cursor='hand2', activebackground='#219a52', activeforeground='white',
-                  command=_do).pack(side='left')
-        tk.Button(bf, text="Později", bg=DT_BTN, fg=DT_TEXT,
-                  font=('Segoe UI', 9), padx=10, pady=6, relief='flat',
-                  cursor='hand2', command=win.destroy).pack(side='left', padx=(8, 0))
-    else:
-        tk.Button(bf, text="Zavřít", bg=DT_BTN, fg=DT_TEXT,
-                  font=('Segoe UI', 10), padx=18, pady=6, relief='flat',
-                  cursor='hand2', command=win.destroy).pack(side='right')
 
 
 def check_for_updates(silent=False):
