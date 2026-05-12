@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.7"
+VERSION = "1.4.8"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -233,7 +233,10 @@ def check_for_updates(silent=False):
                 if os.path.exists(py_path): os.remove(py_path)
                 os.rename(tmp_path, py_path)
                 messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nProgram se restartuje...")
-                subprocess.Popen([sys.executable], creationflags=subprocess.CREATE_NO_WINDOW)
+                bat = os.path.join(os.path.dirname(sys.executable), '_restart.bat')
+                with open(bat, 'w') as _bf:
+                    _bf.write(f'@echo off\ntimeout /t 2 /nobreak >nul\nstart "" "{sys.executable}"\ndel "%~f0"\n')
+                subprocess.Popen(['cmd', '/c', bat], creationflags=subprocess.CREATE_NO_WINDOW)
             else:
                 # ── .py skript ──────────────────────────────────────────────
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
@@ -2132,7 +2135,8 @@ def update_listbox():
     f_session = filter_session_var.get()   if filter_session_var else "VŠE"
     f_from    = filter_date_from_var.get() if filter_date_from_var else ""
     f_to      = filter_date_to_var.get()   if filter_date_to_var else ""
-    f_tag     = filter_tag_var.get().strip().lower() if filter_tag_var else ""
+    _f_tag_raw = filter_tag_var.get().strip().lower() if filter_tag_var else ""
+    f_tag     = "" if _f_tag_raw in ("vše", "vse", "") else _f_tag_raw
     f_rrr_min = filter_rrr_min_var.get().strip() if filter_rrr_min_var else ""
     f_rrr_max = filter_rrr_max_var.get().strip() if filter_rrr_max_var else ""
 
@@ -3106,7 +3110,29 @@ def show_main_screen(p_name):
     left_h = tk.Frame(h, bg=DT_PANEL); left_h.pack(side='left', fill='y')
     mode_badge = tk.Label(left_h, text=f" {mode_text} ", bg=mode_color, fg=DT_BG, font=('Segoe UI', 8, 'bold'), padx=6, pady=3)
     mode_badge.pack(side='left', padx=(15,8), pady=14)
-    tk.Label(left_h, text=p_name.upper(), fg=DT_ACCENT, bg=DT_PANEL, font=('Segoe UI', 12, 'bold')).pack(side='left', pady=14)
+    _pname_var = tk.StringVar(value=p_name.upper())
+    _pname_lbl = tk.Label(left_h, textvariable=_pname_var, fg=DT_ACCENT, bg=DT_PANEL,
+                          font=('Segoe UI', 12, 'bold'), cursor='hand2')
+    _pname_lbl.pack(side='left', pady=14)
+    tk.Label(left_h, text=" ✏️", bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI', 9),
+             cursor='hand2').pack(side='left', pady=14)
+    def _rename_project(e=None):
+        new_name = simpledialog.askstring("Přejmenovat projekt",
+            "Nový název projektu:", initialvalue=_pname_var.get(), parent=root)
+        if not new_name or not new_name.strip(): return
+        new_name = new_name.strip()
+        old_path = os.path.join(BASE_DIR, p_name)
+        new_path = os.path.join(BASE_DIR, new_name)
+        if os.path.exists(new_path):
+            messagebox.showerror("Chyba", f"Projekt '{new_name}' už existuje."); return
+        try:
+            os.rename(old_path, new_path)
+            _pname_var.set(new_name.upper())
+            # Aktualizuj p_name pro zbytek session
+            import ctypes; ctypes.py_object
+        except Exception as ex:
+            messagebox.showerror("Chyba přejmenování", str(ex))
+    _pname_lbl.bind('<Button-1>', _rename_project)
     # Pravá část – tlačítka
     hb = tk.Frame(h, bg=DT_PANEL); hb.pack(side='right', fill='y', padx=12)
     tk.Button(hb, text="✕  MENU", command=show_intro_screen, bg='#c0392b', fg='white', font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
@@ -3239,8 +3265,18 @@ def show_main_screen(p_name):
               bg='#27ae60', fg='white', font=('Segoe UI', 8, 'bold'), bd=0, padx=10, cursor='hand2'
               ).pack(side='right', padx=2, pady=2)
 
-    # Řádek s filtry — jako chipsy
-    row_a = tk.Frame(flt_body, bg='#eaecee'); row_a.pack(fill='x', pady=(2, 1))
+    # Řádek s filtry — scrollovatelný canvas (pevná výška, žádné expand)
+    flt_canvas = tk.Canvas(flt_body, bg='#eaecee', height=36, highlightthickness=0)
+    flt_xsb = ttk.Scrollbar(flt_body, orient='horizontal', command=flt_canvas.xview)
+    flt_canvas.configure(xscrollcommand=flt_xsb.set)
+    flt_xsb.pack(fill='x', side='bottom')
+    flt_canvas.pack(fill='x', pady=(2, 0))
+    row_a = tk.Frame(flt_canvas, bg='#eaecee')
+    _flt_win = flt_canvas.create_window((0, 0), window=row_a, anchor='nw')
+    def _flt_configure(e=None):
+        flt_canvas.configure(scrollregion=flt_canvas.bbox('all'))
+    row_a.bind('<Configure>', _flt_configure)
+    flt_canvas.bind('<MouseWheel>', lambda e: flt_canvas.xview_scroll(int(-1*(e.delta/120)), 'units'))
 
     def chip(parent, lbl, widget):
         """Bílý rámeček s popiskem + widgetem."""
@@ -3252,7 +3288,28 @@ def show_main_screen(p_name):
     chip(row_a, "Symbol",    lambda f: ttk.Combobox(f, textvariable=filter_symbol_var, values=["VŠE"]+PAIRS, width=10, state='readonly'))
     chip(row_a, "Výsledek",  lambda f: ttk.Combobox(f, textvariable=filter_result_var, values=["VŠE","Win","Loss","BE"], width=7, state='readonly'))
     chip(row_a, "Seance",    lambda f: ttk.Combobox(f, textvariable=filter_session_var, values=["VŠE"]+SESSIONS_LIST, width=9, state='readonly'))
-    chip(row_a, "Tag",       lambda f: tk.Entry(f, textvariable=filter_tag_var, width=10, bg='white', relief='flat'))
+
+    # Tag filter — dynamický seznam hashtagů z obchodů
+    def _load_project_tags():
+        tags = set()
+        try:
+            import glob as _glob
+            p_dir = os.path.join(BASE_DIR, current_project_name)
+            for csv_f in _glob.glob(os.path.join(p_dir, '*.csv')):
+                with open(csv_f, 'r', encoding='utf-8') as _f:
+                    for row in csv.DictReader(_f):
+                        for t in row.get('tags','').replace(',',' ').split():
+                            if t.startswith('#'): tags.add(t)
+        except Exception: pass
+        return ["VŠE"] + sorted(tags)
+
+    _tag_combo_ref = [None]
+    def _make_tag_combo(f):
+        cb = ttk.Combobox(f, textvariable=filter_tag_var, values=_load_project_tags(), width=12)
+        cb.bind('<Button-1>', lambda e: cb.configure(values=_load_project_tags()))
+        _tag_combo_ref[0] = cb
+        return cb
+    chip(row_a, "Štítky", _make_tag_combo)
     chip(row_a, "Od",        lambda f: tk.Entry(f, textvariable=filter_date_from_var, width=11, bg='white', relief='flat'))
     chip(row_a, "Do",        lambda f: tk.Entry(f, textvariable=filter_date_to_var, width=11, bg='white', relief='flat'))
 
@@ -3282,6 +3339,10 @@ def show_main_screen(p_name):
     rrr_min_e.bind('<Return>', lambda e: apply_filter())
     rrr_max_e.bind('<Return>', lambda e: apply_filter())
     saved_combo_flt.bind('<<ComboboxSelected>>', lambda e: apply_saved_filter_by_name(saved_flt_var.get(), saved_combo_flt) or None)
+
+    # Inicializace scrollregion — filtry viditelné hned od startu
+    row_a.update_idletasks()
+    flt_canvas.configure(scrollregion=flt_canvas.bbox('all'))
 
     # Anchor pro toggle (musí být za flt_body)
     _flt_anchor = tk.Frame(top_pane, height=0, bg=DT_PANEL); _flt_anchor.pack(fill='x')
@@ -3439,7 +3500,7 @@ def load_app_title():
             t = open(APP_TITLE_FILE, encoding='utf-8').read().strip()
             if t: return t
     except: pass
-    return "SMC ANALYTICS PRO 2026"
+    return "Trade Tracker"
 
 def save_app_title(title):
     try:
