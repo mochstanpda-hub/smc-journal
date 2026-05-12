@@ -60,126 +60,168 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
+
+def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=None):
+    """Pěkný dialog s indikátorem GitHub připojení a oběma verzemi."""
+    win = tk.Toplevel(root)
+    win.title("Aktualizace")
+    win.resizable(False, False)
+    win.grab_set()
+    win.configure(bg=DT_BG)
+    w, h = 440, 270
+    try:
+        cx = max(0, root.winfo_rootx() + (root.winfo_width() - w) // 2)
+        cy = max(0, root.winfo_rooty() + (root.winfo_height() - h) // 2)
+        win.geometry(f"{w}x{h}+{cx}+{cy}")
+    except Exception:
+        win.geometry(f"{w}x{h}")
+
+    # ── Hlavička s GitHub indikátorem ──────────────────────────────────────
+    hdr = tk.Frame(win, bg='#2c3e50', pady=10)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="🔄  Aktualizace programu", bg='#2c3e50', fg='white',
+             font=('Segoe UI', 12, 'bold')).pack(side='left', padx=16)
+    dot_text  = '●  GitHub: připojeno' if connected else '●  GitHub: nepřipojeno'
+    dot_color = '#2ecc71' if connected else '#e74c3c'
+    tk.Label(hdr, text=dot_text, bg='#2c3e50', fg=dot_color,
+             font=('Segoe UI', 9, 'bold')).pack(side='right', padx=16)
+
+    # ── Tělo ───────────────────────────────────────────────────────────────
+    body = tk.Frame(win, bg=DT_BG, padx=24, pady=14)
+    body.pack(fill='both', expand=True)
+
+    if not connected:
+        tk.Label(body, text="⚠️  Nepodařilo se připojit k GitHubu.", bg=DT_BG,
+                 fg='#e74c3c', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
+        if error_msg:
+            tk.Label(body, text=str(error_msg), bg=DT_BG, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 9), wraplength=390, justify='left').pack(anchor='w', pady=(6, 0))
+    else:
+        # Tabulka verzí
+        vf = tk.Frame(body, bg=DT_SURFACE, padx=16, pady=10)
+        vf.pack(fill='x', pady=(0, 10))
+
+        def _vrow(parent, label, value, val_color):
+            r = tk.Frame(parent, bg=DT_SURFACE); r.pack(fill='x', pady=2)
+            tk.Label(r, text=label, bg=DT_SURFACE, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 10), width=15, anchor='w').pack(side='left')
+            tk.Label(r, text=value, bg=DT_SURFACE, fg=val_color,
+                     font=('Segoe UI', 10, 'bold')).pack(side='left')
+
+        _vrow(vf, "Tvoje verze:", VERSION, DT_TEXT)
+        gh_color = '#27ae60' if on_update else DT_TEXT
+        _vrow(vf, "GitHub verze:", remote_ver or '—', gh_color)
+
+        if on_update:
+            tk.Label(body, text="✅  Nová verze je k dispozici!", bg=DT_BG,
+                     fg='#27ae60', font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 6))
+        else:
+            tk.Label(body, text="Máš nejnovější verzi.", bg=DT_BG,
+                     fg=DT_SUBTEXT, font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 6))
+
+    # ── Tlačítka ───────────────────────────────────────────────────────────
+    bf = tk.Frame(win, bg=DT_BG, padx=24, pady=(0, 14))
+    bf.pack(fill='x')
+    if on_update:
+        def _do():
+            win.destroy(); on_update()
+        tk.Button(bf, text="⬇  STÁHNOUT A NAINSTALOVAT", bg='#27ae60', fg='white',
+                  font=('Segoe UI', 10, 'bold'), padx=14, pady=6, relief='flat',
+                  cursor='hand2', activebackground='#219a52', activeforeground='white',
+                  command=_do).pack(side='left')
+        tk.Button(bf, text="Později", bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 9), padx=10, pady=6, relief='flat',
+                  cursor='hand2', command=win.destroy).pack(side='left', padx=(8, 0))
+    else:
+        tk.Button(bf, text="Zavřít", bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 10), padx=18, pady=6, relief='flat',
+                  cursor='hand2', command=win.destroy).pack(side='right')
+    win.wait_window()
+
 
 def check_for_updates(silent=False):
     """
     Zkontroluje GitHub pro novou verzi programu.
-    Stáhne první řádky souboru, porovná VERSION a případně nabídne update.
-    silent=True → neinformuje pokud je verze aktuální.
+    silent=True → neinformuje pokud je verze aktuální (ale ukáže dialog při nové verzi).
     """
     if "TVUJ_USERNAME" in UPDATE_URL:
-        return  # URL ještě nebyla nastavena — přeskočit
+        return
+
+    def ver_tuple(v):
+        # Každou část parsuj jako číslo — "0001"==1, "86"==86
+        try: return tuple(int(x) for x in str(v).strip().split('.'))
+        except: return (0,)
 
     try:
-        import urllib.request
-
+        import re, urllib.request
         req = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
         with urllib.request.urlopen(req, timeout=8) as response:
-            # Stáhni jen prvních 8 KB pro detekci verze (rychlejší)
             header_bytes = response.read(8192).decode('utf-8', errors='ignore')
 
-        import re
         m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', header_bytes, re.MULTILINE)
         if not m:
             if not silent:
-                messagebox.showinfo("Aktualizace", "Nelze zjistit verzi ze serveru.")
+                _show_update_dialog(connected=True, remote_ver='???',
+                    error_msg="Nelze přečíst verzi ze souboru na GitHubu.\nZkontroluj formát: VERSION = \"x.y.z\"")
             return
 
-        remote_ver = m.group(1)
-
-        def ver_tuple(v):
-            try: return tuple(int(x) for x in v.split('.'))
-            except: return (0,)
+        remote_ver = m.group(1).strip()
 
         if ver_tuple(remote_ver) <= ver_tuple(VERSION):
             if not silent:
-                messagebox.showinfo("Aktualizace",
-                    f"Máš nejnovější verzi.\n\n"
-                    f"Tvoje verze:  {VERSION}\n"
-                    f"Na GitHubu:   {remote_ver}\n\n"
-                    f"URL:  {UPDATE_URL}")
+                try: _show_update_dialog(connected=True, remote_ver=remote_ver)
+                except Exception as de: messagebox.showinfo("Aktualizace", f"Tvoje verze: {VERSION}\nGitHub verze: {remote_ver}\nMáš nejnovější verzi.")
             return
 
-        # ── Nová verze dostupná ──────────────────────────────────────────────
-        answer = messagebox.askyesno(
-            "🔄 Dostupná aktualizace",
-            f"Je dostupná nová verze  {remote_ver}  (tvoje: {VERSION}).\n\n"
-            f"Stáhnout a nainstalovat teď?\n"
-            f"(Program se po aktualizaci restartuje)"
-        )
-        if not answer:
-            return
-
+        # ── Nová verze dostupná ─────────────────────────────────────────────
         import subprocess
 
-        if getattr(sys, 'frozen', False):
-            # ── Běžíme jako launcher.exe ──────────────────────────────────────
-            # Stáhni nový BACKTESTING.py ze GitHubu a ulož ho vedle EXE
-            py_path = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
-            tmp_path = py_path + '.new'
-
-            try:
-                messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
+        def do_download():
+            if getattr(sys, 'frozen', False):
+                # ── launcher.exe ────────────────────────────────────────────
+                py_path  = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
+                tmp_path = py_path + '.new'
+                try:
+                    messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
+                    req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+                    with urllib.request.urlopen(req2, timeout=60) as r:
+                        new_content = r.read().decode('utf-8')
+                except Exception as dl_err:
+                    messagebox.showerror("Chyba stahování", f"Nepodařilo se stáhnout:\n{dl_err}")
+                    return
+                if os.path.exists(py_path):
+                    shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                if os.path.exists(py_path): os.remove(py_path)
+                os.rename(tmp_path, py_path)
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nProgram se restartuje...")
+                subprocess.Popen([sys.executable], creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                # ── .py skript ──────────────────────────────────────────────
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-                with urllib.request.urlopen(req2, timeout=60) as r:
+                with urllib.request.urlopen(req2, timeout=30) as r:
                     new_content = r.read().decode('utf-8')
-            except Exception as dl_err:
-                messagebox.showerror("Chyba stahování",
-                    f"Nepodařilo se stáhnout novou verzi:\n{dl_err}\n\n"
-                    f"Zkontroluj připojení k internetu.")
-                return
-
-            # Záloha a zápis nového BACKTESTING.py
-            if os.path.exists(py_path):
-                backup = py_path + f'.backup_{VERSION}'
-                shutil.copy2(py_path, backup)
-
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            # Atomická záměna
-            if os.path.exists(py_path):
-                os.remove(py_path)
-            os.rename(tmp_path, py_path)
-
-            messagebox.showinfo("✅ Aktualizace dokončena",
-                f"Aktualizováno na verzi {remote_ver}.\n"
-                f"Program se restartuje...")
-            subprocess.Popen([sys.executable],
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+                current_path = os.path.abspath(__file__)
+                shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
+                with open(current_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nProgram se restartuje...")
+                subprocess.Popen([sys.executable, current_path])
             try: root.destroy()
             except: pass
             sys.exit(0)
 
-        else:
-            # ── Běžíme jako .py skript ───────────────────────────────────────
-            req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-            with urllib.request.urlopen(req2, timeout=30) as response:
-                new_content = response.read().decode('utf-8')
-
-            current_path = os.path.abspath(__file__)
-            backup_path  = current_path + f'.backup_{VERSION}'
-            shutil.copy2(current_path, backup_path)
-
-            with open(current_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-
-            messagebox.showinfo(
-                "✅ Aktualizace dokončena",
-                f"Aktualizováno na verzi {remote_ver}.\n"
-                f"Záloha: {os.path.basename(backup_path)}\n\n"
-                f"Program se restartuje..."
-            )
-            subprocess.Popen([sys.executable, current_path])
-            try: root.destroy()
-            except: pass
-            sys.exit(0)
+        try: _show_update_dialog(connected=True, remote_ver=remote_ver, on_update=do_download)
+        except Exception as de: messagebox.askyesno("🔄 Aktualizace", f"Nová verze {remote_ver} (tvoje: {VERSION}). Stáhnout?") and do_download()
 
     except Exception as e:
         if not silent:
-            messagebox.showerror("Chyba aktualizace", f"Nepodařilo se zkontrolovat aktualizaci:\n{e}")
+            try: _show_update_dialog(connected=False, error_msg=str(e))
+            except Exception: messagebox.showerror("Chyba aktualizace", f"Nepodařilo se připojit k GitHubu:\n{e}")
 
 # ==============================================================================
 # MOTIVY (THEMES)
