@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.8"
+VERSION = "1.5.9"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2444,12 +2444,11 @@ def analyze_screenshot(image_path):
 
     # ── 1. Detekce price labelů přes HSV kontury (hlavní metoda) ────────────
     # TV y-osa s price labely (SL/Entry/TP) je typicky na 70-80 % šířky obrazu.
-    # Skenujeme pravých 45 % — zachytíme y-osu bez ohledu na layout TV.
-    scan_x = max(0, int(w * 0.55))
+    # Skenujeme od 62 % šířky (= pravých 38 %) — stejně jako původní verze.
+    scan_x = max(0, int(w * 0.62))
     panel  = img[:, scan_x:]
     ph, pw = panel.shape[:2]
     hsv    = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
-    _scale = max(1.0, w / 1920)   # škálovací faktor (4K = 2.0)
 
     color_ranges = {
         'sl': [
@@ -2524,12 +2523,11 @@ def analyze_screenshot(image_path):
         for cnt in contours:
             bx, by, bw2, bh2 = cv2.boundingRect(cnt)
             area = cv2.contourArea(cnt)
-            if area < int(60 * _scale):
+            if area < 80:
                 continue
             aspect = bw2 / max(bh2, 1)
-            # Price label: šírší než vysoký, minimální šířka 60px@1080p
-            if (bh2 < int(6 * _scale) or bh2 > int(80 * _scale)
-                    or aspect < 1.2 or bw2 < int(60 * _scale)):
+            # Původní nepomásštábované filtry — fungují pro 1080p i 4K native
+            if bh2 < 8 or bh2 > 70 or aspect < 1.2 or bw2 < 18:
                 continue
             pad = 4
             roi = panel[max(0, by-pad):min(ph, by+bh2+pad),
@@ -2538,8 +2536,8 @@ def analyze_screenshot(image_path):
             _dbg_prices.append(
                 f"  {cname} xy=({scan_x+bx},{by}) sz={bw2}x{bh2} ocr={v}")
             if v and v > 0.5:
-                # Silná váha pro nejpravější pozici — y-osa bude vždy nejpravěji
-                score = ((bx + bw2) / pw) ** 2
+                # Nejpravější kontur vyhraje (y-osa je vždy nejvíce vpravo)
+                score = (bx + bw2) + area * 0.01
                 candidates.append((score, v, by))
 
         if candidates:
