@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.5"
+VERSION = "1.5.6"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2443,27 +2443,35 @@ def analyze_screenshot(image_path):
     result = {}
 
     # ── Detekce pravé hranice grafu (watchlist panel) ────────────────────────
-    # TradingView může mít vpravo watchlist panel. Hledáme kde začíná
-    # tak, že sledujeme sloupce zprava — nízká variance = uniformní panel.
+    # Watchlist je vpravo a má VYSOKOU varianci (světlý text na tmavém pozadí).
+    # Graf vlevo má nižší varianci (tmavé pozadí). Scanujeme zprava doleva:
+    # EMA se nabije z watchlistu (vysoká), pak hledáme POKLES → začátek grafu.
     chart_right = w
-    min_chart_right = int(w * 0.70)  # graf musí mít aspoň 70 % šířky
+    min_chart_right = int(w * 0.60)
 
-    # Projdi sloupce zprava doleva, hledej přechod panel↔graf
-    prev_var = None
-    for x in range(w - 1, min_chart_right, -5):
-        col_strip = img[int(h*0.1):int(h*0.9), x].astype(np.float32)
-        var = float(np.var(col_strip))
-        if prev_var is not None and var > prev_var * 3 and var > 800:
-            chart_right = x + 10
-            break
-        prev_var = var if prev_var is None else (prev_var * 0.7 + var * 0.3)
+    _ema = None
+    _low_streak = 0
+    for _x in range(w - 1, min_chart_right, -4):
+        _col = img[int(h * 0.12):int(h * 0.88), _x].astype(np.float32)
+        _var = float(np.var(_col))
+        if _ema is None:
+            _ema = _var
+            continue
+        # Pokud EMA je vysoká (jsme ve watchlistu) a aktuální sloupec je nízký → jsme v grafu
+        if _ema > 600 and _var < _ema * 0.40:
+            _low_streak += 1
+            if _low_streak >= 4:   # 4 × 4px = 16px nízkých sloupců = jsme v grafu
+                chart_right = _x + 50
+                break
+        else:
+            _low_streak = 0
+        _ema = _ema * 0.75 + _var * 0.25
 
     chart_right = max(min_chart_right, chart_right)
 
     # ── 1. Detekce price labelů přes HSV kontury (hlavní metoda) ────────────
-    # Price labely jsou vždy těsně u pravé osy — skenujeme jen 10 % šířky
-    # (38 % by zachytilo těla svíček a dávalo falešné shody)
-    scan_x  = max(0, chart_right - int(w * 0.10))
+    # Skenujeme pravých 15 % grafu (price labely jsou na pravé y-ose)
+    scan_x  = max(0, chart_right - int(w * 0.15))
     scan_w  = chart_right - scan_x
     panel   = img[:, scan_x:chart_right]
     ph, pw  = panel.shape[:2]
@@ -2479,7 +2487,7 @@ def analyze_screenshot(image_path):
         ],
         'entry': [
             (np.array([90,  50,  70]),  np.array([145, 255, 255])),   # modrá / cyan
-            (np.array([15,  80,  80]),  np.array([38,  255, 255])),   # oranžová (alt TV motiv)
+            (np.array([15,  60,  80]),  np.array([45,  255, 255])),   # oranžová / žlutá
         ],
         'tp': [
             (np.array([50,  40,  40]),  np.array([108, 255, 255])),   # zelená / teal
@@ -2705,7 +2713,7 @@ def analyze_screenshot(image_path):
                     if dt not in found: found.append(dt)
         return found
 
-    debug_lines = [f"[TIME DEBUG] img size: {w}x{h}, chart_right={chart_right}"]
+    debug_lines = [f"[DEBUG] img size: {w}x{h}, chart_right={chart_right}, scan_x={scan_x}, result_so_far={result}"]
     open_time   = None
     close_time  = None
 
