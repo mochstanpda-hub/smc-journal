@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -436,6 +436,44 @@ def _resolve_project_path(mode, name):
         return custom
     base = DIR_BACKTEST if mode == "BACKTEST" else DIR_REAL
     return os.path.join(base, name)
+
+# Globální nastavení aplikace (prohlížeč, atd.)
+GLOBAL_SETTINGS_FILE = os.path.join(_APP_DIR, 'global_settings.json')
+
+def load_global_settings():
+    try:
+        if os.path.exists(GLOBAL_SETTINGS_FILE):
+            with open(GLOBAL_SETTINGS_FILE, 'r', encoding='utf-8') as _f:
+                return json.load(_f)
+    except Exception:
+        pass
+    return {}
+
+def save_global_settings(data):
+    try:
+        with open(GLOBAL_SETTINGS_FILE, 'w', encoding='utf-8') as _f:
+            json.dump(data, _f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nepodařilo se uložit nastavení: {e}")
+
+def get_browser_exe():
+    """Vrátí cestu k prohlížeči z nastavení nebo auto-detekuje Edge/Chrome/Firefox."""
+    cfg = load_global_settings()
+    custom = cfg.get('browser_exe', '')
+    if custom and os.path.exists(custom):
+        return custom
+    # Auto-detect
+    candidates = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Mozilla Firefox\firefox.exe",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return "msedge.exe"  # fallback
 IMAGES_DIR = ''
 JOURNAL_FILE = os.path.join(DIR_JOURNAL, 'journal_entries.json')
 
@@ -2779,11 +2817,7 @@ def setup_tradingview_tab(parent):
     import subprocess, threading, ctypes, ctypes.wintypes as wt
     import win32gui, win32process, win32con
 
-    EDGE_PATHS = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    ]
-    edge_exe = next((p for p in EDGE_PATHS if os.path.exists(p)), "msedge.exe")
+    edge_exe = get_browser_exe()
 
     edge_proc = [None]   # subprocess handle
     edge_hwnd = [None]   # HWND embedded okna
@@ -3101,6 +3135,35 @@ def setup_tradingview_tab(parent):
 # ==============================================================================
 
 
+
+def _make_tabs_draggable(notebook):
+    """Drag & drop přeřazení záložek v ttk.Notebook."""
+    _d = {'src': None}
+
+    def _press(e):
+        try: _d['src'] = notebook.index(f'@{e.x},{e.y}')
+        except tk.TclError: _d['src'] = None
+
+    def _release(e):
+        if _d['src'] is None: return
+        try: dst = notebook.index(f'@{e.x},{e.y}')
+        except tk.TclError: dst = notebook.index('end') - 1
+        if dst != _d['src']:
+            notebook.insert(dst, _d['src'])
+        _d['src'] = None
+
+    def _motion(e):
+        if _d['src'] is None: return
+        try:
+            dst = notebook.index(f'@{e.x},{e.y}')
+            notebook.configure(cursor='fleur' if dst != _d['src'] else '')
+        except tk.TclError:
+            notebook.configure(cursor='')
+
+    notebook.bind('<ButtonPress-1>', _press, add=True)
+    notebook.bind('<ButtonRelease-1>', _release, add=True)
+    notebook.bind('<B1-Motion>', _motion, add=True)
+
 def open_settings_window(initial_tab=0):
     """Centrální nastavení — motiv, aktualizace, páry, scoring, sloupce, složka projektu."""
     sw = tk.Toplevel(root)
@@ -3291,6 +3354,79 @@ def open_settings_window(initial_tab=0):
                   bg='#e74c3c', fg='white', font=('Segoe UI', 9),
                   padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
+    # ── Tab: Prohlížeč ────────────────────────────────────────────────────────
+    t_browser = ttk.Frame(nb); nb.add(t_browser, text='  🌐 Prohlížeč  ')
+    _br_frame = tk.Frame(t_browser, bg=DT_BG, padx=28, pady=24)
+    _br_frame.pack(fill='both', expand=True)
+    tk.Label(_br_frame, text="Prohlížeč pro TradingView", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 6))
+    tk.Label(_br_frame, text="TradingView se otevírá ve vestavěném okně prohlížeče. Vyber prohlížeč nebo zadej vlastní cestu.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 10), wraplength=580, justify='left').pack(anchor='w', pady=(0, 16))
+
+    # Detekuj dostupné prohlížeče
+    _browsers = [
+        ("Microsoft Edge",  r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        ("Microsoft Edge",  r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        ("Google Chrome",   r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        ("Google Chrome",   r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        ("Mozilla Firefox", r"C:\Program Files\Mozilla Firefox\firefox.exe"),
+    ]
+    _available = [(name, path) for name, path in _browsers if os.path.exists(path)]
+
+    cur_gs = load_global_settings()
+    _br_var = tk.StringVar(value=cur_gs.get('browser_exe', ''))
+
+    if _available:
+        tk.Label(_br_frame, text="Nalezené prohlížeče:", bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(0, 4))
+        for _bname, _bpath in _available:
+            tk.Radiobutton(_br_frame, text=f"{_bname}  ({_bpath})",
+                           variable=_br_var, value=_bpath,
+                           bg=DT_BG, fg=DT_TEXT, selectcolor=DT_SURFACE,
+                           activebackground=DT_BG, font=('Segoe UI', 9),
+                           cursor='hand2').pack(anchor='w', pady=2)
+        tk.Radiobutton(_br_frame, text="Vlastní cesta (viz níže):",
+                       variable=_br_var, value='__custom__',
+                       bg=DT_BG, fg=DT_TEXT, selectcolor=DT_SURFACE,
+                       activebackground=DT_BG, font=('Segoe UI', 9),
+                       cursor='hand2').pack(anchor='w', pady=(8, 2))
+
+    _custom_var = tk.StringVar(value=cur_gs.get('browser_exe', '') if cur_gs.get('browser_exe', '') not in [p for _, p in _available] else '')
+    _custom_entry = tk.Entry(_br_frame, textvariable=_custom_var, width=54,
+                             font=('Segoe UI', 9), relief='solid', bd=1)
+    _custom_entry.pack(fill='x', pady=(0, 4))
+
+    def _browse_browser():
+        p = filedialog.askopenfilename(title="Vyber spustitelný soubor prohlížeče",
+                                       filetypes=[("Spustitelné soubory", "*.exe"), ("Vše", "*.*")])
+        if p:
+            _custom_var.set(p)
+            _br_var.set('__custom__')
+
+    def _save_browser():
+        chosen = _br_var.get()
+        if chosen == '__custom__':
+            chosen = _custom_var.get().strip()
+        if not chosen:
+            messagebox.showwarning("Prázdná hodnota", "Vyber nebo zadej cestu k prohlížeči.", parent=sw)
+            return
+        if not os.path.exists(chosen):
+            messagebox.showwarning("Soubor nenalezen", f"Soubor neexistuje:\n{chosen}", parent=sw)
+            return
+        gs = load_global_settings()
+        gs['browser_exe'] = chosen
+        save_global_settings(gs)
+        messagebox.showinfo("Uloženo", f"Prohlížeč nastaven:\n{chosen}", parent=sw)
+
+    _br_btn_row = tk.Frame(_br_frame, bg=DT_BG)
+    _br_btn_row.pack(anchor='w', pady=(4, 0))
+    tk.Button(_br_btn_row, text="📂  Procházet...", command=_browse_browser,
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9),
+              padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+    tk.Button(_br_btn_row, text="💾  Uložit", command=_save_browser,
+              bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'),
+              padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
+
     nb.select(initial_tab)
 
 
@@ -3376,6 +3512,7 @@ def show_main_screen(p_name):
     tk.Button(hb, text="📝 PRAVIDLA", command=open_checklist_editor, bg='#8e44ad', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
 
     nb = ttk.Notebook(root); nb.pack(fill='both', expand=True, padx=5, pady=5)
+    _make_tabs_draggable(nb)
     
     # TAB 1
     tab1 = ttk.Frame(nb); nb.add(tab1, text='  ZÁPIS  ')
@@ -3732,12 +3869,6 @@ def show_main_screen(p_name):
     tab_rules = ttk.Frame(nb); nb.add(tab_rules, text='  MOJE PRAVIDLA  ')
     setup_rules_ui(tab_rules)
 
-    tab4 = ttk.Frame(nb); nb.add(tab4, text='  NASTAVENÍ SCORINGU  '); setup_settings_ui(tab4)
-    
-    # TAB NASTAVENÍ (Páry)
-    tab_settings = ttk.Frame(nb); nb.add(tab_settings, text='  NASTAVENÍ  ')
-    setup_lists_manager_ui(tab_settings)
-
     # TAB 5 (MONTE CARLO)
     tab5 = ttk.Frame(nb); nb.add(tab5, text='  MONTE CARLO  ')
     setup_monte_carlo_ui(tab5)
@@ -3845,6 +3976,81 @@ def show_splash(callback):
             callback()
     splash.after(80, _anim)
 
+
+def import_project_from_folder():
+    """Importuje projekt z libovolné složky — zkopíruje data do projektového adresáře."""
+    folder = filedialog.askdirectory(title="Vyber složku projektu k importu", parent=root)
+    if not folder:
+        return
+
+    # Detekuj typ projektu
+    has_trades = os.path.exists(os.path.join(folder, 'trades.csv'))
+    has_prop   = os.path.exists(os.path.join(folder, 'prop_config.json'))
+    suggested_name = os.path.basename(folder.rstrip('/\\'))
+
+    # Dialog pro název a typ
+    dlg = tk.Toplevel(root)
+    dlg.title("Import projektu")
+    dlg.geometry("380x230")
+    dlg.configure(bg='#ecf0f1')
+    dlg.resizable(False, False)
+    dlg.grab_set()
+
+    tk.Label(dlg, text="Import projektu ze složky", font=('Segoe UI', 12, 'bold'),
+             bg='#ecf0f1', fg='#2c3e50').pack(pady=(18, 4))
+    tk.Label(dlg, text=f"Složka: ...{os.sep}{suggested_name}", font=('Segoe UI', 9),
+             bg='#ecf0f1', fg='#555').pack()
+
+    form = tk.Frame(dlg, bg='#ecf0f1', padx=24, pady=10)
+    form.pack(fill='x')
+
+    tk.Label(form, text="Název projektu:", bg='#ecf0f1', font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=4)
+    name_var = tk.StringVar(value=suggested_name)
+    tk.Entry(form, textvariable=name_var, width=26).grid(row=0, column=1, padx=8)
+
+    tk.Label(form, text="Typ:", bg='#ecf0f1', font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=4)
+    mode_var = tk.StringVar(value="REAL" if has_prop else "BACKTEST")
+    ttk.Combobox(form, textvariable=mode_var, values=["BACKTEST", "REAL"],
+                 state='readonly', width=14).grid(row=1, column=1, padx=8, sticky='w')
+
+    result = [None]
+
+    def _do_import():
+        name = name_var.get().strip().replace(' ', '_')
+        mode = mode_var.get()
+        if not name:
+            messagebox.showwarning("Chyba", "Zadej název projektu.", parent=dlg)
+            return
+        base = DIR_BACKTEST if mode == "BACKTEST" else DIR_REAL
+        dest = os.path.join(base, name)
+        if os.path.exists(dest):
+            if not messagebox.askyesno("Přepsat?",
+                    f"Projekt '{name}' již existuje. Přepsat?", parent=dlg):
+                return
+        try:
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            shutil.copytree(folder, dest)
+            result[0] = (mode, name)
+            dlg.destroy()
+        except Exception as ex:
+            messagebox.showerror("Chyba importu", str(ex), parent=dlg)
+
+    bf = tk.Frame(dlg, bg='#ecf0f1')
+    bf.pack(pady=(0, 14))
+    tk.Button(bf, text="Importovat", command=_do_import,
+              bg='#27ae60', fg='white', font=('Segoe UI', 10, 'bold'),
+              padx=16, pady=6, relief='flat').pack(side='left', padx=6)
+    tk.Button(bf, text="Zrušit", command=dlg.destroy,
+              bg='#e74c3c', fg='white', font=('Segoe UI', 9),
+              padx=12, pady=6, relief='flat').pack(side='left')
+
+    dlg.wait_window()
+    if result[0]:
+        mode, name = result[0]
+        messagebox.showinfo("Hotovo", f"Projekt '{name}' importován jako {mode}.")
+        show_intro_screen()
+
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
@@ -3898,8 +4104,17 @@ def show_intro_screen():
     tk.Label(f3, text="📅", font=('Arial', 50), bg="white").pack(pady=30)
     tk.Button(f3, text="OTEVŘÍT DENÍK", command=show_journal_screen, bg="#8e44ad", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
     # ── Přepínač motivů ─────────────────────────────────────────────────────
-    theme_bar = tk.Frame(main_container, bg="#ecf0f1")
-    theme_bar.pack(side="bottom", pady=12)
+    # Import projektu tlačítko (vedle motivů)
+    bottom_bar = tk.Frame(main_container, bg="#ecf0f1")
+    bottom_bar.pack(side="bottom", pady=12)
+
+    tk.Button(bottom_bar, text="📂  Importovat projekt ze složky",
+              command=import_project_from_folder,
+              bg='#2980b9', fg='white', font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 20))
+
+    theme_bar = tk.Frame(bottom_bar, bg="#ecf0f1")
+    theme_bar.pack(side='left')
     tk.Label(theme_bar, text="🎨 MOTIV:", bg="#ecf0f1", fg="#555",
              font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(0, 8))
 
