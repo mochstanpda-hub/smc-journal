@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -194,49 +194,7 @@ def check_for_updates(silent=False):
         if ver_tuple(remote_ver) <= ver_tuple(VERSION):
             if not silent:
                 try: _show_update_dialog(connected=True, remote_ver=remote_ver)
-                except Exception as de: messagebox.showinfo("Aktualizace", f"Tvoje verze: {VERSION}\nGitHub verze: {remote_ver}\nMáš nejnovější verzi.")
-            return
-
-        # ── Nová verze dostupná ─────────────────────────────────────────────
-        import subprocess
-
-        def do_download():
-            if getattr(sys, 'frozen', False):
-                # ── launcher.exe ────────────────────────────────────────────
-                py_path  = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
-                tmp_path = py_path + '.new'
-                try:
-                    messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
-                    req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-                    with urllib.request.urlopen(req2, timeout=60) as r:
-                        new_content = r.read().decode('utf-8')
-                except Exception as dl_err:
-                    messagebox.showerror("Chyba stahování", f"Nepodařilo se stáhnout:\n{dl_err}")
-                    return
-                # Ověř velikost a platnost — ochrana před oříznutým stažením
-                if len(new_content.encode('utf-8')) < 150_000:
-                    messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je příliš malý ({len(new_content)//1024} KB) — pravděpodobně oříznutý.\n"
-                        f"Aktualizace zrušena. Zkus to za 5 minut znovu.")
-                    return
-                try:
-                    compile(new_content, 'BACKTESTING.py', 'exec')
-                except SyntaxError as se:
-                    messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\n"
-                        f"Aktualizace zrušena — starý soubor zůstává.\n\nZkus to za chvíli znovu.")
-                    return
-                if os.path.exists(py_path):
-                    shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
-                with open(tmp_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                if os.path.exists(py_path): os.remove(py_path)
-                os.rename(tmp_path, py_path)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nProgram se restartuje...")
-                bat = os.path.join(os.path.dirname(sys.executable), '_restart.bat')
-                with open(bat, 'w') as _bf:
-                    _bf.write(f'@echo off\ntimeout /t 2 /nobreak >nul\nstart "" "{sys.executable}"\ndel "%~f0"\n')
-                subprocess.Popen(['cmd', '/c', bat], creationflags=subprocess.CREATE_NO_WINDOW)
+                except Exception as de: messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
             else:
                 # ── .py skript ──────────────────────────────────────────────
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
@@ -259,8 +217,7 @@ def check_for_updates(silent=False):
                 shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
                 with open(current_path, 'w', encoding='utf-8') as f:
                     f.write(new_content)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nProgram se restartuje...")
-                subprocess.Popen([sys.executable, current_path])
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
             try: root.destroy()
             except: pass
             sys.exit(0)
@@ -2021,33 +1978,95 @@ def setup_rules_ui(parent):
     tk.Label(font_ctrl, textvariable=current_font_size, width=4, font=("Arial", 10, "bold")).pack(side="left")
     tk.Button(font_ctrl, text="+", command=lambda: update_font(1), width=3).pack(side="left")
 
+# Globální slovník pro filtry galerie (vyplňuje se při stavbě záložky)
+_GAL_FILTERS = {}
+
 def update_gallery():
     if gallery_inner is None: return
     for w in gallery_inner.winfo_children(): w.destroy()
-    trades = load_data(); gallery_items = []
-    if not os.path.exists(IMAGES_DIR): return
+
+    f_sym  = _GAL_FILTERS.get('sym_var',  tk.StringVar(value='VŠE')).get()
+    f_res  = _GAL_FILTERS.get('res_var',  tk.StringVar(value='VŠE')).get()
+    f_ses  = _GAL_FILTERS.get('ses_var',  tk.StringVar(value='VŠE')).get()
+    f_tag  = _GAL_FILTERS.get('tag_var',  tk.StringVar()).get().strip().lower()
+    f_sort = _GAL_FILTERS.get('sort_var', tk.StringVar(value='Datum ↓')).get()
+    f_size = _GAL_FILTERS.get('size_var', tk.IntVar(value=200)).get()
+    f_cols = _GAL_FILTERS.get('cols_var', tk.IntVar(value=5)).get()
+    count_var = _GAL_FILTERS.get('count_var', None)
+
+    trades = load_data()
+    gallery_items = []
+    if not os.path.exists(IMAGES_DIR):
+        if count_var: count_var.set("Složka obrázků neexistuje.")
+        return
+
     for t in trades:
-        imgs = t.get('obrazky', '').split(';')
-        for img_name in imgs:
+        if f_sym and f_sym != 'VŠE' and t.get('symbol', '') != f_sym: continue
+        res_raw = t.get('vysledek', '').strip()
+        if f_res and f_res != 'VŠE' and res_raw.lower() != f_res.lower(): continue
+        if f_ses and f_ses != 'VŠE' and t.get('session', '') != f_ses: continue
+        if f_tag and f_tag not in t.get('tags', '').lower(): continue
+
+        for img_name in t.get('obrazky', '').split(';'):
             if not img_name: continue
             full_path = os.path.join(IMAGES_DIR, img_name)
             if os.path.exists(full_path):
-                info_parts = []; label_text = " | ".join(info_parts)
-                gallery_items.append({'path': full_path, 'info': label_text, 'result': t.get('vysledek', '')})
+                gallery_items.append({
+                    'path': full_path, 'result': res_raw,
+                    'symbol': t.get('symbol', ''), 'datum': t.get('cas_otevreni', '')[:10],
+                    'session': t.get('session', ''), 'smer': t.get('smer', ''),
+                    'rrr': t.get('rrr', ''), 'tags': t.get('tags', ''),
+                })
+
+    sort_key = {'Datum ↓': lambda x: x['datum'], 'Datum ↑': lambda x: x['datum'],
+                'Symbol': lambda x: x['symbol'],
+                'Výsledek': lambda x: {'win':0,'loss':1,'be':2}.get(x['result'].lower(), 3)}
+    rev = f_sort == 'Datum ↓'
+    gallery_items.sort(key=sort_key.get(f_sort, lambda x: x['datum']), reverse=rev)
+
+    if count_var: count_var.set(f"{len(gallery_items)} obrázků")
+
+    RES_COLORS = {'win': ('#d5f5e3','#1e8449'), 'loss': ('#fadbd8','#922b21'), 'be': ('#fef9e7','#9a7d0a')}
+    thumb_w = max(100, min(int(f_size), 340))
+    thumb_h = int(thumb_w * 0.75)
+    cols = max(1, int(f_cols))
+
     row, col = 0, 0
     for idx, item in enumerate(gallery_items):
         try:
-            img = Image.open(item['path']); img.thumbnail((200, 150)); ph = ImageTk.PhotoImage(img)
-            frame = tk.Frame(gallery_inner, relief="solid", borderwidth=1); frame.grid(row=row, column=col, padx=5, pady=5)
-            lbl = tk.Label(frame, image=ph, cursor="hand2"); lbl.image = ph; lbl.pack()
-            lbl.bind("<Button-1>", lambda e, i=idx: ImageZoomViewer(root, gallery_items, i))
-            res = item['result']; color = "black"; 
-            if res.lower() == "win": color = "green"
-            elif res.lower() == "loss": color = "red"
-            tk.Label(frame, text=res, fg=color, font=("Arial", 8, "bold")).pack()
-            col += 1; 
-            if col > 4: col = 0; row += 1
-        except: pass
+            img = Image.open(item['path']); img.thumbnail((thumb_w, thumb_h))
+            ph = ImageTk.PhotoImage(img)
+            res_lower = item['result'].lower()
+            bg_c, fg_c = RES_COLORS.get(res_lower, ('#f5f5f5', '#333'))
+
+            frame = tk.Frame(gallery_inner, bg=bg_c, highlightbackground='#ccc', highlightthickness=1)
+            frame.grid(row=row, column=col, padx=6, pady=6, sticky='n')
+
+            lbl = tk.Label(frame, image=ph, cursor='hand2', bg=bg_c)
+            lbl.image = ph; lbl.pack(padx=2, pady=(4, 2))
+            lbl.bind('<Button-1>', lambda e, i=idx: ImageZoomViewer(root, gallery_items, i))
+
+            info = tk.Frame(frame, bg=bg_c); info.pack(fill='x', padx=4, pady=(0, 2))
+            sym_txt = item['symbol'] or '—'
+            if item['smer']: sym_txt += f" {item['smer']}"
+            tk.Label(info, text=sym_txt, bg=bg_c, fg=fg_c,
+                     font=('Segoe UI', 8, 'bold')).pack(side='left')
+            tk.Label(info, text=item['result'].upper() or '—', bg=bg_c, fg=fg_c,
+                     font=('Segoe UI', 8, 'bold')).pack(side='right')
+
+            meta = tk.Frame(frame, bg=bg_c); meta.pack(fill='x', padx=4, pady=(0, 4))
+            tk.Label(meta, text=item['datum'], bg=bg_c, fg='#666',
+                     font=('Segoe UI', 7)).pack(side='left')
+            if item['rrr']:
+                tk.Label(meta, text=f"R:{item['rrr']}", bg=bg_c, fg='#555',
+                         font=('Segoe UI', 7)).pack(side='right')
+            if item['session']:
+                tk.Label(meta, text=item['session'], bg=bg_c, fg='#888',
+                         font=('Segoe UI', 7)).pack(side='right', padx=(0, 4))
+
+            col += 1
+            if col >= cols: col = 0; row += 1
+        except Exception: pass
 
 def pridat_obchod():
     global editing_trade_index
@@ -3136,6 +3155,130 @@ def setup_tradingview_tab(parent):
 
 
 
+
+def _build_gallery_tab(parent):
+    """Záložka galerie s filtry, hezčím vizuálem a nastavitelnou velikostí."""
+    global gallery_inner
+
+    # ── Lišta filtrů ─────────────────────────────────────────────────────────
+    flt_outer = tk.Frame(parent, bg=DT_PANEL)
+    flt_outer.pack(fill='x')
+
+    # Záhlaví filtru
+    flt_hdr = tk.Frame(flt_outer, bg='#2c3e50', pady=4)
+    flt_hdr.pack(fill='x')
+    tk.Label(flt_hdr, text="  🔍 FILTR GALERIE", bg='#2c3e50', fg='white',
+             font=('Segoe UI', 8, 'bold')).pack(side='left')
+    count_var = tk.StringVar(value="")
+    tk.Label(flt_hdr, textvariable=count_var, bg='#2c3e50', fg='#7f8c8d',
+             font=('Segoe UI', 8)).pack(side='right', padx=12)
+
+    flt_row = tk.Frame(flt_outer, bg=DT_PANEL, padx=8, pady=6)
+    flt_row.pack(fill='x')
+
+    sym_var  = tk.StringVar(value='VŠE')
+    res_var  = tk.StringVar(value='VŠE')
+    ses_var  = tk.StringVar(value='VŠE')
+    tag_var  = tk.StringVar(value='')
+    sort_var = tk.StringVar(value='Datum ↓')
+    size_var = tk.IntVar(value=200)
+    cols_var = tk.IntVar(value=5)
+
+    # Ulož do globálního slovníku
+    _GAL_FILTERS.update({
+        'sym_var': sym_var, 'res_var': res_var, 'ses_var': ses_var,
+        'tag_var': tag_var, 'sort_var': sort_var,
+        'size_var': size_var, 'cols_var': cols_var,
+        'count_var': count_var,
+    })
+
+    def _chip(parent, label, widget_fn):
+        f = tk.Frame(parent, bg=DT_PANEL); f.pack(side='left', padx=4)
+        tk.Label(f, text=label, bg=DT_PANEL, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 7, 'bold')).pack(anchor='w')
+        widget_fn(f)
+
+    _chip(flt_row, "Symbol",
+          lambda f: ttk.Combobox(f, textvariable=sym_var,
+                                 values=['VŠE']+PAIRS, width=10,
+                                 state='readonly').pack())
+    _chip(flt_row, "Výsledek",
+          lambda f: ttk.Combobox(f, textvariable=res_var,
+                                 values=['VŠE','Win','Loss','BE'], width=7,
+                                 state='readonly').pack())
+    _chip(flt_row, "Seance",
+          lambda f: ttk.Combobox(f, textvariable=ses_var,
+                                 values=['VŠE']+SESSIONS_LIST, width=9,
+                                 state='readonly').pack())
+    _chip(flt_row, "Tag (obsahuje)",
+          lambda f: tk.Entry(f, textvariable=tag_var, width=12,
+                             bg='white', relief='solid', bd=1,
+                             font=('Segoe UI', 9)).pack())
+    _chip(flt_row, "Seřadit",
+          lambda f: ttk.Combobox(f, textvariable=sort_var,
+                                 values=['Datum ↓','Datum ↑','Symbol','Výsledek'],
+                                 width=10, state='readonly').pack())
+
+    sep = tk.Frame(flt_row, bg=DT_PANEL, width=1); sep.pack(side='left', fill='y', padx=8)
+
+    # Velikost & sloupce
+    size_frame = tk.Frame(flt_row, bg=DT_PANEL); size_frame.pack(side='left', padx=4)
+    tk.Label(size_frame, text="Velikost", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI', 7, 'bold')).pack(anchor='w')
+    size_lbl = tk.Label(size_frame, textvariable=tk.StringVar(),
+                        bg=DT_PANEL, fg=DT_TEXT, font=('Segoe UI', 7))
+    size_lbl.pack(anchor='w')
+    def _update_size_lbl(*_):
+        size_lbl.config(text=f"{size_var.get()} px")
+    size_var.trace_add('write', _update_size_lbl)
+    _update_size_lbl()
+    ttk.Scale(size_frame, from_=120, to=340, variable=size_var,
+              orient='horizontal', length=90,
+              command=lambda _: update_gallery()).pack()
+
+    cols_frame = tk.Frame(flt_row, bg=DT_PANEL); cols_frame.pack(side='left', padx=4)
+    tk.Label(cols_frame, text="Sloupce", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI', 7, 'bold')).pack(anchor='w')
+    cols_spin = tk.Spinbox(cols_frame, from_=2, to=8, textvariable=cols_var,
+                           width=3, font=('Segoe UI', 9),
+                           command=update_gallery)
+    cols_spin.pack()
+
+    # Tlačítka vpravo
+    btn_f = tk.Frame(flt_row, bg=DT_PANEL); btn_f.pack(side='right', padx=6)
+    tk.Button(btn_f, text="Použít", command=update_gallery,
+              bg='#27ae60', fg='white', font=('Segoe UI', 8, 'bold'),
+              padx=10, pady=4, relief='flat', cursor='hand2').pack(side='top', pady=(0, 3))
+    def _reset_gal():
+        sym_var.set('VŠE'); res_var.set('VŠE'); ses_var.set('VŠE')
+        tag_var.set(''); sort_var.set('Datum ↓')
+        size_var.set(200); cols_var.set(5)
+        update_gallery()
+    tk.Button(btn_f, text="Reset", command=_reset_gal,
+              bg='#e74c3c', fg='white', font=('Segoe UI', 8),
+              padx=10, pady=4, relief='flat', cursor='hand2').pack(side='top')
+
+    # Bind combos → auto-apply
+    for child in flt_row.winfo_children():
+        for sub in (child.winfo_children() if hasattr(child, 'winfo_children') else []):
+            if isinstance(sub, ttk.Combobox):
+                sub.bind('<<ComboboxSelected>>', lambda e: update_gallery())
+    tag_var.trace_add('write', lambda *_: None)  # Enter ruční
+
+    # ── Scrollovatelná plocha pro obrázky ────────────────────────────────────
+    gal_wrap = tk.Frame(parent, bg=DT_BG); gal_wrap.pack(fill='both', expand=True)
+    gal_canv = tk.Canvas(gal_wrap, bg=DT_BG, highlightthickness=0)
+    gal_scb  = ttk.Scrollbar(gal_wrap, command=gal_canv.yview)
+    gal_canv.pack(side='left', fill='both', expand=True)
+    gal_scb.pack(side='right', fill='y')
+    gallery_inner = tk.Frame(gal_canv, bg=DT_BG)
+    gal_canv.create_window((0, 0), window=gallery_inner, anchor='nw')
+    gallery_inner.bind('<Configure>',
+                       lambda e: gal_canv.configure(scrollregion=gal_canv.bbox('all')))
+    gal_canv.configure(yscrollcommand=gal_scb.set)
+    gal_canv.bind('<MouseWheel>',
+                  lambda e: gal_canv.yview_scroll(int(-1*(e.delta/120)), 'units'))
+
 def _make_tabs_draggable(notebook):
     """Drag & drop přeřazení záložek v ttk.Notebook."""
     _d = {'src': None}
@@ -3863,7 +4006,7 @@ def show_main_screen(p_name):
     bar_chart_frame = tk.Frame(st_f, bg=DT_BG); bar_chart_frame.pack(fill='both', expand=True, padx=10, pady=(5,10))
 
     # TAB 3, 4
-    tab3 = ttk.Frame(nb); nb.add(tab3, text='  GALERIE  '); gal_canv = tk.Canvas(tab3); gal_scb = ttk.Scrollbar(tab3, command=gal_canv.yview); gal_canv.pack(side='left', fill='both', expand=True); gal_scb.pack(side='right', fill='y'); gallery_inner = tk.Frame(gal_canv); gal_canv.create_window((0,0), window=gallery_inner, anchor='nw'); gallery_inner.bind("<Configure>", lambda e: gal_canv.configure(scrollregion=gal_canv.bbox("all"))); gal_canv.configure(yscrollcommand=gal_scb.set)
+    tab3 = ttk.Frame(nb); nb.add(tab3, text='  GALERIE  '); _build_gallery_tab(tab3)
     
     # TAB PRAVIDLA
     tab_rules = ttk.Frame(nb); nb.add(tab_rules, text='  MOJE PRAVIDLA  ')
