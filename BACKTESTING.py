@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.6"
+VERSION = "1.5.7"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2442,52 +2442,24 @@ def analyze_screenshot(image_path):
     h, w = img.shape[:2]
     result = {}
 
-    # ── Detekce pravé hranice grafu (watchlist panel) ────────────────────────
-    # Watchlist je vpravo a má VYSOKOU varianci (světlý text na tmavém pozadí).
-    # Graf vlevo má nižší varianci (tmavé pozadí). Scanujeme zprava doleva:
-    # EMA se nabije z watchlistu (vysoká), pak hledáme POKLES → začátek grafu.
-    chart_right = w
-    min_chart_right = int(w * 0.60)
-
-    _ema = None
-    _low_streak = 0
-    for _x in range(w - 1, min_chart_right, -4):
-        _col = img[int(h * 0.12):int(h * 0.88), _x].astype(np.float32)
-        _var = float(np.var(_col))
-        if _ema is None:
-            _ema = _var
-            continue
-        # Pokud EMA je vysoká (jsme ve watchlistu) a aktuální sloupec je nízký → jsme v grafu
-        if _ema > 600 and _var < _ema * 0.40:
-            _low_streak += 1
-            if _low_streak >= 4:   # 4 × 4px = 16px nízkých sloupců = jsme v grafu
-                chart_right = _x + 50
-                break
-        else:
-            _low_streak = 0
-        _ema = _ema * 0.75 + _var * 0.25
-
-    chart_right = max(min_chart_right, chart_right)
-
     # ── 1. Detekce price labelů přes HSV kontury (hlavní metoda) ────────────
-    # Skenujeme pravých 15 % grafu (price labely jsou na pravé y-ose)
-    scan_x  = max(0, chart_right - int(w * 0.15))
-    scan_w  = chart_right - scan_x
-    panel   = img[:, scan_x:chart_right]
-    ph, pw  = panel.shape[:2]
-    hsv     = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
-    # Škálovací faktor pro threshold velikosti (4K má větší labely)
-    _scale  = max(1.0, w / 1920)
+    # TV y-osa s price labely (SL/Entry/TP) je typicky na 70-80 % šířky obrazu.
+    # Skenujeme pravých 45 % — zachytíme y-osu bez ohledu na layout TV.
+    scan_x = max(0, int(w * 0.55))
+    panel  = img[:, scan_x:]
+    ph, pw = panel.shape[:2]
+    hsv    = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
+    _scale = max(1.0, w / 1920)   # škálovací faktor (4K = 2.0)
 
-    # Barvy pro různé TV motivy — rozšířené rozsahy
     color_ranges = {
         'sl': [
             (np.array([0,   70,  70]),  np.array([14,  255, 255])),   # červená
-            (np.array([160, 70,  70]),  np.array([179, 255, 255])),   # temně červená
+            (np.array([160, 70,  70]),  np.array([179, 255, 255])),   # tmavě červená
         ],
         'entry': [
             (np.array([90,  50,  70]),  np.array([145, 255, 255])),   # modrá / cyan
-            (np.array([15,  60,  80]),  np.array([45,  255, 255])),   # oranžová / žlutá
+            (np.array([15,  55,  80]),  np.array([48,  255, 255])),   # oranžová / žlutá
+            (np.array([0,   0,  180]),  np.array([179, 25,  255])),   # bílá / světle šedá
         ],
         'tp': [
             (np.array([50,  40,  40]),  np.array([108, 255, 255])),   # zelená / teal
@@ -2495,6 +2467,7 @@ def analyze_screenshot(image_path):
         ],
     }
     color_key_map = {'sl': 'stoploss', 'entry': 'vstupni_hodnota', 'tp': 'takeprofit'}
+    _dbg_prices = []
 
     def _ocr_roi(roi):
         """OCR výřezu — vrátí float nebo None."""
@@ -2513,7 +2486,6 @@ def analyze_screenshot(image_path):
             if len(re.findall(r'\d', txt)) < 4:
                 continue
             txt_n = txt.replace(',', '.')
-            # Zkus float přímo
             nums = re.findall(r'\d{2,}\.?\d*', txt_n)
             for n in nums:
                 try:
@@ -2533,7 +2505,7 @@ def analyze_screenshot(image_path):
         except:
             return False
 
-    # Pro každou barvu: najdi kontury a vyber nejlepší (nejpravější, správná velikost)
+    # Pro každou barvu: najdi kontury, OCR, vyber nejpravější s platnou cenou
     for cname, ranges in color_ranges.items():
         key = color_key_map[cname]
         if result.get(key) and _is_plausible(result[key]):
@@ -2543,45 +2515,41 @@ def analyze_screenshot(image_path):
         for lo, hi in ranges:
             mask |= cv2.inRange(hsv, lo, hi)
 
-        # Morfologie — spoj fragmenty
         kernel = np.ones((5, 5), np.uint8)
         mask   = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask   = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  np.ones((3,3), np.uint8))
+        mask   = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        best_box = None
-        best_score = -1
+        candidates = []
         for cnt in contours:
             bx, by, bw2, bh2 = cv2.boundingRect(cnt)
             area = cv2.contourArea(cnt)
-            if area < int(80 * _scale):
+            if area < int(60 * _scale):
                 continue
-            # Typický price label: šírší než vysoký, výška škálovaná podle rozlišení
             aspect = bw2 / max(bh2, 1)
-            if (bh2 < int(8 * _scale) or bh2 > int(70 * _scale)
-                    or aspect < 1.2 or bw2 < int(18 * _scale)):
+            if (bh2 < int(6 * _scale) or bh2 > int(80 * _scale)
+                    or aspect < 0.8 or bw2 < int(15 * _scale)):
                 continue
-            # Preferuj labely co jsou co nejpravější v panelu
-            score = (bx + bw2) + area * 0.01
-            if score > best_score:
-                best_score = score
-                best_box   = (bx, by, bw2, bh2)
-
-        if best_box:
-            bx, by, bw2, bh2 = best_box
             pad = 4
             roi = panel[max(0, by-pad):min(ph, by+bh2+pad),
                         max(0, bx-pad):min(pw, bx+bw2+pad)]
             v = _ocr_roi(roi)
+            _dbg_prices.append(
+                f"  {cname} xy=({scan_x+bx},{by}) sz={bw2}x{bh2} ocr={v}")
             if v and v > 0.5:
-                result[key] = f"{v:.6g}"
+                # Skóre: nejpravější kontur v panelu (0..1) = y-osa, ne tělo grafu
+                score = (bx + bw2) / pw
+                candidates.append((score, v, by))
+
+        if candidates:
+            candidates.sort(reverse=True)   # nejpravější jako první
+            result[key] = f"{candidates[0][1]:.6g}"
 
     # ── 2. Řádková BGR analýza jako záloha (pro motivy kde HSV selže) ────────
-    label_w = max(80, int(w * 0.055))
-    # Skenuj těsně u pravé hrany grafu, ne kraje obrázku
-    strip_x = max(0, chart_right - label_w)
-    label_strip = img[:, strip_x:chart_right]
+    # Skenuj pravých 25 % šířky (kde je y-osa grafu)
+    label_x     = max(0, int(w * 0.75))
+    label_strip = img[:, label_x:]
 
     bands     = []
     cur_color = None
@@ -2598,13 +2566,13 @@ def analyze_screenshot(image_path):
             color = None
         else:
             b = float(np.mean(b_arr[mask])); g = float(np.mean(g_arr[mask])); r = float(np.mean(r_arr[mask]))
-            sat = max(b,g,r) - min(b,g,r)
+            sat = max(b, g, r) - min(b, g, r)
             if sat > 25:
-                if r > b * 1.10 and r > g * 1.10:                          color = 'sl'
-                elif b > r * 1.05 and b > g * 0.80:                        color = 'entry'
-                elif g >= b * 0.70 and g > r * 1.05:                       color = 'tp'
-                elif r > 140 and 80 < g < 180 and b < 100:                 color = 'entry'  # oranžová
-                else:                                                        color = None
+                if r > b * 1.10 and r > g * 1.10:          color = 'sl'
+                elif b > r * 1.05 and b > g * 0.80:         color = 'entry'
+                elif g >= b * 0.70 and g > r * 1.05:        color = 'tp'
+                elif r > 140 and 80 < g < 180 and b < 100:  color = 'entry'  # oranžová
+                else:                                         color = None
             else:
                 color = None
 
@@ -2625,9 +2593,9 @@ def analyze_screenshot(image_path):
 
     bands = merge_bands(bands)
 
-    # OCR ze strip pásmů
-    ocr_x  = max(0, chart_right - max(250, int(w * 0.14)))
-    ocr_strip = img[:, ocr_x:chart_right]
+    # OCR ze strip pásmů — skenuj pravých 32 % šířky
+    ocr_x     = max(0, int(w * 0.68))
+    ocr_strip = img[:, ocr_x:]
     for y_s, y_e, cname in bands:
         key = color_key_map[cname]
         if result.get(key) and _is_plausible(result[key]):
@@ -2713,7 +2681,10 @@ def analyze_screenshot(image_path):
                     if dt not in found: found.append(dt)
         return found
 
-    debug_lines = [f"[DEBUG] img size: {w}x{h}, chart_right={chart_right}, scan_x={scan_x}, result_so_far={result}"]
+    debug_lines = [
+        f"[DEBUG] img={w}x{h}  scan_x={scan_x}  prices_found={result}",
+        f"[CONTOURS] {len(_dbg_prices)} kandidátů:",
+    ] + _dbg_prices + [""]
     open_time   = None
     close_time  = None
 
