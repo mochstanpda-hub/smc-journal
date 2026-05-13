@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.4"
+VERSION = "1.5.5"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2461,12 +2461,15 @@ def analyze_screenshot(image_path):
     chart_right = max(min_chart_right, chart_right)
 
     # ── 1. Detekce price labelů přes HSV kontury (hlavní metoda) ────────────
-    # Skenujeme pravou část GRAFU (ne watchlist)
-    scan_x  = max(0, chart_right - int(w * 0.38))
+    # Price labely jsou vždy těsně u pravé osy — skenujeme jen 10 % šířky
+    # (38 % by zachytilo těla svíček a dávalo falešné shody)
+    scan_x  = max(0, chart_right - int(w * 0.10))
     scan_w  = chart_right - scan_x
     panel   = img[:, scan_x:chart_right]
     ph, pw  = panel.shape[:2]
     hsv     = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
+    # Škálovací faktor pro threshold velikosti (4K má větší labely)
+    _scale  = max(1.0, w / 1920)
 
     # Barvy pro různé TV motivy — rozšířené rozsahy
     color_ranges = {
@@ -2544,11 +2547,12 @@ def analyze_screenshot(image_path):
         for cnt in contours:
             bx, by, bw2, bh2 = cv2.boundingRect(cnt)
             area = cv2.contourArea(cnt)
-            if area < 80:
+            if area < int(80 * _scale):
                 continue
-            # Typický price label: šírší než vysoký, výška 8–55px
+            # Typický price label: šírší než vysoký, výška škálovaná podle rozlišení
             aspect = bw2 / max(bh2, 1)
-            if bh2 < 8 or bh2 > 70 or aspect < 1.2 or bw2 < 18:
+            if (bh2 < int(8 * _scale) or bh2 > int(70 * _scale)
+                    or aspect < 1.2 or bw2 < int(18 * _scale)):
                 continue
             # Preferuj labely co jsou co nejpravější v panelu
             score = (bx + bw2) + area * 0.01
@@ -2774,7 +2778,28 @@ def analyze_screenshot(image_path):
     if open_time:  result['cas_otevreni'] = open_time
     if close_time: result['cas_zavreni']  = close_time
 
-    # ── 5. Směr z poměru cen ─────────────────────────────────────────────────
+    # ── 5. Post-processing: zahoď ceny mimo rozsah symbolu ──────────────────
+    _price_ranges = {
+        'XAUUSD': (1400, 5500),   'EURUSD': (0.5,  2.5),
+        'GBPUSD': (1.0,  2.5),   'USDJPY': (80,   200),
+        'GBPJPY': (100,  280),   'USDCAD': (1.0,  2.0),
+        'AUDUSD': (0.5,  1.2),   'NAS100': (8000, 25000),
+        'US30':  (20000, 50000), 'US500':  (2000,  7000),
+        'BTCUSD':(5000,120000),  'DAX':   (8000,  22000),
+    }
+    _sym = result.get('symbol')
+    if _sym in _price_ranges:
+        _lo, _hi = _price_ranges[_sym]
+        for _k in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
+            _v = result.get(_k)
+            if _v:
+                try:
+                    if not (_lo <= float(_v) <= _hi):
+                        result.pop(_k, None)
+                except (ValueError, TypeError):
+                    pass
+
+    # ── 6. Směr z poměru cen ─────────────────────────────────────────────────
     try:
         entry = float(result.get('vstupni_hodnota', 0))
         sl    = float(result.get('stoploss', 0))
