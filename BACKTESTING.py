@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.9"
+VERSION = "1.5.0"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -408,6 +408,34 @@ PAIRS_FILE = '' # NOVÉ: Soubor pro seznam párů
 TIMEFRAMES_FILE = '' # NOVÉ: Soubor pro seznam timeframe
 RULES_FILE = '' # NOVÉ: Soubor pro pravidla
 FILTERS_FILE = '' # Soubor pro uložené filtry
+
+# Soubor s vlastními cestami projektů (globální, mimo projekt)
+PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
+
+def load_project_paths():
+    try:
+        if os.path.exists(PROJECT_PATHS_FILE):
+            with open(PROJECT_PATHS_FILE, 'r', encoding='utf-8') as _f:
+                return json.load(_f)
+    except Exception:
+        pass
+    return {}
+
+def save_project_paths(data):
+    try:
+        with open(PROJECT_PATHS_FILE, 'w', encoding='utf-8') as _f:
+            json.dump(data, _f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nepodařilo se uložit cesty projektů: {e}")
+
+def _resolve_project_path(mode, name):
+    """Vrátí cestu projektu — vlastní pokud nastavena a existuje, jinak výchozí."""
+    key = f"{mode}/{name}"
+    custom = load_project_paths().get(key)
+    if custom and os.path.isdir(custom):
+        return custom
+    base = DIR_BACKTEST if mode == "BACKTEST" else DIR_REAL
+    return os.path.join(base, name)
 IMAGES_DIR = ''
 JOURNAL_FILE = os.path.join(DIR_JOURNAL, 'journal_entries.json')
 
@@ -3072,6 +3100,212 @@ def setup_tradingview_tab(parent):
 # HLAVNÍ OBRAZOVKA (TRADING)
 # ==============================================================================
 
+
+def open_settings_window(initial_tab=0):
+    """Centrální nastavení — motiv, aktualizace, páry, scoring, sloupce, složka projektu."""
+    sw = tk.Toplevel(root)
+    sw.title("Nastavení")
+    sw.geometry("720x560")
+    sw.configure(bg=DT_BG)
+    sw.resizable(True, True)
+    sw.minsize(600, 480)
+    sw.lift(); sw.focus_set()
+
+    # Hlavička
+    hdr = tk.Frame(sw, bg='#2c3e50', pady=8)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="⚙  Nastavení", bg='#2c3e50', fg='white',
+             font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
+
+    nb = ttk.Notebook(sw)
+    nb.pack(fill='both', expand=True, padx=8, pady=8)
+
+    # ── Tab: Motiv ────────────────────────────────────────────────────────────
+    t_theme = ttk.Frame(nb); nb.add(t_theme, text='  🎨 Motiv  ')
+    _th_frame = tk.Frame(t_theme, bg=DT_BG, padx=28, pady=24)
+    _th_frame.pack(fill='both', expand=True)
+    tk.Label(_th_frame, text="Barevný motiv aplikace", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 16))
+    _theme_colors = {
+        "Klasický":         ("#0078d4", "#ffffff"),
+        "Šedý profesionál": ("#2e86c1", "#ffffff"),
+        "Světlý elegantní": ("#0d6efd", "#ffffff"),
+    }
+    cur_theme = load_theme_name()
+    def _sw_switch_theme(name):
+        apply_theme(name)
+        apply_dark_theme(root)
+        sw.destroy()
+        show_intro_screen() if not current_project_name else show_main_screen(current_project_name)
+    for tname, (tbg, tfg) in _theme_colors.items():
+        is_active = (tname == cur_theme)
+        tk.Button(_th_frame, text=("✔  " if is_active else "     ") + tname,
+                  bg=tbg, fg=tfg,
+                  font=('Segoe UI', 11, 'bold' if is_active else 'normal'),
+                  relief='solid' if is_active else 'flat', bd=2 if is_active else 0,
+                  padx=24, pady=10, cursor='hand2',
+                  command=lambda n=tname: _sw_switch_theme(n)).pack(anchor='w', pady=5)
+
+    # ── Tab: Aktualizace ─────────────────────────────────────────────────────
+    t_upd = ttk.Frame(nb); nb.add(t_upd, text='  🔄 Aktualizace  ')
+    _upd_frame = tk.Frame(t_upd, bg=DT_BG, padx=28, pady=24)
+    _upd_frame.pack(fill='both', expand=True)
+    tk.Label(_upd_frame, text="Aktualizace programu", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 16))
+    _ver_box = tk.Frame(_upd_frame, bg=DT_SURFACE, padx=18, pady=14)
+    _ver_box.pack(fill='x', pady=(0, 16))
+    def _vrow2(lbl, val, vc=None):
+        r = tk.Frame(_ver_box, bg=DT_SURFACE); r.pack(fill='x', pady=3)
+        tk.Label(r, text=lbl, bg=DT_SURFACE, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 10), width=18, anchor='w').pack(side='left')
+        tk.Label(r, text=val, bg=DT_SURFACE, fg=vc or DT_TEXT,
+                 font=('Segoe UI', 10, 'bold')).pack(side='left')
+    _vrow2("Aktuální verze:", VERSION, DT_ACCENT)
+    _vrow2("GitHub URL:", UPDATE_URL[:48] + "...", DT_SUBTEXT)
+    tk.Button(_upd_frame, text="🔄  Zkontrolovat aktualizace", command=lambda: [sw.destroy(), check_for_updates(silent=False)],
+              bg='#27ae60', fg='white', font=('Segoe UI', 10, 'bold'),
+              padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
+
+    # ── Tab: Páry & Timeframes ────────────────────────────────────────────────
+    t_lists = ttk.Frame(nb); nb.add(t_lists, text='  📊 Páry & TF  ')
+    setup_lists_manager_ui(t_lists)
+
+    # ── Tab: Scoring ──────────────────────────────────────────────────────────
+    t_score = ttk.Frame(nb); nb.add(t_score, text='  🏆 Scoring  ')
+    setup_settings_ui(t_score)
+
+    # ── Tab: Sloupce tabulky ─────────────────────────────────────────────────
+    t_cols = ttk.Frame(nb); nb.add(t_cols, text='  ⚙ Sloupce  ')
+    _cols_frame = tk.Frame(t_cols, bg=DT_BG, padx=28, pady=24)
+    _cols_frame.pack(fill='both', expand=True)
+    tk.Label(_cols_frame, text="Sloupce tabulky obchodů", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 12))
+    tk.Label(_cols_frame, text="Přidej nebo odeber sloupce v tabulce obchodů. Změny se projeví po zavření nastavení.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 16))
+    def _open_col_cfg():
+        sw.destroy()
+        ColumnConfigurator(root, lambda: show_main_screen(current_project_name))
+    tk.Button(_cols_frame, text="⚙  Otevřít konfiguraci sloupců",
+              command=_open_col_cfg,
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 10),
+              padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
+
+    # ── Tab: Složka projektu ──────────────────────────────────────────────────
+    t_folder = ttk.Frame(nb); nb.add(t_folder, text='  📁 Složka projektu  ')
+    _fld_frame = tk.Frame(t_folder, bg=DT_BG, padx=28, pady=24)
+    _fld_frame.pack(fill='both', expand=True)
+    tk.Label(_fld_frame, text="Vlastní složka projektu", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 6))
+    tk.Label(_fld_frame,
+             text="Každý projekt může mít data v libovolné složce na disku. Hodí se pro synchronizaci přes cloud (OneDrive, Dropbox, ...).",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 10),
+             wraplength=580, justify='left').pack(anchor='w', pady=(0, 20))
+
+    if not current_project_name:
+        tk.Label(_fld_frame, text="⚠  Žádný projekt není otevřen.", bg=DT_BG, fg='#e74c3c',
+                 font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+    else:
+        proj_key = f"{current_mode}/{current_project_name}"
+        paths_data = load_project_paths()
+        cur_custom = paths_data.get(proj_key, "")
+        cur_default = _resolve_project_path(current_mode, current_project_name)
+
+        info_box = tk.Frame(_fld_frame, bg=DT_SURFACE, padx=16, pady=12)
+        info_box.pack(fill='x', pady=(0, 16))
+        def _irow(lbl, val):
+            r = tk.Frame(info_box, bg=DT_SURFACE); r.pack(fill='x', pady=2)
+            tk.Label(r, text=lbl, bg=DT_SURFACE, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 9), width=16, anchor='w').pack(side='left')
+            tk.Label(r, text=val, bg=DT_SURFACE, fg=DT_TEXT,
+                     font=('Segoe UI', 9, 'bold'), wraplength=450, anchor='w').pack(side='left', fill='x', expand=True)
+        _irow("Projekt:", f"{current_project_name}  ({current_mode})")
+        _irow("Aktuální složka:", cur_custom if cur_custom else cur_default)
+        if cur_custom:
+            _irow("Typ:", "✔  Vlastní složka")
+        else:
+            _irow("Typ:", "Výchozí (automatická)")
+
+        path_var = tk.StringVar(value=cur_custom or cur_default)
+        path_entry = tk.Entry(_fld_frame, textvariable=path_var, width=60,
+                              bg=DT_ENTRY if hasattr(globals(), 'DT_ENTRY') else 'white',
+                              fg=DT_TEXT, relief='solid', bd=1,
+                              font=('Segoe UI', 9))
+        path_entry.pack(fill='x', pady=(0, 8))
+
+        btn_row = tk.Frame(_fld_frame, bg=DT_BG)
+        btn_row.pack(anchor='w')
+
+        def _browse():
+            d = filedialog.askdirectory(title="Vyber složku projektu",
+                                        initialdir=path_var.get() or _APP_DIR)
+            if d:
+                path_var.set(d.replace('/', os.sep))
+
+        def _save_path():
+            new_path = path_var.get().strip()
+            if not new_path:
+                messagebox.showwarning("Prázdná cesta", "Zadej cestu ke složce.")
+                return
+            if not os.path.isdir(new_path):
+                if messagebox.askyesno("Složka neexistuje",
+                                       f"Složka neexistuje:\n{new_path}\n\nChceš ji vytvořit?"):
+                    try:
+                        os.makedirs(os.path.join(new_path, 'images'), exist_ok=True)
+                    except Exception as ex:
+                        messagebox.showerror("Chyba", f"Nelze vytvořit: {ex}"); return
+                else:
+                    return
+            paths_data[proj_key] = new_path
+            save_project_paths(paths_data)
+            # Okamžitě přepnout globální proměnné
+            global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE
+            global SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, FILTERS_FILE
+            p = new_path
+            DATA_FILE = os.path.join(p, 'trades.csv')
+            PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json')
+            IMAGES_DIR = os.path.join(p, 'images')
+            CHECKLIST_FILE = os.path.join(p, 'checklist.json')
+            SCORING_FILE = os.path.join(p, 'scoring_config.json')
+            PAIRS_FILE = os.path.join(p, 'pairs_config.json')
+            TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json')
+            RULES_FILE = os.path.join(p, 'rules.txt')
+            FILTERS_FILE = os.path.join(p, 'filters_config.json')
+            messagebox.showinfo("Uloženo", f"Složka projektu uložena:\n{new_path}")
+            sw.destroy()
+            show_main_screen(current_project_name)
+
+        def _reset_path():
+            if messagebox.askyesno("Reset", "Vrátit projekt do výchozí složky?"):
+                paths_data.pop(proj_key, None)
+                save_project_paths(paths_data)
+                sw.destroy()
+                open_project_by_name(current_mode, current_project_name)
+
+        tk.Button(btn_row, text="📂  Procházet...", command=_browse,
+                  bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9),
+                  padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+        tk.Button(btn_row, text="💾  Uložit", command=_save_path,
+                  bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'),
+                  padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+        tk.Button(btn_row, text="↺  Reset na výchozí", command=_reset_path,
+                  bg='#e74c3c', fg='white', font=('Segoe UI', 9),
+                  padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
+
+    nb.select(initial_tab)
+
+
+def open_project_by_name(mode, name):
+    """Otevře projekt podle jména bez Listbox (používá se po reset složky)."""
+    p = _resolve_project_path(mode, name)
+    global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE
+    DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json')
+    IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
+    SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json')
+    TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
+    FILTERS_FILE = os.path.join(p, 'filters_config.json')
+    current_mode = mode
+    show_main_screen(name)
+
 def show_main_screen(p_name):
     global current_project_name, trades_tree, filter_col_var, filter_val_var, paned, v_paned, save_btn
     global cas_otevreni_entry, cas_zavreni_entry, symbol_combo, smer_var, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry
@@ -3136,6 +3370,7 @@ def show_main_screen(p_name):
     # Pravá část – tlačítka
     hb = tk.Frame(h, bg=DT_PANEL); hb.pack(side='right', fill='y', padx=12)
     tk.Button(hb, text="✕  MENU", command=show_intro_screen, bg='#c0392b', fg='white', font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="⚙ NASTAVENÍ", command=open_settings_window, bg='#34495e', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="🔄 UPDATE", command=lambda: check_for_updates(silent=False), bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📖 DENÍK", command=show_journal_screen, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📝 PRAVIDLA", command=open_checklist_editor, bg='#8e44ad', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
@@ -3735,9 +3970,8 @@ def delete_project(lb, mode):
 def open_project(lb, mode):
     if lb.curselection():
         n = lb.get(lb.curselection()[0])
-        base = DIR_BACKTEST if mode == "BACKTEST" else DIR_REAL
-        p = os.path.join(base, n)
-        global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode
+        p = _resolve_project_path(mode, n)
+        global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
         FILTERS_FILE = os.path.join(p, 'filters_config.json')
