@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.10"
+VERSION = "1.5.11"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2470,8 +2470,13 @@ def analyze_screenshot(image_path):
             ).strip().replace(' ', '')
             if len(re.findall(r'\d', txt)) < 4:
                 continue
-            txt_n = txt.replace(',', '.')
-            nums = re.findall(r'\d{2,}\.?\d*', txt_n)
+            # Odstraň tisícové oddělovače: "4,672.80" → "4672.80"
+            txt_clean = txt.replace(',', '')
+            # Pokud Tesseract čte tečku jako tisícový oddělovač: "4.672.80" → "4672.80"
+            parts = txt_clean.split('.')
+            if len(parts) > 2:
+                txt_clean = ''.join(parts[:-1]) + '.' + parts[-1]
+            nums = re.findall(r'\d+\.?\d*', txt_clean)
             for n in nums:
                 try:
                     v = float(n)
