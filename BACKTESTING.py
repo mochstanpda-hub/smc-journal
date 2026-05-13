@@ -191,27 +191,60 @@ def check_for_updates(silent=False):
 
         remote_ver = m.group(1).strip()
 
+        # Žádná nová verze
         if ver_tuple(remote_ver) <= ver_tuple(VERSION):
             if not silent:
                 try: _show_update_dialog(connected=True, remote_ver=remote_ver)
-                except Exception as de: messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
-            else:
-                # ── .py skript ──────────────────────────────────────────────
-                req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
-                with urllib.request.urlopen(req2, timeout=30) as r:
-                    new_content = r.read().decode('utf-8')
-                # Ověř velikost a platnost před přepsáním
+                except Exception: messagebox.showinfo("Aktualizace", f"Tvoje verze: {VERSION}\nGitHub: {remote_ver}\nMáš nejnovější verzi.")
+            return
+
+        # ── Nová verze dostupná ──────────────────────────────────────────────
+        import subprocess
+
+        def do_download():
+            if getattr(sys, 'frozen', False):
+                # ── launcher.exe ─────────────────────────────────────────────
+                py_path  = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
+                tmp_path = py_path + '.new'
+                try:
+                    messagebox.showinfo("Stahování", f"Stahuji verzi {remote_ver}...\nPočkej prosím.")
+                    req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+                    with urllib.request.urlopen(req2, timeout=60) as r:
+                        new_content = r.read().decode('utf-8')
+                except Exception as dl_err:
+                    messagebox.showerror("Chyba stahování", f"Nepodařilo se stáhnout:\n{dl_err}")
+                    return
                 if len(new_content.encode('utf-8')) < 150_000:
                     messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je příliš malý ({len(new_content)//1024} KB) — pravděpodobně oříznutý.\n"
-                        f"Aktualizace zrušena. Zkus to za 5 minut znovu.")
+                        f"Stažený soubor je příliš malý ({len(new_content)//1024} KB).\nAktualizace zrušena.")
                     return
                 try:
                     compile(new_content, 'BACKTESTING.py', 'exec')
                 except SyntaxError as se:
                     messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\n"
-                        f"Aktualizace zrušena — starý soubor zůstává.\n\nZkus to za chvíli znovu.")
+                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\nAktualizace zrušena.")
+                    return
+                if os.path.exists(py_path):
+                    shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                if os.path.exists(py_path): os.remove(py_path)
+                os.rename(tmp_path, py_path)
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
+            else:
+                # ── .py skript ────────────────────────────────────────────────
+                req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+                with urllib.request.urlopen(req2, timeout=30) as r:
+                    new_content = r.read().decode('utf-8')
+                if len(new_content.encode('utf-8')) < 150_000:
+                    messagebox.showerror("Chyba aktualizace",
+                        f"Stažený soubor je příliš malý ({len(new_content)//1024} KB).\nAktualizace zrušena.")
+                    return
+                try:
+                    compile(new_content, 'BACKTESTING.py', 'exec')
+                except SyntaxError as se:
+                    messagebox.showerror("Chyba aktualizace",
+                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\nAktualizace zrušena.")
                     return
                 current_path = os.path.abspath(__file__)
                 shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
