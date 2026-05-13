@@ -1,0 +1,60 @@
+{
+    "setups": {
+        "Golden Zone (50-61.8)": 4,
+        "Discount (>61.8)": 3,
+        "Premium (<50)": 2,
+        "Order Block": 1
+    },
+    "sessions": {
+        "London": 3,
+        "NY AM": 2,
+        "NY PM": 2,
+        "Asia": 1,
+        "Close": 1
+    },
+    "days": {
+        "\u00dater\u00fd": 2,
+        "St\u0159eda": 2,
+        "\u010ctvrtek": 2,
+        "Pond\u011bl\u00ed": 1,
+        "P\u00e1tek": 1
+    },
+    "rrr": {
+        "1:1": 0,
+        "1:2": 1,
+        "1:3": 2,
+        "1:4": 3,
+        "1:5+": 4
+    },
+    "pips": {
+        "5-10": 2,
+        "10-15": 1,
+        "15-20": 0,
+        "20+": -1
+    },
+    "thresholds": {
+        "A+": 13,
+        "A": 9,
+        "B": 5
+    },
+    "columns": [
+        "cas_otevreni",
+        "symbol",
+        "smer",
+        "rrr",
+        "checklist_ratio",
+        "vysledek"
+    ],
+    "layout": {
+        "col_widths": {
+            "cas_otevreni": 100,
+            "symbol": 100,
+            "smer": 100,
+            "rrr": 100,
+            "checklist_ratio": 100,
+            "vysledek": 100
+        },
+        "sash_horizontal": 481,
+        "sash_vertical": 451
+    }
+}
