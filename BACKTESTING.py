@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.9"
+VERSION = "1.5.10"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2442,33 +2442,20 @@ def analyze_screenshot(image_path):
     h, w = img.shape[:2]
     result = {}
 
-    # ── 1. Detekce price labelů přes HSV kontury (hlavní metoda) ────────────
-    # TV y-osa s price labely (SL/Entry/TP) je typicky na 70-80 % šířky obrazu.
-    # Skenujeme od 62 % šířky (= pravých 38 %) — stejně jako původní verze.
+    # ── 1+2. Detekce price labelů — unified přístup ─────────────────────────────
+    # Hledáme VŠECHNY nasycené labely na y-ose, pak přiřadíme role podle:
+    #   červená = SL, prostřední cena = Entry, zbývající = TP.
+    # Funguje pro oba motivy: bílý (SL=červená, Entry=teal, TP=zelená)
+    #                         i tmavý (SL=červená, Entry=žlutá, TP=cyan).
     scan_x = max(0, int(w * 0.62))
     panel  = img[:, scan_x:]
     ph, pw = panel.shape[:2]
     hsv    = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
 
-    color_ranges = {
-        'sl': [
-            (np.array([0,   70,  70]),  np.array([14,  255, 255])),   # červená
-            (np.array([160, 70,  70]),  np.array([179, 255, 255])),   # tmavě červená
-        ],
-        'entry': [
-            (np.array([90,  50,  70]),  np.array([145, 255, 255])),   # modrá / cyan
-            (np.array([15,  55,  80]),  np.array([48,  255, 255])),   # oranžová / žlutá
-        ],
-        'tp': [
-            (np.array([50,  40,  40]),  np.array([108, 255, 255])),   # zelená / teal
-            (np.array([144, 40,  40]),  np.array([179, 255, 255])),   # purpurová (alt motiv)
-        ],
-    }
     color_key_map = {'sl': 'stoploss', 'entry': 'vstupni_hodnota', 'tp': 'takeprofit'}
     _dbg_prices = []
 
     def _ocr_roi(roi):
-        """OCR výřezu — vrátí float nebo None."""
         if roi.size == 0:
             return None
         roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
@@ -2497,112 +2484,107 @@ def analyze_screenshot(image_path):
         return best
 
     def _is_plausible(s):
-        try:
-            v = float(s)
-            return v >= 0.5
-        except:
-            return False
+        try: return float(s) >= 0.5
+        except: return False
 
-    # Pro každou barvu: najdi kontury, OCR, vyber nejpravější s platnou cenou
-    for cname, ranges in color_ranges.items():
-        key = color_key_map[cname]
-        if result.get(key) and _is_plausible(result[key]):
-            continue
+    # Jednotná maska — S≥40, V≥50 zachytí red/green/teal/cyan/yellow/orange
+    _umask = cv2.inRange(hsv, np.array([0, 40, 50]), np.array([179, 255, 255]))
+    _k5    = np.ones((5, 5), np.uint8)
+    _umask = cv2.morphologyEx(_umask, cv2.MORPH_CLOSE, _k5)
+    _umask = cv2.morphologyEx(_umask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
+    _ucnts, _ = cv2.findContours(_umask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        mask = np.zeros(panel.shape[:2], np.uint8)
-        for lo, hi in ranges:
-            mask |= cv2.inRange(hsv, lo, hi)
+    # Sbírej kandidáty: (pravý_okraj_abs, y_střed, cena, je_červený)
+    _cands = []
+    for _cnt in _ucnts:
+        _bx, _by, _bw, _bh = cv2.boundingRect(_cnt)
+        if cv2.contourArea(_cnt) < 80: continue
+        if _bh < 8 or _bh > 70 or _bw / max(_bh, 1) < 1.2 or _bw < 18: continue
+        _p4  = 4
+        _roi = panel[max(0,_by-_p4):min(ph,_by+_bh+_p4),
+                     max(0,_bx-_p4):min(pw,_bx+_bw+_p4)]
+        _v = _ocr_roi(_roi)
+        _rx = scan_x + _bx + _bw
+        _dbg_prices.append(f"  cand rx={_rx} y={_by} sz={_bw}x{_bh} ocr={_v}")
+        if not _v or _v <= 0.5: continue
+        _rh = hsv[_by:min(ph,_by+_bh), _bx:min(pw,_bx+_bw)]
+        _rm = (cv2.inRange(_rh, np.array([0,  70,70]), np.array([14,  255,255])) |
+               cv2.inRange(_rh, np.array([160,70,70]), np.array([179, 255,255])))
+        _red = np.count_nonzero(_rm) > _rh.shape[0]*_rh.shape[1]*0.25
+        _cands.append((_rx, _by+_bh//2, _v, _red))
 
-        kernel = np.ones((5, 5), np.uint8)
-        mask   = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask   = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
+    # Nejpravější cluster = y-osa (všechny labely mají stejné x)
+    if _cands:
+        _cands.sort(key=lambda c: -c[0])
+        _rmax    = _cands[0][0]
+        _cluster = [c for c in _cands if _rmax - c[0] < 150]
+        _pp      = sorted(set(round(c[2], 2) for c in _cluster))
+        _dbg_prices.append(f"  cluster={len(_cluster)} prices={_pp}")
 
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        _redC = [c for c in _cluster if c[3]]
+        _slP  = _redC[0][2] if _redC else None
 
-        candidates = []
-        for cnt in contours:
-            bx, by, bw2, bh2 = cv2.boundingRect(cnt)
-            area = cv2.contourArea(cnt)
-            if area < 80:
-                continue
-            aspect = bw2 / max(bh2, 1)
-            # Původní nepomásštábované filtry — fungují pro 1080p i 4K native
-            if bh2 < 8 or bh2 > 70 or aspect < 1.2 or bw2 < 18:
-                continue
-            pad = 4
-            roi = panel[max(0, by-pad):min(ph, by+bh2+pad),
-                        max(0, bx-pad):min(pw, bx+bw2+pad)]
-            v = _ocr_roi(roi)
-            _dbg_prices.append(
-                f"  {cname} xy=({scan_x+bx},{by}) sz={bw2}x{bh2} ocr={v}")
-            if v and v > 0.5:
-                # Nejpravější kontur vyhraje (y-osa je vždy nejvíce vpravo)
-                score = (bx + bw2) + area * 0.01
-                candidates.append((score, v, by))
-
-        if candidates:
-            candidates.sort(reverse=True)   # nejpravější jako první
-            result[key] = f"{candidates[0][1]:.6g}"
-
-    # ── 2. Řádková BGR analýza jako záloha (pro motivy kde HSV selže) ────────
-    # Skenuj pravých 25 % šířky (kde je y-osa grafu)
-    label_x     = max(0, int(w * 0.75))
-    label_strip = img[:, label_x:]
-
-    bands     = []
-    cur_color = None
-    cur_start = None
-
-    for y in range(h):
-        row   = label_strip[y].astype(np.float32)
-        b_arr = row[:, 0]; g_arr = row[:, 1]; r_arr = row[:, 2]
-        mx = np.maximum(np.maximum(b_arr, g_arr), r_arr)
-        mn = np.minimum(np.minimum(b_arr, g_arr), r_arr)
-        sat_px = mx - mn
-        mask   = sat_px > 35
-        if not np.any(mask):
-            color = None
-        else:
-            b = float(np.mean(b_arr[mask])); g = float(np.mean(g_arr[mask])); r = float(np.mean(r_arr[mask]))
-            sat = max(b, g, r) - min(b, g, r)
-            if sat > 25:
-                if r > b * 1.10 and r > g * 1.10:          color = 'sl'
-                elif b > r * 1.05 and b > g * 0.80:         color = 'entry'
-                elif g >= b * 0.70 and g > r * 1.05:        color = 'tp'
-                elif r > 140 and 80 < g < 180 and b < 100:  color = 'entry'  # oranžová
-                else:                                         color = None
+        if len(_pp) >= 3:
+            _mid = _pp[len(_pp)//2]
+            result.setdefault('vstupni_hodnota', f"{_mid:.6g}")
+            if _slP is not None:
+                result.setdefault('stoploss', f"{_slP:.6g}")
+                _tpL = [p for p in _pp if abs(p-_mid)>0.01 and abs(p-_slP)>0.01]
+                if _tpL: result.setdefault('takeprofit', f"{_tpL[0]:.6g}")
             else:
-                color = None
+                result.setdefault('stoploss',  f"{_pp[0]:.6g}")
+                result.setdefault('takeprofit', f"{_pp[-1]:.6g}")
+        elif len(_pp) == 2:
+            if _slP is not None:
+                result.setdefault('stoploss', f"{_slP:.6g}")
+                _oth = [p for p in _pp if abs(p-_slP)>0.01]
+                if _oth: result.setdefault('vstupni_hodnota', f"{_oth[0]:.6g}")
+            else:
+                result.setdefault('vstupni_hodnota', f"{_pp[0]:.6g}")
+                result.setdefault('takeprofit',       f"{_pp[1]:.6g}")
+        elif len(_pp) == 1:
+            _k0 = 'stoploss' if _slP else 'vstupni_hodnota'
+            result.setdefault(_k0, f"{_pp[0]:.6g}")
 
-        if color != cur_color:
-            if cur_color and cur_start is not None and (y - cur_start) >= 4:
-                bands.append((cur_start, y, cur_color))
-            cur_color = color
-            cur_start = y if color else None
-
-    def merge_bands(bl, gap=8):
-        if not bl: return []
-        bl = sorted(bl, key=lambda x: x[0]); out = [bl[0]]
-        for b in bl[1:]:
-            p = out[-1]
-            if b[2] == p[2] and b[0] - p[1] <= gap: out[-1] = (p[0], b[1], p[2])
-            else: out.append(b)
-        return out
-
-    bands = merge_bands(bands)
-
-    # OCR ze strip pásmů — skenuj pravých 32 % šířky
-    ocr_x     = max(0, int(w * 0.68))
-    ocr_strip = img[:, ocr_x:]
-    for y_s, y_e, cname in bands:
-        key = color_key_map[cname]
-        if result.get(key) and _is_plausible(result[key]):
-            continue
-        pad = 6
-        roi = ocr_strip[max(0, y_s-pad):min(h, y_e+pad), :]
-        v   = _ocr_roi(roi)
-        if v and v > 0.5:
-            result[key] = f"{v:.6g}"
+    # ── Záloha: řádková BGR analýza (pro případ kde unified selže) ───────────
+    if not all(result.get(k) for k in ('stoploss','vstupni_hodnota','takeprofit')):
+        _lx  = max(0, int(w * 0.70))
+        _lst = img[:, _lx:]
+        _bands2 = []; _cc2 = None; _cs2 = None
+        for _y2 in range(h):
+            _rw = _lst[_y2].astype(np.float32)
+            _b2,_g2,_r2 = _rw[:,0],_rw[:,1],_rw[:,2]
+            _sat2 = np.maximum(np.maximum(_b2,_g2),_r2) - np.minimum(np.minimum(_b2,_g2),_r2)
+            _m2 = _sat2 > 35
+            if not np.any(_m2): _co2 = None
+            else:
+                _bv=float(np.mean(_b2[_m2]));_gv=float(np.mean(_g2[_m2]));_rv=float(np.mean(_r2[_m2]))
+                _sv = max(_bv,_gv,_rv)-min(_bv,_gv,_rv)
+                if _sv>25:
+                    if _rv>_bv*1.10 and _rv>_gv*1.10:       _co2='sl'
+                    elif _bv>_rv*1.05 and _bv>_gv*0.80:     _co2='entry'
+                    elif _gv>=_bv*0.70 and _gv>_rv*1.05:    _co2='tp'
+                    elif _rv>140 and 80<_gv<180 and _bv<100: _co2='entry'
+                    else: _co2=None
+                else: _co2=None
+            if _co2!=_cc2:
+                if _cc2 and _cs2 is not None and (_y2-_cs2)>=4: _bands2.append((_cs2,_y2,_cc2))
+                _cc2=_co2; _cs2=_y2 if _co2 else None
+        def _mb(bl,gap=8):
+            if not bl: return []
+            bl=sorted(bl,key=lambda x:x[0]); out=[bl[0]]
+            for b in bl[1:]:
+                p=out[-1]
+                if b[2]==p[2] and b[0]-p[1]<=gap: out[-1]=(p[0],b[1],p[2])
+                else: out.append(b)
+            return out
+        _bands2=_mb(_bands2)
+        _os2=img[:, _lx:]
+        for _ys2,_ye2,_cn2 in _bands2:
+            _key2=color_key_map[_cn2]
+            if result.get(_key2) and _is_plausible(result[_key2]): continue
+            _rv2=_ocr_roi(_os2[max(0,_ys2-6):min(h,_ye2+6),:])
+            if _rv2 and _rv2>0.5: result[_key2]=f"{_rv2:.6g}"
 
     # ── 3. Symbol — OCR záhlaví ───────────────────────────────────────────────
     title_h = max(65, int(h * 0.045))  # výška záhlaví (proporcionální pro 4K)
