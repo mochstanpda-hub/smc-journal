@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.7"
+VERSION = "1.5.8"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2459,7 +2459,6 @@ def analyze_screenshot(image_path):
         'entry': [
             (np.array([90,  50,  70]),  np.array([145, 255, 255])),   # modrá / cyan
             (np.array([15,  55,  80]),  np.array([48,  255, 255])),   # oranžová / žlutá
-            (np.array([0,   0,  180]),  np.array([179, 25,  255])),   # bílá / světle šedá
         ],
         'tp': [
             (np.array([50,  40,  40]),  np.array([108, 255, 255])),   # zelená / teal
@@ -2528,8 +2527,9 @@ def analyze_screenshot(image_path):
             if area < int(60 * _scale):
                 continue
             aspect = bw2 / max(bh2, 1)
+            # Price label: šírší než vysoký, minimální šířka 60px@1080p
             if (bh2 < int(6 * _scale) or bh2 > int(80 * _scale)
-                    or aspect < 0.8 or bw2 < int(15 * _scale)):
+                    or aspect < 1.2 or bw2 < int(60 * _scale)):
                 continue
             pad = 4
             roi = panel[max(0, by-pad):min(ph, by+bh2+pad),
@@ -2538,8 +2538,8 @@ def analyze_screenshot(image_path):
             _dbg_prices.append(
                 f"  {cname} xy=({scan_x+bx},{by}) sz={bw2}x{bh2} ocr={v}")
             if v and v > 0.5:
-                # Skóre: nejpravější kontur v panelu (0..1) = y-osa, ne tělo grafu
-                score = (bx + bw2) / pw
+                # Silná váha pro nejpravější pozici — y-osa bude vždy nejpravěji
+                score = ((bx + bw2) / pw) ** 2
                 candidates.append((score, v, by))
 
         if candidates:
