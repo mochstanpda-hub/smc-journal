@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.11"
+VERSION = "1.5.12"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2494,7 +2494,8 @@ def analyze_screenshot(image_path):
 
     # Jednotná maska — S≥40, V≥50 zachytí red/green/teal/cyan/yellow/orange
     _umask = cv2.inRange(hsv, np.array([0, 40, 50]), np.array([179, 255, 255]))
-    _k5    = np.ones((5, 5), np.uint8)
+    # Svislý kernel uzavře mezeru textu uvnitř cenového piliule (15px výška)
+    _k5    = np.ones((15, 5), np.uint8)
     _umask = cv2.morphologyEx(_umask, cv2.MORPH_CLOSE, _k5)
     _umask = cv2.morphologyEx(_umask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
     _ucnts, _ = cv2.findContours(_umask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -2503,11 +2504,13 @@ def analyze_screenshot(image_path):
     _cands = []
     for _cnt in _ucnts:
         _bx, _by, _bw, _bh = cv2.boundingRect(_cnt)
-        if cv2.contourArea(_cnt) < 80: continue
-        if _bh < 8 or _bh > 70 or _bw / max(_bh, 1) < 1.2 or _bw < 18: continue
+        if cv2.contourArea(_cnt) < 50: continue
+        if _bh < 4 or _bh > 80 or _bw < 12: continue
         _p4  = 4
+        # Pro malé markery (<40px) rozšíř OCR oblast vpravo — text ceny je vedle markeru
+        _x2_ocr = min(pw, _bx + _bw + (120 if _bw < 40 else _p4))
         _roi = panel[max(0,_by-_p4):min(ph,_by+_bh+_p4),
-                     max(0,_bx-_p4):min(pw,_bx+_bw+_p4)]
+                     max(0,_bx-_p4):_x2_ocr]
         _v = _ocr_roi(_roi)
         _rx = scan_x + _bx + _bw
         _dbg_prices.append(f"  cand rx={_rx} y={_by} sz={_bw}x{_bh} ocr={_v}")
