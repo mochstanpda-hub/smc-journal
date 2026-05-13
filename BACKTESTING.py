@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.15"
+VERSION = "1.5.16"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2441,6 +2441,7 @@ def analyze_screenshot(image_path):
 
     h, w = img.shape[:2]
     result = {}
+    debug_lines = []
 
     # ── 1. ŘÁDKOVÁ BGR ANALÝZA pravého okraje (price labely) ─────────────────
     # Detekce tmavého motivu: průměrný jas horního pravého rohu
@@ -2450,6 +2451,7 @@ def analyze_screenshot(image_path):
     # Tmavé pozadí: 2 % (77 px pro 4K) — vyhne se barevným Kill Zone / Session zónám
     # které se táhnou přes celý graf a zasahují do širšího pruhu
     label_w = max(60, int(w * (0.020 if _is_dark_bg else 0.08)))
+    debug_lines.append(f"[DEBUG] img={w}x{h}  dark_bg={_is_dark_bg}  label_w={label_w}")
     label_strip = img[:, max(0, w - label_w):]
 
     bands = []
@@ -2495,57 +2497,79 @@ def analyze_screenshot(image_path):
                 out.append(b)
         return out
 
-    bands = merge_bands(bands)
+    bands_raw = list(merge_bands(bands))
     # Filtruj příliš vysoká pásma — price label je max 60 px, Kill Zone / Session zóna je stovky px
-    bands = [b for b in bands if (b[1] - b[0]) <= 60]
+    bands = [b for b in bands_raw if (b[1] - b[0]) <= 60]
+    debug_lines.append(f"  bands_raw={bands_raw}")
+    debug_lines.append(f"  bands_filtered={bands}")
 
     # ── 2. OCR price boxů ────────────────────────────────────────────────────
     # Světlé pozadí: 15 % (576 px) — labely mohou být dále od okraje
-    # Tmavé pozadí: 3 % (115 px) — jen price scale, vyhne se číslům z grafu
-    ocr_w     = max(80, int(w * (0.03 if _is_dark_bg else 0.15)))
+    # Tmavé pozadí: 5 % (192 px) — price scale, dost široký pro label box
+    ocr_w     = max(80, int(w * (0.05 if _is_dark_bg else 0.15)))
     ocr_strip = img[:, max(0, w - ocr_w):]
+    debug_lines.append(f"  ocr_w={ocr_w}")
 
-    def ocr_price_band(y_s, y_e):
-        pad = 6
+    def ocr_price_band(y_s, y_e, band_tag=''):
+        pad = 8
         roi = ocr_strip[max(0, y_s - pad):min(h, y_e + pad), :]
-        if roi.size == 0: return None
-        roi = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        if roi.size == 0: return None, []
+        roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
         best_val = None
-        for thr_val, inv in [(160, False), (100, False), (160, True)]:
-            _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
-            if inv: thr = cv2.bitwise_not(thr)
+        ocr_log = []
+        # Pro dark bg: priority na inverted (bílý text na tmavém → po inverzi černý text na bílém)
+        attempts = [(160, True), (160, False), (100, False), (0, True, True)] if _is_dark_bg else [(160, False), (100, False), (160, True)]
+        for attempt in attempts:
+            if len(attempt) == 3:
+                # Adaptive threshold
+                thr = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                            cv2.THRESH_BINARY_INV, 21, 5)
+            else:
+                thr_val, inv = attempt
+                _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
+                if inv: thr = cv2.bitwise_not(thr)
             text = pytesseract.image_to_string(
                 thr, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'
             ).strip().replace(' ', '')
-            if len(re.findall(r'\d', text)) < 4: continue
+            ocr_log.append(f"'{text}'")
+            if len(re.findall(r'\d', text)) < 3: continue
             # Spoj číselné skupiny: "4,672.80" → parts=["4","672","80"] → 4672.80
             parts = re.findall(r'\d+', text)
             if len(parts) >= 2:
                 try:
                     v = float(''.join(parts[:-1]) + '.' + parts[-1])
-                    if v > 0.5: best_val = v; break
+                    if v > 0.1: best_val = v; break
                 except: pass
             text_n = text.replace(',', '.')
-            for n in re.findall(r'\d{3,}\.?\d*', text_n):
+            for n in re.findall(r'\d{2,}\.?\d*', text_n):
                 try:
                     v = float(n)
-                    if v > 0.5: best_val = v; break
+                    if v > 0.1: best_val = v; break
                 except: pass
             if best_val: break
-        return best_val
+        # Uložit debug PNG pro diagnostiku
+        try:
+            if band_tag and roi_big is not None:
+                cv2.imwrite(f'C:\\obd\\debug_roi_{band_tag}.png', roi_big)
+                if 'thr' in dir() and thr is not None:
+                    cv2.imwrite(f'C:\\obd\\debug_thr_{band_tag}.png', thr)
+        except: pass
+        return best_val, ocr_log
 
     color_key_map = {'sl': 'stoploss', 'entry': 'vstupni_hodnota', 'tp': 'takeprofit'}
     for y_s, y_e, color in bands:
-        v = ocr_price_band(y_s, y_e)
-        if v and v > 0.5:
+        v, ocr_log = ocr_price_band(y_s, y_e, band_tag=f"{color}_{y_s}")
+        debug_lines.append(f"  band {color}[{y_s}-{y_e}]: ocr={ocr_log} val={v}")
+        if v and v > 0.1:
             key = color_key_map[color]
             if key not in result:
                 result[key] = f"{v:.6g}"
 
     # ── 3. HSV contour fallback — doplní chybějící hodnoty ───────────────────
     def _is_plausible(s):
-        try: return float(s) >= 50
+        # Jakákoliv kladná cena je plausibilní — >= 50 bylo špatné pro EURUSD (~1.0)
+        try: return float(s) > 0.1
         except: return False
 
     search_w    = max(200, int(w * 0.20))
@@ -2562,12 +2586,16 @@ def analyze_screenshot(image_path):
 
     for cname, ranges in color_ranges.items():
         key = color_key_map[cname]
-        if result.get(key) and _is_plausible(result[key]): continue
+        already = result.get(key, '')
+        if already and _is_plausible(already):
+            debug_lines.append(f"  hsv_{cname}: skip (already={already})")
+            continue
         mask = np.zeros(right_panel.shape[:2], np.uint8)
         for lo, hi in ranges:
             mask |= cv2.inRange(hsv_rp, lo, hi)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        all_cnts = [(cv2.boundingRect(c), cv2.contourArea(c)) for c in contours]
         best = None
         for cnt in contours:
             x, y, cw, ch = cv2.boundingRect(cnt)
@@ -2575,11 +2603,14 @@ def analyze_screenshot(image_path):
                 score = x + cw
                 if best is None or score > best[0]:
                     best = (score, x, y, cw, ch)
+        debug_lines.append(f"  hsv_{cname}: total_cnts={len(contours)} valid_cnts={sum(1 for (x,y,cw,ch),a in all_cnts if 8<ch<80 and cw>20 and a>150)} best={best}")
         if not best: continue
         _, bx, by, bw2, bh2 = best
         roi_r = right_panel[max(0, by-3):min(right_panel.shape[0], by+bh2+3),
                             max(0, bx-3):min(right_panel.shape[1], bx+bw2+3)]
         if roi_r.size == 0: continue
+        try: cv2.imwrite(f'C:\\obd\\debug_hsv_{cname}.png', roi_r)
+        except: pass
         roi_big  = cv2.resize(roi_r, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
         gray_r   = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
         _, thr_r  = cv2.threshold(gray_r, 160, 255, cv2.THRESH_BINARY)
@@ -2588,16 +2619,18 @@ def analyze_screenshot(image_path):
             pytesseract.image_to_string(thr_r,  config='--psm 7 -c tessedit_char_whitelist=0123456789.,'),
             pytesseract.image_to_string(thr_r2, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'),
         ):
+            txt = txt.strip().replace(' ', '')
+            debug_lines.append(f"  hsv_{cname} ocr: '{txt}'")
             parts = re.findall(r'\d+', txt)
             if len(parts) >= 2:
                 try:
                     v = float(''.join(parts[:-1]) + '.' + parts[-1])
-                    if v > 1.0: result[key] = f"{v:.6g}"; break
+                    if v > 0.1: result[key] = f"{v:.6g}"; break
                 except: pass
-            for n in re.findall(r'\d{3,}\.?\d*', txt.replace(',', '.')):
+            for n in re.findall(r'\d{2,}\.?\d*', txt.replace(',', '.')):
                 try:
                     v = float(n)
-                    if v > 1.0: result[key] = f"{v:.6g}"; break
+                    if v > 0.1: result[key] = f"{v:.6g}"; break
                 except: pass
             if result.get(key): break
 
@@ -2661,7 +2694,7 @@ def analyze_screenshot(image_path):
                     if dt not in found: found.append(dt)
         return found
 
-    debug_lines = [f"[DEBUG] img={w}x{h}  bands={bands}  prices={result}"]
+    debug_lines.append(f"  prices_before_postproc={result}")
     open_time = close_time = None
 
     y_axis_start = int(h * 0.60)
@@ -2718,11 +2751,7 @@ def analyze_screenshot(image_path):
         if all_times:        open_time  = all_times[0]
         if len(all_times)>=2: close_time = all_times[-1]
 
-    debug_lines.append(f"\nFINAL: open={open_time}  close={close_time}")
-    try:
-        with open(r'C:\obd\time_debug.txt', 'w', encoding='utf-8') as dbf:
-            dbf.write('\n'.join(debug_lines))
-    except: pass
+    debug_lines.append(f"\nFINAL_TIMES: open={open_time}  close={close_time}")
 
     if open_time:  result['cas_otevreni'] = open_time
     if close_time: result['cas_zavreni']  = close_time
@@ -2742,6 +2771,7 @@ def analyze_screenshot(image_path):
         for _k in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
             try:
                 if result.get(_k) and not (_lo <= float(result[_k]) <= _hi):
+                    debug_lines.append(f"  postproc: removed {_k}={result[_k]} (out of range {_lo}-{_hi} for {_sym})")
                     result.pop(_k, None)
             except (ValueError, TypeError): pass
 
@@ -2754,6 +2784,12 @@ def analyze_screenshot(image_path):
             if tp > entry > sl:   result['smer'] = 'Buy'
             elif sl > entry > tp: result['smer'] = 'Sell'
     except (ValueError, TypeError): pass
+
+    debug_lines.append(f"FINAL_RESULT: {result}")
+    try:
+        with open(r'C:\obd\time_debug.txt', 'w', encoding='utf-8') as dbf:
+            dbf.write('\n'.join(debug_lines))
+    except: pass
 
     return result
 
