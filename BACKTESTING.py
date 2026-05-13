@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.4.8"
+VERSION = "1.4.9"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -3255,6 +3255,56 @@ def show_main_screen(p_name):
                                 bg='#34495e', fg='white', font=('Segoe UI', 8),
                                 bd=0, padx=8, cursor='hand2')
     _toggle_flt_btn.pack(side='right', padx=4, pady=2)
+
+    def _open_filter_config():
+        """Dialog pro výběr viditelných filtrů."""
+        cfg_win = tk.Toplevel(root)
+        cfg_win.title("Konfigurace filtrů")
+        cfg_win.resizable(False, False)
+        cfg_win.configure(bg=DT_BG)
+        cfg_win.geometry("260x320")
+        cfg_win.lift(); cfg_win.focus_set()
+        tk.Label(cfg_win, text="⚙  Zobrazené filtry", bg='#2c3e50', fg='white',
+                 font=('Segoe UI', 11, 'bold'), pady=10).pack(fill='x')
+        body_cfg = tk.Frame(cfg_win, bg=DT_BG, padx=18, pady=10)
+        body_cfg.pack(fill='both', expand=True)
+        _all_chips = ['Symbol', 'Výsledek', 'Seance', 'Štítky', 'Od', 'Do', 'RRR', 'Uložené']
+        cur_vis = load_saved_filters().get('chip_visibility', {})
+        _vars = {}
+        for name in _all_chips:
+            v = tk.BooleanVar(value=cur_vis.get(name, True))
+            _vars[name] = v
+            tk.Checkbutton(body_cfg, text=name, variable=v, bg=DT_BG, fg=DT_TEXT,
+                           activebackground=DT_BG, selectcolor=DT_SURFACE,
+                           font=('Segoe UI', 10)).pack(anchor='w', pady=2)
+        bf_cfg = tk.Frame(cfg_win, bg=DT_BG, padx=18, pady=10)
+        bf_cfg.pack(fill='x', side='bottom')
+        def _apply_cfg():
+            new_vis = {n: _vars[n].get() for n in _all_chips}
+            data = load_saved_filters()
+            data['chip_visibility'] = new_vis
+            save_saved_filters(data)
+            for name, frame in _chip_frames.items():
+                try:
+                    if new_vis.get(name, True):
+                        frame.pack(side='left', padx=3, pady=1, ipady=2)
+                    else:
+                        frame.pack_forget()
+                except Exception:
+                    pass
+            row_a.update_idletasks()
+            flt_canvas.configure(scrollregion=flt_canvas.bbox('all'))
+            cfg_win.destroy()
+        tk.Button(bf_cfg, text="Použít", command=_apply_cfg,
+                  bg='#27ae60', fg='white', font=('Segoe UI', 10, 'bold'),
+                  padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left')
+        tk.Button(bf_cfg, text="Zrušit", command=cfg_win.destroy,
+                  bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9),
+                  padx=10, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(8, 0))
+
+    tk.Button(filter_outer, text="⚙", command=_open_filter_config,
+              bg='#2c3e50', fg='#7f8c8d', font=('Segoe UI', 9),
+              bd=0, padx=8, cursor='hand2').pack(side='right', padx=0, pady=2)
     tk.Button(filter_outer, text="Uložit", command=lambda: save_current_filter(saved_combo_flt),
               bg='#8e44ad', fg='white', font=('Segoe UI', 8), bd=0, padx=8, cursor='hand2'
               ).pack(side='right', padx=2, pady=2)
@@ -3279,15 +3329,27 @@ def show_main_screen(p_name):
     flt_canvas.bind('<MouseWheel>', lambda e: flt_canvas.xview_scroll(int(-1*(e.delta/120)), 'units'))
 
     def chip(parent, lbl, widget):
-        """Bílý rámeček s popiskem + widgetem."""
+        """Bílý rámeček s popiskem + widgetem. Vrací frame pro show/hide."""
         f = tk.Frame(parent, bg='white', relief='solid', bd=1)
         f.pack(side='left', padx=3, pady=1, ipady=2)
         tk.Label(f, text=lbl, bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
         widget(f).pack(side='left', padx=(0, 5))
+        return f
 
-    chip(row_a, "Symbol",    lambda f: ttk.Combobox(f, textvariable=filter_symbol_var, values=["VŠE"]+PAIRS, width=10, state='readonly'))
-    chip(row_a, "Výsledek",  lambda f: ttk.Combobox(f, textvariable=filter_result_var, values=["VŠE","Win","Loss","BE"], width=7, state='readonly'))
-    chip(row_a, "Seance",    lambda f: ttk.Combobox(f, textvariable=filter_session_var, values=["VŠE"]+SESSIONS_LIST, width=9, state='readonly'))
+    _chip_frames = {}
+    def chip_t(parent, lbl, widget):
+        """chip() s ukládáním reference pro konfiguraci viditelnosti."""
+        f = chip(parent, lbl, widget)
+        _chip_frames[lbl] = f
+        # Skryj pokud uložená konfig říká skrýt
+        _vis = load_saved_filters().get('chip_visibility', {})
+        if not _vis.get(lbl, True):
+            f.pack_forget()
+        return f
+
+    chip_t(row_a, "Symbol",    lambda f: ttk.Combobox(f, textvariable=filter_symbol_var, values=["VŠE"]+PAIRS, width=10, state='readonly'))
+    chip_t(row_a, "Výsledek",  lambda f: ttk.Combobox(f, textvariable=filter_result_var, values=["VŠE","Win","Loss","BE"], width=7, state='readonly'))
+    chip_t(row_a, "Seance",    lambda f: ttk.Combobox(f, textvariable=filter_session_var, values=["VŠE"]+SESSIONS_LIST, width=9, state='readonly'))
 
     # Tag filter — dynamický seznam hashtagů z obchodů
     def _load_project_tags():
@@ -3309,13 +3371,15 @@ def show_main_screen(p_name):
         cb.bind('<Button-1>', lambda e: cb.configure(values=_load_project_tags()))
         _tag_combo_ref[0] = cb
         return cb
-    chip(row_a, "Štítky", _make_tag_combo)
-    chip(row_a, "Od",        lambda f: tk.Entry(f, textvariable=filter_date_from_var, width=11, bg='white', relief='flat'))
-    chip(row_a, "Do",        lambda f: tk.Entry(f, textvariable=filter_date_to_var, width=11, bg='white', relief='flat'))
+    chip_t(row_a, "Štítky", _make_tag_combo)
+    chip_t(row_a, "Od",        lambda f: tk.Entry(f, textvariable=filter_date_from_var, width=11, bg='white', relief='flat'))
+    chip_t(row_a, "Do",        lambda f: tk.Entry(f, textvariable=filter_date_to_var, width=11, bg='white', relief='flat'))
 
     # RRR chip
     rrr_f = tk.Frame(row_a, bg='white', relief='solid', bd=1)
     rrr_f.pack(side='left', padx=3, pady=1, ipady=2)
+    _chip_frames['RRR'] = rrr_f
+    if not load_saved_filters().get('chip_visibility', {}).get('RRR', True): rrr_f.pack_forget()
     tk.Label(rrr_f, text="RRR", bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
     rrr_min_e = tk.Entry(rrr_f, textvariable=filter_rrr_min_var, width=4, bg='white', relief='flat'); rrr_min_e.pack(side='left')
     tk.Label(rrr_f, text="–", bg='white', fg='#888').pack(side='left')
@@ -3325,6 +3389,8 @@ def show_main_screen(p_name):
     saved_flt_var = tk.StringVar()
     sf = tk.Frame(row_a, bg='white', relief='solid', bd=1)
     sf.pack(side='left', padx=3, pady=1, ipady=2)
+    _chip_frames['Uložené'] = sf
+    if not load_saved_filters().get('chip_visibility', {}).get('Uložené', True): sf.pack_forget()
     tk.Label(sf, text="💾 Uložené", bg='white', fg='#555', font=('Segoe UI', 7, 'bold'), padx=5).pack(side='left')
     saved_combo_flt = ttk.Combobox(sf, textvariable=saved_flt_var, width=12, state='readonly')
     saved_flt_data = load_saved_filters()
@@ -3508,6 +3574,42 @@ def save_app_title(title):
         open(APP_TITLE_FILE, 'w', encoding='utf-8').write(title)
     except: pass
 
+
+def show_splash(callback):
+    """Animovaný splash screen při startu, ~2.5 s."""
+    splash = tk.Toplevel()
+    splash.overrideredirect(True)
+    w, h = 440, 270
+    sw = splash.winfo_screenwidth(); sh = splash.winfo_screenheight()
+    splash.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+    splash.configure(bg='#0d1117')
+    splash.lift(); splash.attributes('-topmost', True)
+
+    tk.Label(splash, text="Trade Tracker", bg='#0d1117', fg='#ffffff',
+             font=('Segoe UI', 30, 'bold')).pack(pady=(44, 4))
+    tk.Label(splash, text="Profesionální obchodní deník", bg='#0d1117', fg='#586069',
+             font=('Segoe UI', 11)).pack()
+
+    pb_bg = tk.Canvas(splash, bg='#21262d', width=300, height=6,
+                      highlightthickness=0, bd=0)
+    pb_bg.pack(pady=(28, 6))
+    bar = pb_bg.create_rectangle(0, 0, 0, 6, fill='#58a6ff', outline='')
+
+    tk.Label(splash, text=f"v{VERSION}", bg='#0d1117', fg='#30363d',
+             font=('Segoe UI', 9)).pack(side='bottom', anchor='e', padx=18, pady=10)
+
+    _step = [0]
+    def _anim():
+        if _step[0] <= 100:
+            pb_bg.coords(bar, 0, 0, _step[0] * 3, 6)
+            _step[0] += 2
+            splash.after(38, _anim)
+        else:
+            try: splash.destroy()
+            except: pass
+            callback()
+    splash.after(80, _anim)
+
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
@@ -3531,6 +3633,8 @@ def show_intro_screen():
     tk.Button(title_frame, text="✏️", command=edit_title, bg="#ecf0f1", fg="#95a5a6",
               relief='flat', font=('Arial', 14), cursor='hand2',
               activebackground="#ecf0f1").pack(side='left', padx=(8, 0))
+    tk.Label(main_container, text=f"v{VERSION}", bg="#ecf0f1", fg="#bdc3c7",
+             font=('Segoe UI', 9)).pack(side='bottom', anchor='e', padx=18, pady=6)
     grid_frame = tk.Frame(main_container, bg="#ecf0f1"); grid_frame.pack(expand=True)
     
     f1 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f1.grid(row=0, column=0, padx=20, pady=20); f1.pack_propagate(False)
@@ -3647,7 +3751,8 @@ if __name__ == "__main__":
         root.minsize(1100, 700)
         apply_dark_theme(root)
         root.protocol("WM_DELETE_WINDOW", on_close)
-        root.after(100, show_intro_screen)
+        root.withdraw()  # Skryj main window dokud splash neskončí
+        root.after(100, lambda: show_splash(lambda: [root.deiconify(), show_intro_screen()]))
         # Tiše zkontroluj aktualizace 4 sekundy po startu — na hlavním threadu (ne v background threadu!)
         root.after(4000, lambda: check_for_updates(silent=True))
         root.mainloop()
