@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.14"
+VERSION = "1.5.15"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -2499,8 +2499,10 @@ def analyze_screenshot(image_path):
     # Filtruj příliš vysoká pásma — price label je max 60 px, Kill Zone / Session zóna je stovky px
     bands = [b for b in bands if (b[1] - b[0]) <= 60]
 
-    # ── 2. OCR price boxů (15 % pravého okraje) ──────────────────────────────
-    ocr_w     = max(200, int(w * 0.15))
+    # ── 2. OCR price boxů ────────────────────────────────────────────────────
+    # Světlé pozadí: 15 % (576 px) — labely mohou být dále od okraje
+    # Tmavé pozadí: 3 % (115 px) — jen price scale, vyhne se číslům z grafu
+    ocr_w     = max(80, int(w * (0.03 if _is_dark_bg else 0.15)))
     ocr_strip = img[:, max(0, w - ocr_w):]
 
     def ocr_price_band(y_s, y_e):
@@ -2553,7 +2555,7 @@ def analyze_screenshot(image_path):
     color_ranges = {
         'sl':    [(np.array([0,   100,  80]), np.array([12,  255, 255])),
                   (np.array([165, 100,  80]), np.array([179, 255, 255]))],
-        'entry': [(np.array([100,  80,  80]), np.array([135, 255, 255]))],
+        'entry': [(np.array([85,   70,  70]), np.array([145, 255, 255]))],
         'tp':    [(np.array([60,   60,  60]), np.array([100, 255, 255])),
                   (np.array([155,  60,  60]), np.array([175, 255, 255]))],
     }
@@ -2642,7 +2644,7 @@ def analyze_screenshot(image_path):
         txt = re.sub(r"['\"`]", '', txt)
         found = []
         for m in re.finditer(
-                r'(?:\w{3,9}\s+)?(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{2,4})[,\s]+(\d{1,2}:\d{2})', txt):
+                r'(?:\w{3,9}\s+)?(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s*(\d{2,4})[,\s]+(\d{1,2}:\d{2})', txt):
             day, mon, yr, tim = m.groups()
             mo = month_map.get(mon.lower())
             if mo:
