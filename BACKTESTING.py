@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.16"
+VERSION = "1.5.17"
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
@@ -473,6 +473,8 @@ current_project_name = ""
 stats_canvases = [] # Pro equity curve
 pie_canvases = []   # Pro kruhový graf
 heatmap_canvases = [] # Pro heatmapu
+periods_canvases = []    # Pro charty v záložce PERIODY
+periods_frames   = {}    # Odkazy na widgety v záložce PERIODY
 
 # Globální proměnné UI
 trades_tree = None 
@@ -2793,6 +2795,325 @@ def analyze_screenshot(image_path):
 
     return result
 
+# ==============================================================================
+# ZÁLOŽKA PERIODY — týdenní a měsíční přehled výkonnosti
+# ==============================================================================
+
+def setup_periods_tab(parent):
+    """Vytvoří záložku PERIODY s týdenním a měsíčním přehledem."""
+    global periods_frames
+    periods_frames = {}
+
+    canv = tk.Canvas(parent, bg=DT_BG, highlightthickness=0)
+    scb  = ttk.Scrollbar(parent, command=canv.yview)
+    canv.pack(side='left', fill='both', expand=True)
+    scb.pack(side='right', fill='y')
+    sf = tk.Frame(canv, bg=DT_BG)
+    canv.create_window((0, 0), window=sf, anchor='nw')
+    sf.bind("<Configure>", lambda e: canv.configure(scrollregion=canv.bbox("all")))
+    canv.configure(yscrollcommand=scb.set)
+    canv.bind_all("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+    # ── Hlavička ─────────────────────────────────────────────────────────────
+    hdr = tk.Frame(sf, bg='#0f172a', pady=12)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="📅  PŘEHLED VÝKONNOSTI — TÝDEN & MĚSÍC",
+             font=('Segoe UI', 13, 'bold'), bg='#0f172a', fg='white').pack(side='left', padx=18)
+    tk.Button(hdr, text="🔄  Aktualizovat", command=lambda: update_periods_analysis(),
+              bg='#0ea5e9', fg='white', font=('Segoe UI', 9, 'bold'),
+              relief='flat', pady=4, padx=14, cursor='hand2',
+              activebackground='#0284c7').pack(side='right', padx=14)
+
+    # ── KPI row (tento týden | tento měsíc) ──────────────────────────────────
+    kpi_row = tk.Frame(sf, bg=DT_BG)
+    kpi_row.pack(fill='x', padx=14, pady=(12, 6))
+    periods_frames['kpi_week']  = tk.Frame(kpi_row, bg='#1e293b')
+    periods_frames['kpi_week'].pack(side='left', fill='both', expand=True, padx=(0, 7))
+    periods_frames['kpi_month'] = tk.Frame(kpi_row, bg='#1e293b')
+    periods_frames['kpi_month'].pack(side='left', fill='both', expand=True, padx=(7, 0))
+
+    # ── Chart areas ───────────────────────────────────────────────────────────
+    periods_frames['chart_week']  = tk.Frame(sf, bg='#0f172a')
+    periods_frames['chart_week'].pack(fill='x', padx=14, pady=(6, 4))
+    periods_frames['chart_month'] = tk.Frame(sf, bg='#0f172a')
+    periods_frames['chart_month'].pack(fill='x', padx=14, pady=(4, 8))
+
+    # ── Table areas ───────────────────────────────────────────────────────────
+    periods_frames['table_week']  = tk.Frame(sf, bg='#0f172a')
+    periods_frames['table_week'].pack(fill='x', padx=14, pady=(0, 6))
+    periods_frames['table_month'] = tk.Frame(sf, bg='#0f172a')
+    periods_frames['table_month'].pack(fill='x', padx=14, pady=(0, 20))
+
+    update_periods_analysis()
+
+
+def update_periods_analysis():
+    """Načte data a překreslí celou záložku PERIODY."""
+    global periods_canvases, periods_frames
+
+    if not periods_frames:
+        return
+
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from collections import defaultdict
+
+    # Uklid starých grafů
+    for c in periods_canvases:
+        try: c.get_tk_widget().destroy()
+        except: pass
+    periods_canvases.clear()
+
+    trades = load_data()
+    now    = datetime.now()
+
+    # ── Parsování obchodů ────────────────────────────────────────────────────
+    parsed = []
+    for t in trades:
+        raw_day = t.get('den_tydne', '').capitalize()
+        if raw_day in ('Sobota', 'Neděle'):
+            continue
+        res = t.get('vysledek', '').lower()
+        if not res:
+            continue
+        try:
+            dt = datetime.strptime(t['cas_otevreni'], "%Y-%m-%d %H:%M")
+        except:
+            continue
+        try:
+            rrr = float(str(t.get('rrr', 1)).replace(',', '.'))
+        except:
+            rrr = 1.0
+        r_val = rrr if res == 'win' else (-1.0 if res == 'loss' else 0.0)
+        iso = dt.isocalendar()
+        parsed.append({
+            'dt': dt, 'res': res, 'rrr': rrr, 'r': r_val,
+            'week':  f"{iso[0]}-W{iso[1]:02d}",
+            'month': f"{dt.year}-{dt.month:02d}",
+        })
+
+    # Aktuální periody
+    iso_now    = now.isocalendar()
+    cur_week   = f"{iso_now[0]}-W{iso_now[1]:02d}"
+    cur_month  = f"{now.year}-{now.month:02d}"
+
+    # Agregace
+    def agg_by(key):
+        d = defaultdict(lambda: {'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
+        for p in parsed:
+            k = p[key]
+            d[k]['count']  += 1
+            d[k]['r']      += p['r']
+            if p['res'] == 'win':
+                d[k]['wins']    += 1
+                d[k]['gross_p'] += p['rrr']
+            elif p['res'] == 'loss':
+                d[k]['losses']  += 1
+                d[k]['gross_l'] += 1.0
+            else:
+                d[k]['be'] += 1
+        return d
+
+    week_data  = agg_by('week')
+    month_data = agg_by('month')
+
+    def wr_pct(s):
+        d = s['wins'] + s['losses']
+        return s['wins'] / d * 100 if d > 0 else 0.0
+
+    def pf_str(s):
+        if s['gross_l'] == 0:
+            return '∞' if s['gross_p'] > 0 else '—'
+        return f"{s['gross_p']/s['gross_l']:.2f}"
+
+    # Posledních N period (+ ujistit se že aktuální je vždy přítomná)
+    def last_n(data_dict, cur_key, n):
+        keys = sorted(data_dict.keys())
+        if cur_key not in keys:
+            keys.append(cur_key)
+            data_dict[cur_key]  # touch → create default
+        # keep last n, always include cur
+        if cur_key in keys[-n:]:
+            return keys[-n:]
+        return keys[-(n-1):] + [cur_key]
+
+    weeks_keys  = last_n(week_data,  cur_week,  10)
+    months_keys = last_n(month_data, cur_month, 13)
+
+    # ── Popisky period ────────────────────────────────────────────────────────
+    MESICE = ['','Led','Úno','Bře','Dub','Kvě','Čvn','Čvc','Srp','Zář','Říj','Lis','Pro']
+
+    def week_lbl(k):
+        try:
+            y, w = k.split('-W')
+            mon = datetime.strptime(f"{y}-W{w}-1", "%G-W%V-%u")
+            fri = mon + __import__('datetime').timedelta(days=4)
+            return f"{mon.day}.{mon.month}–{fri.day}.{fri.month}"
+        except:
+            return k
+
+    def week_lbl_full(k):
+        try:
+            y, w = k.split('-W')
+            mon = datetime.strptime(f"{y}-W{w}-1", "%G-W%V-%u")
+            fri = mon + __import__('datetime').timedelta(days=4)
+            return f"{mon.day}.{mon.month} – {fri.day}.{fri.month}.{fri.year}"
+        except:
+            return k
+
+    def month_lbl(k):
+        try:
+            y, m = k.split('-')
+            return f"{MESICE[int(m)]} {y}"
+        except:
+            return k
+
+    # ── KPI karty ────────────────────────────────────────────────────────────
+    def build_kpi(frame, title, subtitle, s):
+        for w in frame.winfo_children(): w.destroy()
+
+        wr  = wr_pct(s)
+        r   = s['r']
+        pf  = pf_str(s)
+        r_color  = '#22c55e' if r > 0 else ('#ef4444' if r < 0 else '#94a3b8')
+        wr_bg    = '#14532d' if wr >= 55 else ('#1e40af' if wr >= 45 else '#7f1d1d')
+
+        # Nadpis sekce
+        th = tk.Frame(frame, bg='#1e293b', pady=7)
+        th.pack(fill='x')
+        tk.Label(th, text=title,    font=('Segoe UI', 10, 'bold'), bg='#1e293b', fg='white').pack(side='left', padx=12)
+        tk.Label(th, text=subtitle, font=('Segoe UI', 8),          bg='#1e293b', fg='#64748b').pack(side='right', padx=12)
+
+        # Row karet
+        row = tk.Frame(frame, bg='#1e293b', padx=10, pady=10)
+        row.pack(fill='x')
+
+        card_data = [
+            ("Obchodů",  str(s['count']),        '#334155',  '#e2e8f0'),
+            ("Win Rate", f"{wr:.0f}%",            wr_bg,      '#ffffff'),
+            ("Celkem R", f"{r:+.2f}R",            '#1c3d2e' if r > 0 else '#3d1c1c', r_color),
+            ("✓ Win",    str(s['wins']),           '#14532d',  '#86efac'),
+            ("✗ Loss",   str(s['losses']),         '#7f1d1d',  '#fca5a5'),
+            ("PF",       pf,                       '#1e3a5f',  '#93c5fd'),
+        ]
+        for label, val, bg, fg in card_data:
+            c = tk.Frame(row, bg=bg, padx=12, pady=8)
+            c.pack(side='left', expand=True, fill='both', padx=3)
+            tk.Label(c, text=val,   font=('Segoe UI', 16, 'bold'), bg=bg, fg=fg).pack()
+            tk.Label(c, text=label, font=('Segoe UI', 7),           bg=bg, fg='#94a3b8').pack()
+
+    wk_s = week_data.get(cur_week,  {'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
+    mo_s = month_data.get(cur_month,{'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
+
+    build_kpi(periods_frames['kpi_week'],  "📆  TENTO TÝDEN",  week_lbl_full(cur_week), wk_s)
+    build_kpi(periods_frames['kpi_month'], "🗓️  TENTO MĚSÍC", month_lbl(cur_month),    mo_s)
+
+    # ── Bar chart helper ──────────────────────────────────────────────────────
+    def build_chart(fkey, title, keys, data_dict, lbl_fn, cur_key):
+        frame = periods_frames[fkey]
+        for w in frame.winfo_children(): w.destroy()
+
+        r_vals  = [data_dict[k]['r']     for k in keys]
+        wr_vals = [wr_pct(data_dict[k])  for k in keys]
+        labels  = [lbl_fn(k)             for k in keys]
+        colors  = []
+        for k, v in zip(keys, r_vals):
+            if k == cur_key:   colors.append('#60a5fa')   # modrá = aktuální týden/měsíc
+            elif v > 0:        colors.append('#22c55e')   # zelená = zisk
+            elif v < 0:        colors.append('#ef4444')   # červená = ztráta
+            else:              colors.append('#475569')   # šedá = nula
+
+        fig = Figure(figsize=(11, 2.8), dpi=90)
+        fig.patch.set_facecolor('#0f172a')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#0f172a')
+
+        bars = ax.bar(range(len(keys)), r_vals, color=colors, width=0.55, zorder=3)
+        # Hodnoty nad/pod sloupci
+        y_range = max(r_vals) - min(r_vals) if r_vals else 1
+        offset  = max(0.08, y_range * 0.03)
+        for bar, v in zip(bars, r_vals):
+            if v == 0: continue
+            ax.text(bar.get_x() + bar.get_width()/2.,
+                    v + (offset if v > 0 else -offset),
+                    f'{v:+.1f}R', ha='center',
+                    va='bottom' if v > 0 else 'top',
+                    fontsize=7, color='white', fontweight='bold')
+
+        ax.axhline(0, color='#334155', linewidth=0.9, zorder=2)
+        ax.set_xticks(range(len(keys)))
+        ax.set_xticklabels(labels, rotation=25, ha='right', fontsize=7.5, color='#94a3b8')
+        ax.tick_params(axis='y', colors='#64748b', labelsize=7.5)
+        for spine in ax.spines.values(): spine.set_color('#1e293b')
+        ax.set_ylabel('R', color='#64748b', fontsize=8)
+        ax.grid(axis='y', color='#1e293b', linewidth=0.8, zorder=1)
+        ax.set_title(title, color='#94a3b8', fontsize=9, fontweight='bold', pad=7)
+        fig.tight_layout(pad=1.0)
+
+        fc = FigureCanvasTkAgg(fig, master=frame)
+        fc.draw()
+        fc.get_tk_widget().pack(fill='x', padx=0, pady=0)
+        periods_canvases.append(fc)
+
+    build_chart('chart_week',  'Výkonnost po TÝDNECH  (modrá = aktuální)',
+                weeks_keys,  week_data,  week_lbl,  cur_week)
+    build_chart('chart_month', 'Výkonnost po MĚSÍCÍCH  (modrá = aktuální)',
+                months_keys, month_data, month_lbl, cur_month)
+
+    # ── Tabulka helper ────────────────────────────────────────────────────────
+    def build_table(fkey, title, keys, data_dict, lbl_fn, cur_key):
+        frame = periods_frames[fkey]
+        for w in frame.winfo_children(): w.destroy()
+
+        # Nadpis
+        th = tk.Frame(frame, bg='#1e293b', pady=7)
+        th.pack(fill='x')
+        tk.Label(th, text=title, font=('Segoe UI', 10, 'bold'),
+                 bg='#1e293b', fg='white').pack(side='left', padx=12)
+
+        # Záhlaví sloupců
+        COL = [('Období',14),('Obchody',7),('Win',5),('Loss',5),
+               ('BE',4),('Win %',7),('Celkem R',9),('PF',6)]
+        hrow = tk.Frame(frame, bg='#334155', pady=5)
+        hrow.pack(fill='x', padx=0)
+        for cname, cw in COL:
+            tk.Label(hrow, text=cname, font=('Segoe UI', 8, 'bold'),
+                     bg='#334155', fg='#94a3b8', width=cw, anchor='center').pack(side='left')
+
+        # Řádky dat (nejnovější nahoře)
+        for i, k in enumerate(reversed(keys)):
+            s   = data_dict[k]
+            cur = (k == cur_key)
+            row_bg = '#1e3a5f' if cur else ('#1e293b' if i%2==0 else '#0f172a')
+            row = tk.Frame(frame, bg=row_bg, pady=4)
+            row.pack(fill='x')
+
+            wr   = wr_pct(s)
+            r    = s['r']
+            pf   = pf_str(s)
+            r_fg = '#22c55e' if r > 0 else ('#ef4444' if r < 0 else '#94a3b8')
+            wr_fg= '#86efac' if wr >= 55 else ('#93c5fd' if wr >= 45 else '#fca5a5')
+
+            cells = [
+                (lbl_fn(k) + (' ◀' if cur else ''), '#60a5fa' if cur else '#e2e8f0', 14),
+                (str(s['count']),    '#e2e8f0', 7),
+                (str(s['wins']),     '#86efac', 5),
+                (str(s['losses']),   '#fca5a5', 5),
+                (str(s['be']),       '#94a3b8', 4),
+                (f"{wr:.0f}%",       wr_fg,     7),
+                (f"{r:+.2f}R",       r_fg,      9),
+                (pf,                 '#93c5fd', 6),
+            ]
+            for val, fg, cw in cells:
+                tk.Label(row, text=val, font=('Segoe UI', 9),
+                         bg=row_bg, fg=fg, width=cw, anchor='center').pack(side='left')
+
+    build_table('table_week',  '🗒️  DETAILNÍ PŘEHLED PO TÝDNECH',
+                weeks_keys,  week_data,  week_lbl_full, cur_week)
+    build_table('table_month', '🗒️  DETAILNÍ PŘEHLED PO MĚSÍCÍCH',
+                months_keys, month_data, month_lbl,     cur_month)
+
+
 def show_screenshot_dialog(prefill_callback):
     """Otevře dialog pro výběr screenshotu, analyzuje ho a zavolá callback s výsledky."""
     path = filedialog.askopenfilename(
@@ -4051,6 +4372,9 @@ def show_main_screen(p_name):
     tab5 = ttk.Frame(nb); nb.add(tab5, text='  MONTE CARLO  ')
     setup_monte_carlo_ui(tab5)
 
+    # TAB PERIODY (týden / měsíc)
+    tab_periods = ttk.Frame(nb); nb.add(tab_periods, text='  📅 PERIODY  ')
+
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
     nb.add(tab_tv, text='  TRADINGVIEW GRAF  ')
@@ -4073,17 +4397,20 @@ def show_main_screen(p_name):
 
     def on_tab_changed(event):
         try:
-            selected_tab_index = nb.index("current")
-            # Správné indexy záložek: 1-Analýza, 2-Galerie, 7-TradingView
-            if selected_tab_index == 1:
+            sel = nb.index("current")
+            if sel == 1:
                 update_statistics()
-            elif selected_tab_index == 2:
+            elif sel == 2:
                 update_gallery()
-            elif selected_tab_index == nb.index(tab_tv):
+            elif sel == nb.index(tab_periods):
+                if not tab_periods.winfo_children():
+                    setup_periods_tab(tab_periods)
+                else:
+                    update_periods_analysis()
+            elif sel == nb.index(tab_tv):
                 if not tab_tv.winfo_children():
                     setup_tradingview_tab(tab_tv)
         except tk.TclError:
-            # Může nastat při zavírání okna, ignorujeme
             pass
 
     nb.bind("<<NotebookTabChanged>>", on_tab_changed)
