@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.21"
+VERSION = "1.5.22"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.22 | Nový tmavý motiv — stejný design jako okno Správce účtů; Motiv Tmavý modrý; Klasický motiv zachován; Výchozí motiv změněn na Tmavý; Vylepšený ttk styling pro tmavé motivy
 1.5.21 | Pole Začátek a Konec účtu v správci účtů; Zobrazení datumu v seznamu účtů
 1.5.20 | Správce účtů — FTMO Challenge/Verifikace/Funded; Pole Účet ve formuláři; Tlačítko 🏦 ÚČTY v toolbaru; Per-účet statistiky v Analýze
 1.5.19 | Zvýšení verze pro testování update notifikace
@@ -383,6 +384,28 @@ def check_for_updates(silent=False, startup=False):
 # MOTIVY (THEMES)
 # ==============================================================================
 THEMES = {
+    # ── Tmavé motivy ──────────────────────────────────────────────────────────
+    "Tmavý": {
+        # Stejná paleta jako okno Správce účtů — Tailwind slate
+        "BG":"#0f172a","PANEL":"#1e293b","SURFACE":"#334155",
+        "TEXT":"#e2e8f0","SUBTEXT":"#94a3b8","ACCENT":"#60a5fa",
+        "WIN_BG":"#14532d","WIN_FG":"#86efac",
+        "LOSS_BG":"#7f1d1d","LOSS_FG":"#fca5a5",
+        "BE_BG":"#78350f","BE_FG":"#fde68a",
+        "BTN":"#334155","ENTRY":"#1e293b","BORDER":"#475569",
+        "SELECT_COLOR":"#1e293b","ttk":"clam",
+    },
+    "Tmavý modrý": {
+        # Hlubší modrá varianta
+        "BG":"#0a0f1e","PANEL":"#111827","SURFACE":"#1f2937",
+        "TEXT":"#f1f5f9","SUBTEXT":"#64748b","ACCENT":"#3b82f6",
+        "WIN_BG":"#052e16","WIN_FG":"#4ade80",
+        "LOSS_BG":"#450a0a","LOSS_FG":"#f87171",
+        "BE_BG":"#431407","BE_FG":"#fb923c",
+        "BTN":"#1f2937","ENTRY":"#111827","BORDER":"#374151",
+        "SELECT_COLOR":"#111827","ttk":"clam",
+    },
+    # ── Světlé motivy ─────────────────────────────────────────────────────────
     "Klasický": {
         "BG":"#f0f0f0","PANEL":"#f0f0f0","SURFACE":"#e0e0e0",
         "TEXT":"#1a1a1a","SUBTEXT":"#555555","ACCENT":"#0078d4",
@@ -419,7 +442,7 @@ def load_theme_name():
             t = open(THEME_FILE, encoding='utf-8').read().strip()
             if t in THEMES: return t
     except: pass
-    return "Klasický"
+    return "Tmavý"  # výchozí motiv
 
 def save_theme_name(name):
     try:
@@ -441,45 +464,110 @@ def apply_theme(name):
     DT_BTN=t["BTN"]; DT_ENTRY=t["ENTRY"]; DT_BORDER=t["BORDER"]
     save_theme_name(name)
 
-# Načti motiv při startu
+# Načti motiv při startu — výchozí je "Tmavý" pokud ještě nebyl vybrán jiný
 apply_theme(load_theme_name())
 
 def apply_dark_theme(root):
-    t = THEMES.get(load_theme_name(), THEMES["Klasický"])
+    t = THEMES.get(load_theme_name(), THEMES["Tmavý"])
     style = ttk.Style(root)
-    try: style.theme_use(t.get("ttk","default"))
+    ttk_theme = t.get("ttk", "clam")
+    try: style.theme_use(ttk_theme)
     except:
-        try: style.theme_use('default')
-        except: pass
-    style.configure('Treeview', rowheight=22, font=('Arial', 9),
+        try: style.theme_use('clam')
+        except:
+            try: style.theme_use('default')
+            except: pass
+
+    # ── Treeview ──────────────────────────────────────────────────────────────
+    style.configure('Treeview', rowheight=24, font=('Segoe UI', 9),
                     background=DT_ENTRY, foreground=DT_TEXT,
-                    fieldbackground=DT_ENTRY)
-    style.configure('Treeview.Heading', font=('Arial', 9, 'bold'),
-                    background=DT_SURFACE, foreground=DT_TEXT)
-    style.map('Treeview', background=[('selected', DT_ACCENT)],
+                    fieldbackground=DT_ENTRY, borderwidth=0)
+    style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'),
+                    background=DT_SURFACE, foreground=DT_TEXT,
+                    relief='flat', borderwidth=0)
+    style.map('Treeview',
+              background=[('selected', DT_ACCENT)],
               foreground=[('selected', '#ffffff')])
-    style.configure('TNotebook', background=DT_PANEL)
-    style.configure('TNotebook.Tab', background=DT_SURFACE, foreground=DT_TEXT, padding=[8,4])
-    style.map('TNotebook.Tab', background=[('selected', DT_BG)], foreground=[('selected', DT_ACCENT)])
-    style.configure('TCombobox', fieldbackground=DT_ENTRY, background=DT_SURFACE,
-                    foreground=DT_TEXT, selectbackground=DT_ACCENT)
+    style.map('Treeview.Heading',
+              background=[('active', DT_SURFACE)])
+
+    # ── Notebook (záložky) ────────────────────────────────────────────────────
+    style.configure('TNotebook', background=DT_BG, borderwidth=0)
+    style.configure('TNotebook.Tab',
+                    background=DT_SURFACE, foreground=DT_SUBTEXT,
+                    padding=[12, 6], font=('Segoe UI', 9))
+    style.map('TNotebook.Tab',
+              background=[('selected', DT_PANEL)],
+              foreground=[('selected', DT_ACCENT)])
+
+    # ── Combobox ──────────────────────────────────────────────────────────────
+    style.configure('TCombobox',
+                    fieldbackground=DT_ENTRY, background=DT_SURFACE,
+                    foreground=DT_TEXT, selectbackground=DT_ACCENT,
+                    selectforeground='#ffffff', insertcolor=DT_TEXT,
+                    borderwidth=1, relief='flat')
+    style.map('TCombobox',
+              fieldbackground=[('readonly', DT_ENTRY)],
+              foreground=[('readonly', DT_TEXT)],
+              selectbackground=[('readonly', DT_ACCENT)])
+
+    # ── Scrollbar ─────────────────────────────────────────────────────────────
+    style.configure('Vertical.TScrollbar',
+                    background=DT_SURFACE, troughcolor=DT_BG,
+                    borderwidth=0, arrowcolor=DT_SUBTEXT)
+    style.configure('Horizontal.TScrollbar',
+                    background=DT_SURFACE, troughcolor=DT_BG,
+                    borderwidth=0, arrowcolor=DT_SUBTEXT)
+
+    # ── PanedWindow sash ──────────────────────────────────────────────────────
+    style.configure('TPanedwindow', background=DT_BORDER)
+
+    # ── Globální widget defaults ──────────────────────────────────────────────
     root.configure(bg=DT_BG)
-    root.option_add('*Listbox.BorderWidth', 1)
-    root.option_add('*Button.Relief', 'flat')
-    root.option_add('*Button.BorderWidth', 0)
-    root.option_add('*Button.Cursor', 'hand2')
-    root.option_add('*Radiobutton.Background', DT_BG)
-    root.option_add('*Radiobutton.Foreground', DT_TEXT)
+    root.option_add('*Font', 'Segoe\\ UI 9')
+    root.option_add('*Background',          DT_BG)
+    root.option_add('*Foreground',          DT_TEXT)
+    root.option_add('*Label.Background',    DT_BG)
+    root.option_add('*Label.Foreground',    DT_TEXT)
+    root.option_add('*Frame.Background',    DT_BG)
+    root.option_add('*LabelFrame.Background', DT_PANEL)
+    root.option_add('*LabelFrame.Foreground', DT_TEXT)
+    root.option_add('*Entry.Background',    DT_ENTRY)
+    root.option_add('*Entry.Foreground',    DT_TEXT)
+    root.option_add('*Entry.InsertBackground', DT_TEXT)
+    root.option_add('*Entry.Relief',        'flat')
+    root.option_add('*Entry.BorderWidth',   1)
+    root.option_add('*Text.Background',     DT_ENTRY)
+    root.option_add('*Text.Foreground',     DT_TEXT)
+    root.option_add('*Text.InsertBackground', DT_TEXT)
+    root.option_add('*Text.Relief',         'flat')
+    root.option_add('*Button.Relief',       'flat')
+    root.option_add('*Button.BorderWidth',  0)
+    root.option_add('*Button.Cursor',       'hand2')
+    root.option_add('*Button.Background',   DT_BTN)
+    root.option_add('*Button.Foreground',   DT_TEXT)
+    root.option_add('*Button.activeBackground', DT_SURFACE)
+    root.option_add('*Button.activeForeground', DT_TEXT)
+    root.option_add('*Listbox.Background',  DT_ENTRY)
+    root.option_add('*Listbox.Foreground',  DT_TEXT)
+    root.option_add('*Listbox.SelectBackground', DT_ACCENT)
+    root.option_add('*Listbox.SelectForeground', '#ffffff')
+    root.option_add('*Listbox.BorderWidth', 0)
+    root.option_add('*Radiobutton.Background',       DT_BG)
+    root.option_add('*Radiobutton.Foreground',       DT_TEXT)
     root.option_add('*Radiobutton.activeBackground', DT_BG)
-    root.option_add('*Radiobutton.selectColor', t["SELECT_COLOR"])
-    root.option_add('*Checkbutton.Background', DT_PANEL)
-    root.option_add('*Checkbutton.Foreground', DT_TEXT)
+    root.option_add('*Radiobutton.activeForeground', DT_TEXT)
+    root.option_add('*Radiobutton.selectColor',      t["SELECT_COLOR"])
+    root.option_add('*Checkbutton.Background',       DT_PANEL)
+    root.option_add('*Checkbutton.Foreground',       DT_TEXT)
     root.option_add('*Checkbutton.activeBackground', DT_PANEL)
-    root.option_add('*Checkbutton.selectColor', t["SELECT_COLOR"])
-    root.option_add('*Menu.Background', DT_PANEL)
-    root.option_add('*Menu.Foreground', DT_TEXT)
-    root.option_add('*Menu.ActiveBackground', DT_SURFACE)
-    root.option_add('*Menu.ActiveForeground', DT_ACCENT)
+    root.option_add('*Checkbutton.activeForeground', DT_TEXT)
+    root.option_add('*Checkbutton.selectColor',      t["SELECT_COLOR"])
+    root.option_add('*Menu.Background',        DT_PANEL)
+    root.option_add('*Menu.Foreground',        DT_TEXT)
+    root.option_add('*Menu.ActiveBackground',  DT_SURFACE)
+    root.option_add('*Menu.ActiveForeground',  DT_ACCENT)
+    root.option_add('*Menu.Relief',            'flat')
     root.option_add('*Canvas.HighlightThickness', 0)
     root.option_add('*Entry.Background', DT_ENTRY)
     root.option_add('*Entry.Foreground', DT_TEXT)
