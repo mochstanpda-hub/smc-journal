@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.22"
+VERSION = "1.5.23"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.23 | Intro obrazovka plně přizpůsobena motivu — karty projektů, pozadí a texty reagují na zvolený motiv; Tmavý a Tmavý modrý motiv dostupný přímo z intro obrazovky; Přepínač motivů na intro obrazovce obsahuje všechny 5 motivů
 1.5.22 | Nový tmavý motiv — stejný design jako okno Správce účtů; Motiv Tmavý modrý; Klasický motiv zachován; Výchozí motiv změněn na Tmavý; Vylepšený ttk styling pro tmavé motivy
 1.5.21 | Pole Začátek a Konec účtu v správci účtů; Zobrazení datumu v seznamu účtů
 1.5.20 | Správce účtů — FTMO Challenge/Verifikace/Funded; Pole Účet ve formuláři; Tlačítko 🏦 ÚČTY v toolbaru; Per-účet statistiky v Analýze
@@ -4244,25 +4245,44 @@ def open_settings_window(initial_tab=0):
     _th_frame.pack(fill='both', expand=True)
     tk.Label(_th_frame, text="Barevný motiv aplikace", bg=DT_BG, fg=DT_TEXT,
              font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 16))
-    _theme_colors = {
-        "Klasický":         ("#0078d4", "#ffffff"),
-        "Šedý profesionál": ("#2e86c1", "#ffffff"),
-        "Světlý elegantní": ("#0d6efd", "#ffffff"),
-    }
+    _ALL_THEMES_BTN = [
+        # (název,             btn_bg,    btn_fg,    popis)
+        ("Tmavý",            "#1e293b", "#60a5fa", "Tmavé pozadí — slate paleta"),
+        ("Tmavý modrý",      "#111827", "#3b82f6", "Hlubší tmavá — noční varianta"),
+        ("Klasický",         "#e0e0e0", "#1a1a1a", "Světlý klasický Windows styl"),
+        ("Šedý profesionál", "#cfd4d8", "#1c2833", "Světlý šedý profesionální"),
+        ("Světlý elegantní", "#ffffff", "#0d6efd", "Čistě bílý elegantní"),
+    ]
     cur_theme = load_theme_name()
+
+    # Oddělovač tmavé / světlé
+    tk.Label(_th_frame, text="— TMAVÉ MOTIVY —", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 8)).pack(anchor='w', pady=(0, 4))
+
     def _sw_switch_theme(name):
         apply_theme(name)
         apply_dark_theme(root)
         sw.destroy()
         show_intro_screen() if not current_project_name else show_main_screen(current_project_name)
-    for tname, (tbg, tfg) in _theme_colors.items():
+
+    for i, (tname, tbg, tfg, tdesc) in enumerate(_ALL_THEMES_BTN):
+        if i == 2:  # před prvním světlým
+            tk.Frame(_th_frame, bg=DT_BORDER, height=1).pack(fill='x', pady=8)
+            tk.Label(_th_frame, text="— SVĚTLÉ MOTIVY —", bg=DT_BG, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 8)).pack(anchor='w', pady=(0, 4))
         is_active = (tname == cur_theme)
-        tk.Button(_th_frame, text=("✔  " if is_active else "     ") + tname,
+        row = tk.Frame(_th_frame, bg=DT_BG)
+        row.pack(anchor='w', pady=3)
+        tk.Button(row,
+                  text=("✔  " if is_active else "     ") + tname,
                   bg=tbg, fg=tfg,
                   font=('Segoe UI', 11, 'bold' if is_active else 'normal'),
-                  relief='solid' if is_active else 'flat', bd=2 if is_active else 0,
-                  padx=24, pady=10, cursor='hand2',
-                  command=lambda n=tname: _sw_switch_theme(n)).pack(anchor='w', pady=5)
+                  relief='solid' if is_active else 'flat',
+                  bd=2 if is_active else 0,
+                  padx=24, pady=10, cursor='hand2', width=22,
+                  command=lambda n=tname: _sw_switch_theme(n)).pack(side='left')
+        tk.Label(row, text=tdesc, bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 9)).pack(side='left', padx=12)
 
     # ── Tab: Aktualizace ─────────────────────────────────────────────────────
     t_upd = ttk.Frame(nb); nb.add(t_upd, text='  🔄 Aktualizace  ')
@@ -5130,13 +5150,13 @@ def import_project_from_folder():
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
-    main_container = tk.Frame(root, bg="#ecf0f1"); main_container.pack(fill="both", expand=True)
+    main_container = tk.Frame(root, bg=DT_BG); main_container.pack(fill="both", expand=True)
 
     # Název — kliknutím na ✏️ se dá přepsat
-    title_frame = tk.Frame(main_container, bg="#ecf0f1"); title_frame.pack(pady=(35, 5))
+    title_frame = tk.Frame(main_container, bg=DT_BG); title_frame.pack(pady=(35, 5))
     title_var = tk.StringVar(value=load_app_title())
-    title_lbl = tk.Label(title_frame, textvariable=title_var, bg="#ecf0f1",
-                         font=('Arial', 24, 'bold'), fg="#2c3e50")
+    title_lbl = tk.Label(title_frame, textvariable=title_var, bg=DT_BG,
+                         font=('Arial', 24, 'bold'), fg=DT_TEXT)
     title_lbl.pack(side='left')
 
     def edit_title():
@@ -5147,59 +5167,63 @@ def show_intro_screen():
             save_app_title(new.strip())
             root.title(new.strip())
 
-    tk.Button(title_frame, text="✏️", command=edit_title, bg="#ecf0f1", fg="#95a5a6",
+    tk.Button(title_frame, text="✏️", command=edit_title, bg=DT_BG, fg=DT_SUBTEXT,
               relief='flat', font=('Arial', 14), cursor='hand2',
-              activebackground="#ecf0f1").pack(side='left', padx=(8, 0))
-    tk.Label(main_container, text=f"v{VERSION}", bg="#ecf0f1", fg="#bdc3c7",
+              activebackground=DT_BG).pack(side='left', padx=(8, 0))
+    tk.Label(main_container, text=f"v{VERSION}", bg=DT_BG, fg=DT_SUBTEXT,
              font=('Segoe UI', 9)).pack(side='bottom', anchor='e', padx=18, pady=6)
-    grid_frame = tk.Frame(main_container, bg="#ecf0f1"); grid_frame.pack(expand=True)
-    
-    f1 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f1.grid(row=0, column=0, padx=20, pady=20); f1.pack_propagate(False)
+    grid_frame = tk.Frame(main_container, bg=DT_BG); grid_frame.pack(expand=True)
+
+    f1 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f1.grid(row=0, column=0, padx=20, pady=20); f1.pack_propagate(False)
     tk.Label(f1, text="⛏ BACKTEST", font=('Arial', 16, 'bold'), bg="#34495e", fg="white", pady=10).pack(fill="x")
-    tk.Label(f1, text="Analýza historických dat.", bg="white", fg="gray", pady=10).pack()
-    lb1 = tk.Listbox(f1, height=8, width=30, borderwidth=0, bg="#f9f9f9"); lb1.pack(pady=10, padx=10)
+    tk.Label(f1, text="Analýza historických dat.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
+    lb1 = tk.Listbox(f1, height=8, width=30, borderwidth=0, bg=DT_SURFACE, fg=DT_TEXT,
+                     selectbackground=DT_ACCENT, selectforeground="#ffffff"); lb1.pack(pady=10, padx=10)
     if os.path.exists(DIR_BACKTEST):
         for p in sorted(os.listdir(DIR_BACKTEST)): lb1.insert(tk.END, p)
     tk.Button(f1, text="+ NOVÝ BACKTEST", command=lambda: create_new_project("BACKTEST"), bg="#2ecc71", fg="white").pack(fill="x", padx=20, pady=5)
     tk.Button(f1, text="OTEVŘÍT", command=lambda: open_project(lb1, "BACKTEST"), bg="#34495e", fg="white").pack(fill="x", padx=20, pady=(0, 5))
     tk.Button(f1, text="🗑 SMAZAT PROJEKT", command=lambda: delete_project(lb1, "BACKTEST"), bg="#e74c3c", fg="white").pack(fill="x", padx=20, pady=(0, 15))
 
-    f2 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f2.grid(row=0, column=1, padx=20, pady=20); f2.pack_propagate(False)
+    f2 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f2.grid(row=0, column=1, padx=20, pady=20); f2.pack_propagate(False)
     tk.Label(f2, text="📈 REAL TRADING", font=('Arial', 16, 'bold'), bg="#2980b9", fg="white", pady=10).pack(fill="x")
-    tk.Label(f2, text="FTMO / Prop Firm management.", bg="white", fg="gray", pady=10).pack()
-    lb2 = tk.Listbox(f2, height=8, width=30, borderwidth=0, bg="#f9f9f9"); lb2.pack(pady=10, padx=10)
+    tk.Label(f2, text="FTMO / Prop Firm management.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
+    lb2 = tk.Listbox(f2, height=8, width=30, borderwidth=0, bg=DT_SURFACE, fg=DT_TEXT,
+                     selectbackground=DT_ACCENT, selectforeground="#ffffff"); lb2.pack(pady=10, padx=10)
     if os.path.exists(DIR_REAL):
         for p in sorted(os.listdir(DIR_REAL)): lb2.insert(tk.END, p)
     tk.Button(f2, text="+ NOVÝ PROJEKT", command=lambda: create_new_project("REAL"), bg="#2ecc71", fg="white").pack(fill="x", padx=20, pady=5)
     tk.Button(f2, text="OTEVŘÍT", command=lambda: open_project(lb2, "REAL"), bg="#2980b9", fg="white").pack(fill="x", padx=20, pady=(0, 5))
     tk.Button(f2, text="🗑 SMAZAT PROJEKT", command=lambda: delete_project(lb2, "REAL"), bg="#e74c3c", fg="white").pack(fill="x", padx=20, pady=(0, 15))
 
-    f3 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f3.grid(row=0, column=2, padx=20, pady=20); f3.pack_propagate(False)
+    f3 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f3.grid(row=0, column=2, padx=20, pady=20); f3.pack_propagate(False)
     tk.Label(f3, text="🧠 DENÍK", font=('Arial', 16, 'bold'), bg="#8e44ad", fg="white", pady=10).pack(fill="x")
-    tk.Label(f3, text="Psychologie a emoce.", bg="white", fg="gray", pady=10).pack()
-    tk.Label(f3, text="📅", font=('Arial', 50), bg="white").pack(pady=30)
+    tk.Label(f3, text="Psychologie a emoce.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
+    tk.Label(f3, text="📅", font=('Arial', 50), bg=DT_PANEL, fg=DT_TEXT).pack(pady=30)
     tk.Button(f3, text="OTEVŘÍT DENÍK", command=show_journal_screen, bg="#8e44ad", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
     # ── Přepínač motivů ─────────────────────────────────────────────────────
     # Import projektu tlačítko (vedle motivů)
-    bottom_bar = tk.Frame(main_container, bg="#ecf0f1")
+    bottom_bar = tk.Frame(main_container, bg=DT_BG)
     bottom_bar.pack(side="bottom", pady=12)
 
     tk.Button(bottom_bar, text="📂  Importovat projekt ze složky",
               command=import_project_from_folder,
-              bg='#2980b9', fg='white', font=('Segoe UI', 9, 'bold'),
+              bg=DT_ACCENT, fg="#ffffff", font=('Segoe UI', 9, 'bold'),
               padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 20))
 
-    theme_bar = tk.Frame(bottom_bar, bg="#ecf0f1")
+    theme_bar = tk.Frame(bottom_bar, bg=DT_BG)
     theme_bar.pack(side='left')
-    tk.Label(theme_bar, text="🎨 MOTIV:", bg="#ecf0f1", fg="#555",
+    tk.Label(theme_bar, text="🎨 MOTIV:", bg=DT_BG, fg=DT_SUBTEXT,
              font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(0, 8))
 
-    # Barvy náhledu pro každý motiv (BTN_BG, BTN_FG)
-    _theme_colors = {
-        "Klasický":          ("#0078d4", "#ffffff"),
-        "Šedý profesionál":  ("#2e86c1", "#ffffff"),
-        "Světlý elegantní":  ("#0d6efd", "#ffffff"),
-    }
+    # (name, preview_bg, preview_fg, description) — všechny motivy
+    _ALL_THEMES_BTN = [
+        ("Tmavý",            "#1e293b", "#60a5fa", "Tmavé pozadí — slate paleta"),
+        ("Tmavý modrý",      "#111827", "#3b82f6", "Hlubší tmavá — noční varianta"),
+        ("Klasický",         "#e0e0e0", "#1a1a1a", "Světlý klasický Windows styl"),
+        ("Šedý profesionál", "#cfd4d8", "#1c2833", "Světlý šedý profesionální"),
+        ("Světlý elegantní", "#ffffff", "#0d6efd", "Čistě bílý elegantní"),
+    ]
     current_theme = load_theme_name()
 
     def _switch_theme(name):
@@ -5207,7 +5231,7 @@ def show_intro_screen():
         apply_dark_theme(root)
         show_intro_screen()
 
-    for tname, (tbg, tfg) in _theme_colors.items():
+    for tname, tbg, tfg, _tdesc in _ALL_THEMES_BTN:
         is_active = (tname == current_theme)
         btn = tk.Button(
             theme_bar, text=("✔  " if is_active else "  ") + tname,
@@ -5218,12 +5242,12 @@ def show_intro_screen():
             padx=14, pady=5, cursor='hand2',
             command=lambda n=tname: _switch_theme(n)
         )
-        btn.pack(side='left', padx=5)
+        btn.pack(side='left', padx=4)
 
-    f4 = tk.Frame(grid_frame, bg="white", relief="raised", borderwidth=2, width=300, height=400); f4.grid(row=0, column=3, padx=20, pady=20); f4.pack_propagate(False)
+    f4 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f4.grid(row=0, column=3, padx=20, pady=20); f4.pack_propagate(False)
     tk.Label(f4, text="📋 STRATEGIE", font=('Arial', 16, 'bold'), bg="#e67e22", fg="white", pady=10).pack(fill="x")
-    tk.Label(f4, text="Pravidla a poznámky.", bg="white", fg="gray", pady=10).pack()
-    tk.Label(f4, text="✍️", font=('Arial', 50), bg="white").pack(pady=30)
+    tk.Label(f4, text="Pravidla a poznámky.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
+    tk.Label(f4, text="✍️", font=('Arial', 50), bg=DT_PANEL, fg=DT_TEXT).pack(pady=30)
     tk.Button(f4, text="OTEVŘÍT PRAVIDLA", command=show_global_rules_screen, bg="#e67e22", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
 
 def create_new_project(mode):
