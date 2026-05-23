@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.24"
+VERSION = "1.5.25"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.25 | Okno Co je nového — zobrazí se automaticky po aktualizaci s přehledem všech změn od předchozí verze; Funguje i při přeskočení více verzí najednou; Zobrazí se jen jednou při prvním spuštění nové verze; Verze se ukládá do last_version.txt
 1.5.24 | Redesign tmavého motivu — harmonická slate paleta bez křiklavých barev; Toolbar sjednocen (jedno tlačítko = jeden styl); TAKE PROFIT a STOP LOSS labely reagují na motiv; Intro karty projektů mají jednotnou barvu hlavičky; Vylepšené WIN/LOSS/BE odstíny
 1.5.23 | Intro obrazovka plně přizpůsobena motivu — karty projektů, pozadí a texty reagují na zvolený motiv; Tmavý a Tmavý modrý motiv dostupný přímo z intro obrazovky; Přepínač motivů na intro obrazovce obsahuje všechny 5 motivů
 1.5.22 | Nový tmavý motiv — stejný design jako okno Správce účtů; Motiv Tmavý modrý; Klasický motiv zachován; Výchozí motiv změněn na Tmavý; Vylepšený ttk styling pro tmavé motivy
@@ -436,7 +437,9 @@ THEMES = {
         "SELECT_COLOR":"#ffffff","ttk":"vista",
     },
 }
-THEME_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys,'frozen',False) else os.path.dirname(sys.executable), 'projects', 'theme.txt')
+_SETTINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys,'frozen',False) else os.path.dirname(sys.executable), 'projects')
+THEME_FILE        = os.path.join(_SETTINGS_DIR, 'theme.txt')
+LAST_VERSION_FILE = os.path.join(_SETTINGS_DIR, 'last_version.txt')
 
 def load_theme_name():
     try:
@@ -468,6 +471,152 @@ def apply_theme(name):
 
 # Načti motiv při startu — výchozí je "Tmavý" pokud ještě nebyl vybrán jiný
 apply_theme(load_theme_name())
+
+# ==============================================================================
+# CO JE NOVÉHO — zobrazit po aktualizaci
+# ==============================================================================
+
+def load_last_version():
+    """Vrátí verzi z minulého spuštění (nebo '' pokud soubor neexistuje)."""
+    try:
+        if os.path.exists(LAST_VERSION_FILE):
+            return open(LAST_VERSION_FILE, encoding='utf-8').read().strip()
+    except: pass
+    return ''
+
+def save_last_version(ver):
+    """Uloží aktuální verzi jako 'naposledy spuštěnou'."""
+    try:
+        os.makedirs(_SETTINGS_DIR, exist_ok=True)
+        open(LAST_VERSION_FILE, 'w', encoding='utf-8').write(ver)
+    except: pass
+
+def _parse_local_changelog_since(old_ver):
+    """
+    Parsuje lokální CHANGELOG string a vrátí položky pro všechny verze
+    NOVĚJŠÍ než old_ver (ale nejvýše VERSION).
+    Vrátí list of (verze_str, [položky]) seřazený od nejnovější.
+    """
+    import re
+    def vt(v):
+        try: return tuple(int(x) for x in str(v).strip().split('.'))
+        except: return (0,)
+    old_t = vt(old_ver)
+    entries = []
+    for line in CHANGELOG.splitlines():
+        line = line.strip()
+        if not line: continue
+        m = re.match(r'^(\d+\.\d+\.\d+)\s*\|\s*(.+)$', line)
+        if not m: continue
+        ver, changes_raw = m.group(1), m.group(2)
+        if vt(ver) > old_t:
+            items = [c.strip() for c in changes_raw.split(';') if c.strip()]
+            entries.append((ver, items))
+    entries.sort(key=lambda x: vt(x[0]), reverse=True)
+    return entries
+
+def show_whats_new(old_ver, entries):
+    """
+    Zobrazí okno 'Co je nového' se všemi změnami od old_ver do VERSION.
+    Volat po zobrazení hlavního okna.
+    """
+    n_items = sum(len(ch) for _, ch in entries)
+    n_vers  = len(entries)
+    win_h   = min(680, 180 + n_vers * 34 + n_items * 22)
+
+    win = tk.Toplevel(root)
+    win.title("Co je nového")
+    win.configure(bg=DT_BG)
+    win.geometry(f"560x{win_h}")
+    win.minsize(560, 300)
+    win.resizable(False, True)
+    win.lift(); win.focus_set()
+    # Vystřed na rodiče
+    root.update_idletasks()
+    rx, ry = root.winfo_x(), root.winfo_y()
+    rw, rh = root.winfo_width(), root.winfo_height()
+    wx, wy = rx + (rw - 560) // 2, ry + (rh - win_h) // 2
+    win.geometry(f"560x{win_h}+{wx}+{wy}")
+
+    # ── Hlavička ──────────────────────────────────────────────────────────────
+    hdr = tk.Frame(win, bg=DT_ACCENT, pady=14)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="🎉  Co je nového", bg=DT_ACCENT, fg='#ffffff',
+             font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
+    tk.Label(hdr, text=f"v{old_ver}  →  v{VERSION}", bg=DT_ACCENT,
+             fg='#dbeafe', font=('Segoe UI', 10)).pack(side='right', padx=18)
+
+    # ── Scrollovatelný obsah ─────────────────────────────────────────────────
+    outer = tk.Frame(win, bg=DT_BG)
+    outer.pack(fill='both', expand=True)
+    canv = tk.Canvas(outer, bg=DT_BG, highlightthickness=0)
+    scb  = ttk.Scrollbar(outer, orient='vertical', command=canv.yview)
+    canv.configure(yscrollcommand=scb.set)
+    canv.pack(side='left', fill='both', expand=True)
+    scb.pack(side='right', fill='y')
+    body = tk.Frame(canv, bg=DT_BG, padx=20, pady=16)
+    canv.create_window((0, 0), window=body, anchor='nw')
+    body.bind("<Configure>", lambda e: canv.configure(scrollregion=canv.bbox("all")))
+    canv.bind("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+    for ver, items in entries:
+        # Verze záhlaví
+        vh = tk.Frame(body, bg=DT_SURFACE, pady=6, padx=12)
+        vh.pack(fill='x', pady=(0, 3))
+        tk.Label(vh, text=f"  Verze {ver}", bg=DT_SURFACE, fg=DT_ACCENT,
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        # Položky
+        for item in items:
+            if not item.strip(): continue
+            row = tk.Frame(body, bg=DT_BG, padx=12)
+            row.pack(fill='x', pady=1)
+            tk.Label(row, text="·", bg=DT_BG, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 10)).pack(side='left', padx=(0, 8))
+            tk.Label(row, text=item.strip(), bg=DT_BG, fg=DT_TEXT,
+                     font=('Segoe UI', 9), wraplength=470,
+                     justify='left', anchor='w').pack(side='left', fill='x', expand=True)
+        # Oddělovač
+        tk.Frame(body, bg=DT_BORDER, height=1).pack(fill='x', pady=(4, 6))
+
+    # ── Zavřít ────────────────────────────────────────────────────────────────
+    bf = tk.Frame(win, bg=DT_BG, padx=20, pady=10)
+    bf.pack(fill='x', side='bottom')
+    tk.Button(bf, text="✓  Super, zavřít", command=win.destroy,
+              bg=DT_ACCENT, fg='#ffffff',
+              font=('Segoe UI', 10, 'bold'), padx=18, pady=8,
+              relief='flat', cursor='hand2').pack(side='right')
+
+_whats_new_shown = False   # Zobrazit jen jednou za celé spuštění
+
+def check_whats_new():
+    """
+    Porovná aktuální VERSION s poslední spuštěnou verzí.
+    Pokud se liší → zobrazí okno s novinkama a uloží aktuální verzi.
+    Volat po zobrazení hlavního okna (show_intro_screen).
+    Zobrazí se max. jednou za celé spuštění programu.
+    """
+    global _whats_new_shown
+    if _whats_new_shown:
+        return
+    last = load_last_version()
+    def vt(v):
+        try: return tuple(int(x) for x in str(v).strip().split('.'))
+        except: return (0,)
+
+    if not last:
+        # První spuštění — jen ulož verzi, nic nezobrazuj
+        save_last_version(VERSION)
+        _whats_new_shown = True
+        return
+
+    if vt(VERSION) > vt(last):
+        entries = _parse_local_changelog_since(last)
+        save_last_version(VERSION)
+        _whats_new_shown = True
+        if entries:
+            root.after(400, lambda: show_whats_new(last, entries))
+    else:
+        _whats_new_shown = True
 
 def apply_dark_theme(root):
     t = THEMES.get(load_theme_name(), THEMES["Tmavý"])
@@ -5262,6 +5411,9 @@ def show_intro_screen():
     tk.Label(f4, text="Pravidla a poznámky.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
     tk.Label(f4, text="✍️", font=('Arial', 50), bg=DT_PANEL, fg=DT_TEXT).pack(pady=30)
     tk.Button(f4, text="OTEVŘÍT PRAVIDLA", command=show_global_rules_screen, bg="#e67e22", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
+
+    # Zkontrolovat novinky po aktualizaci (jen jednou po updatu, 600ms po vykreslení)
+    root.after(600, check_whats_new)
 
 def create_new_project(mode):
     n = simpledialog.askstring(f"Nový {mode}", "Název projektu:")
