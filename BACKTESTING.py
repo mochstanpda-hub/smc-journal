@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.20"
+VERSION = "1.5.21"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.21 | Pole Začátek a Konec účtu v správci účtů; Zobrazení datumu v seznamu účtů
 1.5.20 | Správce účtů — FTMO Challenge/Verifikace/Funded; Pole Účet ve formuláři; Tlačítko 🏦 ÚČTY v toolbaru; Per-účet statistiky v Analýze
 1.5.19 | Zvýšení verze pro testování update notifikace
 1.5.18 | Changelog v update dialogu — co je nového při každé aktualizaci; Startup automatická kontrola s dialogem jen při nové verzi; Scrollovatelný changelog s přehledem změn
@@ -3044,7 +3045,7 @@ def open_accounts_manager():
     """Otevře okno správce účtů."""
     win = tk.Toplevel(root)
     win.title("🏦 Správce účtů")
-    win.geometry("820x560")
+    win.geometry("960x580")
     win.configure(bg='#0f172a')
     win.resizable(True, True)
     win.grab_set()
@@ -3062,7 +3063,8 @@ def open_accounts_manager():
     cols_frame = tk.Frame(win, bg='#1e293b', pady=6)
     cols_frame.pack(fill='x', padx=14, pady=(0, 2))
     col_defs = [('Název účtu', 220), ('Typ', 90), ('Firma', 100),
-                ('Velikost', 90), ('Měna', 55), ('Status', 95), ('Poznámka', 140)]
+                ('Velikost', 90), ('Měna', 55), ('Status', 95),
+                ('Začátek → Konec', 154), ('Poznámka', 112)]
     for cname, cw in col_defs:
         tk.Label(cols_frame, text=cname, font=('Segoe UI', 8, 'bold'),
                  bg='#1e293b', fg='#94a3b8', width=cw//7, anchor='center').pack(side='left')
@@ -3113,10 +3115,20 @@ def open_accounts_manager():
             tk.Label(stf, text=st, font=('Segoe UI', 8, 'bold'),
                      bg=st_bg, fg=st_fg).pack()
 
+            # Datum začátek → konec
+            ds = acc.get('datum_start', '')
+            dk = acc.get('datum_konec', '')
+            if ds or dk:
+                datum_str = f"{ds or '?'}  →  {dk or '…'}"
+            else:
+                datum_str = ''
+            tk.Label(row, text=datum_str, font=('Segoe UI', 8), bg=row_bg,
+                     fg='#60a5fa', width=22, anchor='center').pack(side='left', padx=4)
+
             # Poznámka
-            pozn = acc.get('poznamka', '')[:22] + ('…' if len(acc.get('poznamka', '')) > 22 else '')
+            pozn = acc.get('poznamka', '')[:18] + ('…' if len(acc.get('poznamka', '')) > 18 else '')
             tk.Label(row, text=pozn, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#64748b', width=20, anchor='w').pack(side='left', padx=4)
+                     fg='#64748b', width=16, anchor='w').pack(side='left', padx=2)
 
             # Akce
             btn_f = tk.Frame(row, bg=row_bg)
@@ -3151,7 +3163,7 @@ def open_accounts_manager():
         is_new = acc_or_none is None
         dlg = tk.Toplevel(win)
         dlg.title("Nový účet" if is_new else f"Upravit: {acc_or_none.get('nazev','')}")
-        dlg.geometry("440x480")
+        dlg.geometry("440x580")
         dlg.configure(bg='#0f172a')
         dlg.grab_set()
 
@@ -3186,13 +3198,25 @@ def open_accounts_manager():
                 return c
             return _make
 
-        _row("Název účtu:", 'nazev',    _entry,                  'Můj FTMO Challenge')
-        _row("Typ:",        'typ',      _combo(ACCOUNT_TYPES),   'Challenge')
-        _row("Prop firma:", 'firma',    _combo(ACCOUNT_FIRMS),   'FTMO')
-        _row("Velikost ($:","velikost", _entry,                  '100000')
-        _row("Měna:",       'mena',     _combo(['USD','EUR','GBP','CZK','GBP']), 'USD')
-        _row("Status:",     'status',   _combo(ACCOUNT_STATUSES),'Aktivní')
-        _row("Poznámka:",   'poznamka', _entry,                  '')
+        _row("Název účtu:", 'nazev',       _entry,                  'Můj FTMO Challenge')
+        _row("Typ:",        'typ',         _combo(ACCOUNT_TYPES),   'Challenge')
+        _row("Prop firma:", 'firma',       _combo(ACCOUNT_FIRMS),   'FTMO')
+        _row("Velikost ($):",'velikost',  _entry,                  '100000')
+        _row("Měna:",       'mena',        _combo(['USD','EUR','GBP','CZK']), 'USD')
+        _row("Status:",     'status',      _combo(ACCOUNT_STATUSES),'Aktivní')
+
+        # Oddělovač
+        tk.Frame(form, bg='#334155', height=1).pack(fill='x', pady=6)
+        tk.Label(form, text="Datum začátku a konce účtu (YYYY-MM-DD):",
+                 font=('Segoe UI', 8), bg='#1e293b', fg='#64748b').pack(anchor='w', pady=(0,4))
+
+        _row("Začátek účtu:", 'datum_start', _entry, '')
+        _row("Konec účtu:",   'datum_konec', _entry, '')
+        tk.Label(form, text="Formát: 2025-01-15  (nebo nechej prázdné)",
+                 font=('Segoe UI', 7), bg='#1e293b', fg='#475569').pack(anchor='w', pady=(0,4))
+
+        tk.Frame(form, bg='#334155', height=1).pack(fill='x', pady=6)
+        _row("Poznámka:",   'poznamka', _entry, '')
 
         def _save():
             data = {}
