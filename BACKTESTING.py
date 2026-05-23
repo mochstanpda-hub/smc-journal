@@ -60,42 +60,69 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.17"
+VERSION = "1.5.18"
+
+# CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
+# Formát: verze | Změna 1; Změna 2; Změna 3
+CHANGELOG = """\
+1.5.18 | Changelog v update dialogu — co je nového při každé aktualizaci; Startup automatická kontrola s dialogem jen při nové verzi; Scrollovatelný changelog s přehledem změn
+1.5.17 | Nová záložka 📅 PERIODY — týdenní a měsíční přehled výkonnosti; Bar charty posledních 10 týdnů / 13 měsíců; KPI karty (Win Rate, Celkem R, Profit Factor); Detailní tabulka s historií
+1.5.16 | Vylepšená OCR pro tmavé TradingView téma (Tomáš); Ukládání debug PNG z Tesseractu; Oprava _is_plausible pro EURUSD; Rozšíření OCR pruhu na 5 %
+1.5.15 | Oprava detekce časů v dark-bg screenshotech (Feb'25 bez mezery); Rozšíření Entry HSV rozsahu pro teal barvu; Zúžení OCR pruhu pro tmavé téma
+1.5.14 | Podpora tmavého motivu TradingView ve screenshotu; Automatická detekce dark bg; HSV contour fallback pro ceny
+1.5.13 | Záložka MOJE PRAVIDLA; Editor obchodních pravidel s kategoriemi
+1.5.12 | Monte Carlo simulace; A/B test strategie; Výběr N obchodů ze vzorku
+"""
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
 
-def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=None):
-    """Pěkný dialog s indikátorem GitHub připojení a oběma verzemi."""
+def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=None,
+                        changelog_entries=None):
+    """
+    Dialog aktualizace s changelog sekcí.
+    changelog_entries = list of (verze, [změna1, změna2, ...]) pro verze novější než aktuální.
+    """
+    has_update   = bool(on_update)
+    has_changelog = bool(changelog_entries)
+
+    # Výška: závisí na počtu položek changelogu
+    base_h = 340
+    if has_changelog:
+        n_items = sum(len(ch) for _, ch in changelog_entries)
+        base_h  = min(600, base_h + n_items * 20 + len(changelog_entries) * 28)
+    elif not connected:
+        base_h = 260
+
     win = tk.Toplevel(root)
     win.title("Aktualizace")
-    win.resizable(False, False)
+    win.resizable(False, True)
     win.configure(bg=DT_BG)
-    win.geometry("440x320")
+    win.geometry(f"520x{base_h}")
+    win.minsize(520, 240)
     win.lift()
     win.focus_set()
 
-    # ── Hlavička s GitHub indikátorem ──────────────────────────────────────
-    hdr = tk.Frame(win, bg='#2c3e50', pady=10)
+    # ── Hlavička ───────────────────────────────────────────────────────────
+    hdr = tk.Frame(win, bg='#0f172a', pady=11)
     hdr.pack(fill='x')
-    tk.Label(hdr, text="🔄  Aktualizace programu", bg='#2c3e50', fg='white',
+    tk.Label(hdr, text="🔄  Aktualizace programu", bg='#0f172a', fg='white',
              font=('Segoe UI', 12, 'bold')).pack(side='left', padx=16)
-    dot_text  = '●  GitHub: připojeno' if connected else '●  GitHub: nepřipojeno'
-    dot_color = '#2ecc71' if connected else '#e74c3c'
-    tk.Label(hdr, text=dot_text, bg='#2c3e50', fg=dot_color,
-             font=('Segoe UI', 9, 'bold')).pack(side='right', padx=16)
+    dot_text  = '●  GitHub: připojeno' if connected else '●  GitHub: offline'
+    dot_color = '#22c55e' if connected else '#ef4444'
+    tk.Label(hdr, text=dot_text, bg='#0f172a', fg=dot_color,
+             font=('Segoe UI', 9)).pack(side='right', padx=16)
 
-    # ── Tělo ───────────────────────────────────────────────────────────────
-    # Tlacitka packujeme PRVNI s side='bottom' -- jinak body s expand=True je pohltí
-    bf = tk.Frame(win, bg=DT_BG, padx=24, pady=10)
+    # ── Tlačítka (pack first = always visible at bottom) ───────────────────
+    bf = tk.Frame(win, bg=DT_BG, padx=20, pady=10)
     bf.pack(fill='x', side='bottom')
-    if on_update:
+    if has_update:
         def _do():
             win.destroy(); on_update()
-        tk.Button(bf, text="⬇  STÁHNOUT A NAINSTALOVAT", bg='#27ae60', fg='white',
+        tk.Button(bf, text="⬇  STÁHNOUT A NAINSTALOVAT", bg='#16a34a', fg='white',
                   font=('Segoe UI', 10, 'bold'), padx=14, pady=8, relief='flat',
-                  cursor='hand2', activebackground='#219a52', activeforeground='white',
+                  cursor='hand2', activebackground='#15803d',
                   command=_do).pack(side='left')
-        tk.Button(bf, text="Później", bg=DT_BTN, fg=DT_TEXT,
+        tk.Button(bf, text="Později", bg=DT_BTN, fg=DT_TEXT,
                   font=('Segoe UI', 9), padx=10, pady=8, relief='flat',
                   cursor='hand2', command=win.destroy).pack(side='left', padx=(10, 0))
     else:
@@ -103,45 +130,119 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
                   font=('Segoe UI', 10), padx=18, pady=8, relief='flat',
                   cursor='hand2', command=win.destroy).pack(side='right')
 
-    # Telo -- packujeme PO tlacitkach
-    body = tk.Frame(win, bg=DT_BG, padx=24, pady=14)
-    body.pack(fill='both', expand=True)
+    # ── Scrollovatelné tělo ────────────────────────────────────────────────
+    body_outer = tk.Frame(win, bg=DT_BG)
+    body_outer.pack(fill='both', expand=True)
+    body_canv = tk.Canvas(body_outer, bg=DT_BG, highlightthickness=0)
+    body_scb  = ttk.Scrollbar(body_outer, orient='vertical', command=body_canv.yview)
+    body_canv.configure(yscrollcommand=body_scb.set)
+    body_canv.pack(side='left', fill='both', expand=True)
+    body_scb.pack(side='right', fill='y')
+    body = tk.Frame(body_canv, bg=DT_BG, padx=20, pady=14)
+    body_canv.create_window((0, 0), window=body, anchor='nw')
+    body.bind("<Configure>", lambda e: body_canv.configure(scrollregion=body_canv.bbox("all")))
+    body_canv.bind("<MouseWheel>", lambda e: body_canv.yview_scroll(int(-1*(e.delta/120)), "units"))
 
     if not connected:
         tk.Label(body, text="⚠️  Nepodařilo se připojit k GitHubu.", bg=DT_BG,
-                 fg='#e74c3c', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
+                 fg='#ef4444', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
         if error_msg:
             tk.Label(body, text=str(error_msg), bg=DT_BG, fg=DT_SUBTEXT,
-                     font=('Segoe UI', 9), wraplength=390, justify='left').pack(anchor='w', pady=(6, 0))
+                     font=('Segoe UI', 9), wraplength=460, justify='left').pack(anchor='w', pady=(6, 0))
+        return
+
+    # ── Verze info ─────────────────────────────────────────────────────────
+    vf = tk.Frame(body, bg=DT_SURFACE, padx=16, pady=10)
+    vf.pack(fill='x', pady=(0, 12))
+
+    def _vrow(parent, label, value, val_color):
+        r = tk.Frame(parent, bg=DT_SURFACE); r.pack(fill='x', pady=2)
+        tk.Label(r, text=label, bg=DT_SURFACE, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 10), width=15, anchor='w').pack(side='left')
+        tk.Label(r, text=value, bg=DT_SURFACE, fg=val_color,
+                 font=('Segoe UI', 10, 'bold')).pack(side='left')
+
+    _vrow(vf, "Tvoje verze:", VERSION, DT_TEXT)
+    gh_color = '#22c55e' if has_update else DT_TEXT
+    _vrow(vf, "GitHub verze:", remote_ver or '—', gh_color)
+
+    if has_update:
+        status_f = tk.Frame(body, bg='#14532d', padx=12, pady=7)
+        status_f.pack(fill='x', pady=(0, 12))
+        tk.Label(status_f, text="🚀  Nová verze je k dispozici!",
+                 bg='#14532d', fg='#86efac',
+                 font=('Segoe UI', 11, 'bold')).pack(side='left')
+        tk.Label(status_f, text=f"  {VERSION}  →  {remote_ver}",
+                 bg='#14532d', fg='#4ade80',
+                 font=('Segoe UI', 10)).pack(side='left', padx=(8, 0))
     else:
-        # Tabulka verzí
-        vf = tk.Frame(body, bg=DT_SURFACE, padx=16, pady=10)
-        vf.pack(fill='x', pady=(0, 10))
+        tk.Label(body, text="✓  Máš nejnovější verzi.", bg=DT_BG,
+                 fg='#22c55e', font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 8))
 
-        def _vrow(parent, label, value, val_color):
-            r = tk.Frame(parent, bg=DT_SURFACE); r.pack(fill='x', pady=2)
-            tk.Label(r, text=label, bg=DT_SURFACE, fg=DT_SUBTEXT,
-                     font=('Segoe UI', 10), width=15, anchor='w').pack(side='left')
-            tk.Label(r, text=value, bg=DT_SURFACE, fg=val_color,
-                     font=('Segoe UI', 10, 'bold')).pack(side='left')
+    # ── Changelog sekce ────────────────────────────────────────────────────
+    if has_changelog:
+        tk.Label(body, text="📋  Co je nového", bg=DT_BG, fg=DT_TEXT,
+                 font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 6))
 
-        _vrow(vf, "Tvoje verze:", VERSION, DT_TEXT)
-        gh_color = '#27ae60' if on_update else DT_TEXT
-        _vrow(vf, "GitHub verze:", remote_ver or '—', gh_color)
+        for ver, items in changelog_entries:
+            # Záhlaví verze
+            vh = tk.Frame(body, bg='#1e3a5f', pady=5, padx=10)
+            vh.pack(fill='x', pady=(0, 2))
+            tk.Label(vh, text=f"Verze {ver}", bg='#1e3a5f', fg='#93c5fd',
+                     font=('Segoe UI', 9, 'bold')).pack(side='left')
 
-        if on_update:
-            tk.Label(body, text="✅  Nová verze je k dispozici!", bg=DT_BG,
-                     fg='#27ae60', font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 6))
-        else:
-            tk.Label(body, text="Máš nejnovější verzi.", bg=DT_BG,
-                     fg=DT_SUBTEXT, font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 6))
+            # Položky changelogu
+            for item in items:
+                if not item.strip(): continue
+                irow = tk.Frame(body, bg=DT_BG, padx=14)
+                irow.pack(fill='x', pady=1)
+                tk.Label(irow, text="•", bg=DT_BG, fg='#60a5fa',
+                         font=('Segoe UI', 9)).pack(side='left', padx=(0, 6))
+                tk.Label(irow, text=item.strip(), bg=DT_BG, fg=DT_TEXT,
+                         font=('Segoe UI', 9), wraplength=440,
+                         justify='left', anchor='w').pack(side='left', fill='x', expand=True)
 
 
 
-def check_for_updates(silent=False):
+def _parse_remote_changelog(text, current_ver):
+    """
+    Parsuje CHANGELOG blok z textu vzdáleného souboru.
+    Vrátí list of (verze, [položky]) pro verze NOVĚJŠÍ než current_ver.
+    """
+    import re
+    def vt(v):
+        try: return tuple(int(x) for x in str(v).strip().split('.'))
+        except: return (0,)
+
+    # Najdi CHANGELOG = """...""" blok
+    m = re.search(r'CHANGELOG\s*=\s*"""(.*?)"""', text, re.DOTALL)
+    if not m:
+        return []
+
+    entries = []
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Formát: "1.5.17 | Změna 1; Změna 2"
+        mm = re.match(r'^(\d+\.\d+\.\d+)\s*\|\s*(.+)$', line)
+        if not mm:
+            continue
+        ver, changes_raw = mm.group(1), mm.group(2)
+        if vt(ver) > vt(current_ver):
+            items = [c.strip() for c in changes_raw.split(';') if c.strip()]
+            entries.append((ver, items))
+
+    # Seřadit od nejnovější
+    entries.sort(key=lambda x: vt(x[0]), reverse=True)
+    return entries
+
+
+def check_for_updates(silent=False, startup=False):
     """
     Zkontroluje GitHub pro novou verzi programu.
-    silent=True → vůbec žádný dialog (ani při nové verzi). Uživatel musí kliknout UPDATE ručně.
+    silent=True  → žádný dialog vůbec (jen rozsviť UPDATE tlačítko)
+    startup=True → dialog JEN pokud je nová verze (ne "jsi aktuální")
     """
     if "TVUJ_USERNAME" in UPDATE_URL:
         return
@@ -172,7 +273,6 @@ def check_for_updates(silent=False):
         return
 
     def ver_tuple(v):
-        # Každou část parsuj jako číslo — "0001"==1, "86"==86
         try: return tuple(int(x) for x in str(v).strip().split('.'))
         except: return (0,)
 
@@ -180,30 +280,43 @@ def check_for_updates(silent=False):
         import re, urllib.request
         req = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
         with urllib.request.urlopen(req, timeout=8) as response:
-            header_bytes = response.read(8192).decode('utf-8', errors='ignore')
+            # Čteme víc bajtů aby se vešel CHANGELOG blok
+            header_bytes = response.read(20480).decode('utf-8', errors='ignore')
 
         m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', header_bytes, re.MULTILINE)
         if not m:
-            if not silent:
+            if not startup:
                 _show_update_dialog(connected=True, remote_ver='???',
                     error_msg="Nelze přečíst verzi ze souboru na GitHubu.\nZkontroluj formát: VERSION = \"x.y.z\"")
             return
 
         remote_ver = m.group(1).strip()
+        is_new     = ver_tuple(remote_ver) > ver_tuple(VERSION)
+
+        # Parsuj changelog pro verze novější než aktuální
+        changelog_entries = _parse_remote_changelog(header_bytes, VERSION) if is_new else []
 
         # Žádná nová verze
-        if ver_tuple(remote_ver) <= ver_tuple(VERSION):
-            if not silent:
+        if not is_new:
+            if not startup:
+                # Manuální kliknutí → ukáž "jsi aktuální"
                 try: _show_update_dialog(connected=True, remote_ver=remote_ver)
                 except Exception: messagebox.showinfo("Aktualizace", f"Tvoje verze: {VERSION}\nGitHub: {remote_ver}\nMáš nejnovější verzi.")
             return
 
-        # ── Nová verze dostupná ──────────────────────────────────────────────
-        import subprocess
+        # ── Nová verze dostupná — rozsviť tlačítko ───────────────────────────
+        try:
+            for w in root.winfo_children():
+                for ww in (w.winfo_children() if hasattr(w, 'winfo_children') else []):
+                    if hasattr(ww, 'cget') and ww.winfo_class() == 'Button':
+                        try:
+                            if 'UPDATE' in str(ww.cget('text')):
+                                ww.configure(bg='#dc2626', text=f"🔴 UPDATE  {remote_ver}")
+                        except Exception: pass
+        except Exception: pass
 
         def do_download():
             if getattr(sys, 'frozen', False):
-                # ── launcher.exe ─────────────────────────────────────────────
                 py_path  = os.path.join(os.path.dirname(sys.executable), 'BACKTESTING.py')
                 tmp_path = py_path + '.new'
                 try:
@@ -218,21 +331,17 @@ def check_for_updates(silent=False):
                     messagebox.showerror("Chyba aktualizace",
                         f"Stažený soubor je příliš malý ({len(new_content)//1024} KB).\nAktualizace zrušena.")
                     return
-                try:
-                    compile(new_content, 'BACKTESTING.py', 'exec')
+                try: compile(new_content, 'BACKTESTING.py', 'exec')
                 except SyntaxError as se:
                     messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\nAktualizace zrušena.")
+                        f"Stažený soubor je poškozený (SyntaxError řádek {se.lineno}).\nAktualizace zrušena.")
                     return
-                if os.path.exists(py_path):
-                    shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
-                with open(tmp_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
+                if os.path.exists(py_path): shutil.copy2(py_path, py_path + f'.backup_{VERSION}')
+                with open(tmp_path, 'w', encoding='utf-8') as f: f.write(new_content)
                 if os.path.exists(py_path): os.remove(py_path)
                 os.rename(tmp_path, py_path)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu.")
             else:
-                # ── .py skript ────────────────────────────────────────────────
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
                 with urllib.request.urlopen(req2, timeout=30) as r:
                     new_content = r.read().decode('utf-8')
@@ -240,26 +349,30 @@ def check_for_updates(silent=False):
                     messagebox.showerror("Chyba aktualizace",
                         f"Stažený soubor je příliš malý ({len(new_content)//1024} KB).\nAktualizace zrušena.")
                     return
-                try:
-                    compile(new_content, 'BACKTESTING.py', 'exec')
+                try: compile(new_content, 'BACKTESTING.py', 'exec')
                 except SyntaxError as se:
                     messagebox.showerror("Chyba aktualizace",
-                        f"Stažený soubor je poškozený (SyntaxError na řádku {se.lineno}).\nAktualizace zrušena.")
+                        f"Stažený soubor je poškozený (SyntaxError řádek {se.lineno}).\nAktualizace zrušena.")
                     return
                 current_path = os.path.abspath(__file__)
                 shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
-                with open(current_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu pro novou verzi.")
+                with open(current_path, 'w', encoding='utf-8') as f: f.write(new_content)
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu.")
             try: root.destroy()
             except: pass
             sys.exit(0)
 
-        try: _show_update_dialog(connected=True, remote_ver=remote_ver, on_update=do_download)
-        except Exception as de: messagebox.askyesno("🔄 Aktualizace", f"Nová verze {remote_ver} (tvoje: {VERSION}). Stáhnout?") and do_download()
+        try:
+            _show_update_dialog(connected=True, remote_ver=remote_ver,
+                                on_update=do_download,
+                                changelog_entries=changelog_entries)
+        except Exception:
+            if messagebox.askyesno("🔄 Aktualizace",
+                    f"Nová verze {remote_ver} (tvoje: {VERSION}). Stáhnout?"):
+                do_download()
 
     except Exception as e:
-        if not silent:
+        if not startup:
             try: _show_update_dialog(connected=False, error_msg=str(e))
             except Exception: messagebox.showerror("Chyba aktualizace", f"Nepodařilo se připojit k GitHubu:\n{e}")
 
@@ -4708,7 +4821,7 @@ if __name__ == "__main__":
         root.withdraw()  # Skryj main window dokud splash neskončí
         root.after(100, lambda: show_splash(lambda: [root.deiconify(), show_intro_screen()]))
         # Tiše zkontroluj aktualizace 4 sekundy po startu — na hlavním threadu (ne v background threadu!)
-        root.after(4000, lambda: check_for_updates(silent=True))
+        root.after(4000, lambda: check_for_updates(startup=True))
         root.mainloop()
     except Exception as e:
         if 'root' in locals(): messagebox.showerror("Fatální chyba", str(e))
