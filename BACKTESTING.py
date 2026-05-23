@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.23"
+VERSION = "1.5.24"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.24 | Redesign tmavého motivu — harmonická slate paleta bez křiklavých barev; Toolbar sjednocen (jedno tlačítko = jeden styl); TAKE PROFIT a STOP LOSS labely reagují na motiv; Intro karty projektů mají jednotnou barvu hlavičky; Vylepšené WIN/LOSS/BE odstíny
 1.5.23 | Intro obrazovka plně přizpůsobena motivu — karty projektů, pozadí a texty reagují na zvolený motiv; Tmavý a Tmavý modrý motiv dostupný přímo z intro obrazovky; Přepínač motivů na intro obrazovce obsahuje všechny 5 motivů
 1.5.22 | Nový tmavý motiv — stejný design jako okno Správce účtů; Motiv Tmavý modrý; Klasický motiv zachován; Výchozí motiv změněn na Tmavý; Vylepšený ttk styling pro tmavé motivy
 1.5.21 | Pole Začátek a Konec účtu v správci účtů; Zobrazení datumu v seznamu účtů
@@ -387,24 +388,24 @@ def check_for_updates(silent=False, startup=False):
 THEMES = {
     # ── Tmavé motivy ──────────────────────────────────────────────────────────
     "Tmavý": {
-        # Stejná paleta jako okno Správce účtů — Tailwind slate
-        "BG":"#0f172a","PANEL":"#1e293b","SURFACE":"#334155",
-        "TEXT":"#e2e8f0","SUBTEXT":"#94a3b8","ACCENT":"#60a5fa",
-        "WIN_BG":"#14532d","WIN_FG":"#86efac",
-        "LOSS_BG":"#7f1d1d","LOSS_FG":"#fca5a5",
-        "BE_BG":"#78350f","BE_FG":"#fde68a",
-        "BTN":"#334155","ENTRY":"#1e293b","BORDER":"#475569",
-        "SELECT_COLOR":"#1e293b","ttk":"clam",
+        # Tailwind slate — profesionální tmavý motiv
+        "BG":"#0f172a","PANEL":"#1e293b","SURFACE":"#293548",
+        "TEXT":"#e2e8f0","SUBTEXT":"#64748b","ACCENT":"#3b82f6",
+        "WIN_BG":"#0d2e1a","WIN_FG":"#4ade80",
+        "LOSS_BG":"#2d0e0e","LOSS_FG":"#f87171",
+        "BE_BG":"#2a1a07","BE_FG":"#fbbf24",
+        "BTN":"#253348","ENTRY":"#1a2540","BORDER":"#334155",
+        "SELECT_COLOR":"#253348","ttk":"clam",
     },
     "Tmavý modrý": {
-        # Hlubší modrá varianta
-        "BG":"#0a0f1e","PANEL":"#111827","SURFACE":"#1f2937",
-        "TEXT":"#f1f5f9","SUBTEXT":"#64748b","ACCENT":"#3b82f6",
-        "WIN_BG":"#052e16","WIN_FG":"#4ade80",
-        "LOSS_BG":"#450a0a","LOSS_FG":"#f87171",
-        "BE_BG":"#431407","BE_FG":"#fb923c",
-        "BTN":"#1f2937","ENTRY":"#111827","BORDER":"#374151",
-        "SELECT_COLOR":"#111827","ttk":"clam",
+        # Hlubší navy varianta
+        "BG":"#080d1a","PANEL":"#0f1729","SURFACE":"#172033",
+        "TEXT":"#e2e8f0","SUBTEXT":"#64748b","ACCENT":"#6366f1",
+        "WIN_BG":"#0a2414","WIN_FG":"#34d399",
+        "LOSS_BG":"#250a0a","LOSS_FG":"#fb7185",
+        "BE_BG":"#21180a","BE_FG":"#fbbf24",
+        "BTN":"#1a2440","ENTRY":"#0f1729","BORDER":"#1e2d50",
+        "SELECT_COLOR":"#1a2440","ttk":"clam",
     },
     # ── Světlé motivy ─────────────────────────────────────────────────────────
     "Klasický": {
@@ -4580,12 +4581,24 @@ def show_main_screen(p_name):
     _pname_lbl.bind('<Button-1>', _rename_project)
     # Pravá část – tlačítka
     hb = tk.Frame(h, bg=DT_PANEL); hb.pack(side='right', fill='y', padx=12)
-    tk.Button(hb, text="✕  MENU", command=show_intro_screen, bg='#c0392b', fg='white', font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="⚙ NASTAVENÍ", command=open_settings_window, bg='#34495e', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="🔄 UPDATE", command=lambda: check_for_updates(silent=False), bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="🏦 ÚČTY", command=open_accounts_manager, bg='#1e40af', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="📖 DENÍK", command=show_journal_screen, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="📝 PRAVIDLA", command=open_checklist_editor, bg='#8e44ad', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="✕  MENU", command=show_intro_screen,
+              bg=DT_LOSS_BG, fg=DT_LOSS_FG,
+              font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="⚙  NASTAVENÍ", command=open_settings_window,
+              bg=DT_BTN, fg=DT_SUBTEXT,
+              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="🔄  UPDATE", command=lambda: check_for_updates(silent=False),
+              bg=DT_BTN, fg=DT_SUBTEXT,
+              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="🏦  ÚČTY", command=open_accounts_manager,
+              bg=DT_BTN, fg=DT_TEXT,
+              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="📖  DENÍK", command=show_journal_screen,
+              bg=DT_BTN, fg=DT_TEXT,
+              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="📝  PRAVIDLA", command=open_checklist_editor,
+              bg=DT_BTN, fg=DT_TEXT,
+              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
 
     nb = ttk.Notebook(root); nb.pack(fill='both', expand=True, padx=5, pady=5)
     _make_tabs_draggable(nb)
@@ -4653,10 +4666,10 @@ def show_main_screen(p_name):
               command=open_accounts_manager).pack(side='left')
 
     tk.Label(f, text="Symbol:").grid(row=r, column=0, sticky='w'); symbol_combo = ttk.Combobox(f, values=PAIRS, width=33); symbol_combo.grid(row=r, column=1, pady=3); r+=1
-    tk.Label(f, text="Směr:").grid(row=r, column=0, sticky='w'); smer_var = tk.StringVar(value="Buy"); sf = tk.Frame(f); sf.grid(row=r, column=1, sticky='w'); tk.Radiobutton(sf, text="BUY", variable=smer_var, value="Buy", fg='green', font=('Arial', 9, 'bold')).pack(side='left'); tk.Radiobutton(sf, text="SELL", variable=smer_var, value="Sell", fg='red', font=('Arial', 9, 'bold')).pack(side='left'); r+=1
+    tk.Label(f, text="Směr:").grid(row=r, column=0, sticky='w'); smer_var = tk.StringVar(value="Buy"); sf = tk.Frame(f); sf.grid(row=r, column=1, sticky='w'); tk.Radiobutton(sf, text="BUY", variable=smer_var, value="Buy", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).pack(side='left'); tk.Radiobutton(sf, text="SELL", variable=smer_var, value="Sell", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).pack(side='left'); r+=1
     tk.Label(f, text="ENTRY PRICE:", font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); vstupni_hodnota_entry = tk.Entry(f, width=35); vstupni_hodnota_entry.grid(row=r, column=1, pady=3); r+=1
-    tk.Label(f, text="TAKE PROFIT:", fg='green', font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); takeprofit_entry = tk.Entry(f, width=35); takeprofit_entry.grid(row=r, column=1, pady=3); r+=1
-    tk.Label(f, text="STOP LOSS:", fg='red', font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); stoploss_entry = tk.Entry(f, width=35); stoploss_entry.grid(row=r, column=1, pady=3); r+=1
+    tk.Label(f, text="TAKE PROFIT:", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); takeprofit_entry = tk.Entry(f, width=35); takeprofit_entry.grid(row=r, column=1, pady=3); r+=1
+    tk.Label(f, text="STOP LOSS:", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); stoploss_entry = tk.Entry(f, width=35); stoploss_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Vypočtené RRR:").grid(row=r, column=0, sticky='w'); rrr_entry = tk.Entry(f, width=35); rrr_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="SL v Pipsech:").grid(row=r, column=0, sticky='w'); pips_entry = tk.Entry(f, width=35, state='readonly', fg='blue'); pips_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="HTF Graf / LTF Vstup:").grid(row=r, column=0, sticky='w'); ft = tk.Frame(f); ft.grid(row=r, column=1, sticky='w'); htf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); htf_combo.pack(side='left'); ltf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); ltf_combo.pack(side='left', padx=5); r+=1
@@ -5175,7 +5188,7 @@ def show_intro_screen():
     grid_frame = tk.Frame(main_container, bg=DT_BG); grid_frame.pack(expand=True)
 
     f1 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f1.grid(row=0, column=0, padx=20, pady=20); f1.pack_propagate(False)
-    tk.Label(f1, text="⛏ BACKTEST", font=('Arial', 16, 'bold'), bg="#34495e", fg="white", pady=10).pack(fill="x")
+    tk.Label(f1, text="⛏ BACKTEST", font=('Arial', 16, 'bold'), bg=DT_ACCENT, fg="#ffffff", pady=10).pack(fill="x")
     tk.Label(f1, text="Analýza historických dat.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
     lb1 = tk.Listbox(f1, height=8, width=30, borderwidth=0, bg=DT_SURFACE, fg=DT_TEXT,
                      selectbackground=DT_ACCENT, selectforeground="#ffffff"); lb1.pack(pady=10, padx=10)
@@ -5186,7 +5199,7 @@ def show_intro_screen():
     tk.Button(f1, text="🗑 SMAZAT PROJEKT", command=lambda: delete_project(lb1, "BACKTEST"), bg="#e74c3c", fg="white").pack(fill="x", padx=20, pady=(0, 15))
 
     f2 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f2.grid(row=0, column=1, padx=20, pady=20); f2.pack_propagate(False)
-    tk.Label(f2, text="📈 REAL TRADING", font=('Arial', 16, 'bold'), bg="#2980b9", fg="white", pady=10).pack(fill="x")
+    tk.Label(f2, text="📈 REAL TRADING", font=('Arial', 16, 'bold'), bg=DT_ACCENT, fg="#ffffff", pady=10).pack(fill="x")
     tk.Label(f2, text="FTMO / Prop Firm management.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
     lb2 = tk.Listbox(f2, height=8, width=30, borderwidth=0, bg=DT_SURFACE, fg=DT_TEXT,
                      selectbackground=DT_ACCENT, selectforeground="#ffffff"); lb2.pack(pady=10, padx=10)
@@ -5197,7 +5210,7 @@ def show_intro_screen():
     tk.Button(f2, text="🗑 SMAZAT PROJEKT", command=lambda: delete_project(lb2, "REAL"), bg="#e74c3c", fg="white").pack(fill="x", padx=20, pady=(0, 15))
 
     f3 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f3.grid(row=0, column=2, padx=20, pady=20); f3.pack_propagate(False)
-    tk.Label(f3, text="🧠 DENÍK", font=('Arial', 16, 'bold'), bg="#8e44ad", fg="white", pady=10).pack(fill="x")
+    tk.Label(f3, text="🧠 DENÍK", font=('Arial', 16, 'bold'), bg=DT_ACCENT, fg="#ffffff", pady=10).pack(fill="x")
     tk.Label(f3, text="Psychologie a emoce.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
     tk.Label(f3, text="📅", font=('Arial', 50), bg=DT_PANEL, fg=DT_TEXT).pack(pady=30)
     tk.Button(f3, text="OTEVŘÍT DENÍK", command=show_journal_screen, bg="#8e44ad", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
@@ -5245,7 +5258,7 @@ def show_intro_screen():
         btn.pack(side='left', padx=4)
 
     f4 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f4.grid(row=0, column=3, padx=20, pady=20); f4.pack_propagate(False)
-    tk.Label(f4, text="📋 STRATEGIE", font=('Arial', 16, 'bold'), bg="#e67e22", fg="white", pady=10).pack(fill="x")
+    tk.Label(f4, text="📋 STRATEGIE", font=('Arial', 16, 'bold'), bg=DT_ACCENT, fg="#ffffff", pady=10).pack(fill="x")
     tk.Label(f4, text="Pravidla a poznámky.", bg=DT_PANEL, fg=DT_SUBTEXT, pady=10).pack()
     tk.Label(f4, text="✍️", font=('Arial', 50), bg=DT_PANEL, fg=DT_TEXT).pack(pady=30)
     tk.Button(f4, text="OTEVŘÍT PRAVIDLA", command=show_global_rules_screen, bg="#e67e22", fg="white", font=('Arial', 12, 'bold'), height=2).pack(fill="x", padx=20, pady=40)
