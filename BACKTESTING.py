@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.19"
+VERSION = "1.5.20"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.20 | Správce účtů — FTMO Challenge/Verifikace/Funded; Pole Účet ve formuláři; Tlačítko 🏦 ÚČTY v toolbaru; Per-účet statistiky v Analýze
 1.5.19 | Zvýšení verze pro testování update notifikace
 1.5.18 | Changelog v update dialogu — co je nového při každé aktualizaci; Startup automatická kontrola s dialogem jen při nové verzi; Scrollovatelný changelog s přehledem změn
 1.5.17 | Nová záložka 📅 PERIODY — týdenní a měsíční přehled výkonnosti; Bar charty posledních 10 týdnů / 13 měsíců; KPI karty (Win Rate, Celkem R, Profit Factor); Detailní tabulka s historií
@@ -512,6 +513,7 @@ PAIRS_FILE = '' # NOVÉ: Soubor pro seznam párů
 TIMEFRAMES_FILE = '' # NOVÉ: Soubor pro seznam timeframe
 RULES_FILE = '' # NOVÉ: Soubor pro pravidla
 FILTERS_FILE = '' # Soubor pro uložené filtry
+ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
 
 # Soubor s vlastními cestami projektů (globální, mimo projekt)
 PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
@@ -634,6 +636,7 @@ heatmap_graph_frame = None
 
 # UI prvky formuláře
 cas_otevreni_entry = None; cas_zavreni_entry = None; symbol_combo = None; smer_var = None
+accounts_combo = None  # Dropdown pro výběr účtu ve formuláři
 vstupni_hodnota_entry = None; stoploss_entry = None; takeprofit_entry = None; rrr_entry = None
 pips_entry = None; session_combo = None; htf_combo = None; ltf_combo = None; fibo_combo = None
 duvod_entry = None; poznamka_entry = None; vysledek_combo = None; den_tydne_entry = None
@@ -667,7 +670,8 @@ COL_TRANSLATION = {
     "duvod": "Důvod", "poznamka": "Poznámka", "vysledek": "Výsledek",
     "den_tydne": "Den", "delka_obchodu": "Délka", "slippage": "Slippage", "kvalita": "Kvalita",
     "news": "News (Impact)", "news_event": "Fundament (Zpráva)", "checklist_ratio": "✅ Pravidla",
-    "tags": "Štítky (Tags)" # NOVÉ
+    "tags": "Štítky (Tags)",
+    "ucet": "Účet"
 }
 
 DEFAULT_SCORING = {
@@ -1742,6 +1746,44 @@ def update_statistics():
         out += "  (potřeba min. 3 obchody na jednu kombinaci)\n"
     out += "\n"
 
+    # ── Přehled per účet ─────────────────────────────────────────────────────
+    acct_stats = defaultdict(lambda: {'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
+    trades_all = load_data()
+    for t in trades_all:
+        raw_day = t.get('den_tydne', '').capitalize()
+        if raw_day in ('Sobota', 'Neděle'): continue
+        res = t.get('vysledek', '').lower()
+        if not res: continue
+        if selected_symbol_filter != "VŠE" and t.get('symbol') != selected_symbol_filter: continue
+        ucet = t.get('ucet', '').strip() or '— (bez účtu) —'
+        try: rrr_v = float(str(t.get('rrr', 1)).replace(',', '.'))
+        except: rrr_v = 1.0
+        acct_stats[ucet]['count'] += 1
+        if res == 'win':
+            acct_stats[ucet]['wins'] += 1
+            acct_stats[ucet]['r'] += rrr_v
+            acct_stats[ucet]['gross_p'] += rrr_v
+        elif res == 'loss':
+            acct_stats[ucet]['losses'] += 1
+            acct_stats[ucet]['r'] -= 1.0
+            acct_stats[ucet]['gross_l'] += 1.0
+        else:
+            acct_stats[ucet]['be'] += 1
+
+    if len(acct_stats) > 1 or (len(acct_stats) == 1 and list(acct_stats.keys())[0] != '— (bez účtu) —'):
+        out += "═" * 68 + "\n"
+        out += "  🏦 PŘEHLED PER ÚČET\n"
+        out += "─" * 68 + "\n"
+        out += f"  {'Účet':<28} {'Obc':>4} {'Win':>4} {'Loss':>5} {'WR%':>6} {'Celk.R':>8} {'PF':>7}\n"
+        out += "─" * 68 + "\n"
+        for acname, s in sorted(acct_stats.items(), key=lambda x: -x[1]['r']):
+            d  = s['wins'] + s['losses']
+            wr = s['wins'] / d * 100 if d > 0 else 0.0
+            pf = f"{s['gross_p']/s['gross_l']:.2f}" if s['gross_l'] > 0 else ('∞' if s['gross_p'] > 0 else '—')
+            nm = (acname[:27] + '…') if len(acname) > 28 else acname
+            out += f"  {nm:<28} {s['count']:>4} {s['wins']:>4} {s['losses']:>5} {wr:>5.1f}% {s['r']:>+7.2f}R {pf:>7}\n"
+        out += "\n"
+
     stats_text.insert(tk.END, out)
 
     # Pie Charts (Winrate & Timeframes)
@@ -2226,7 +2268,14 @@ def pridat_obchod():
         checklist_res = show_checklist_popup()
         if checklist_res is None: return 
         
+        # Výběr účtu — ulož jen čistý název (bez [FTMO 100k] části)
+        _raw_ucet = accounts_combo.get() if accounts_combo else ''
+        _ucet_map = get_account_short_names()
+        _ucet_val = _ucet_map.get(_raw_ucet, _raw_ucet)
+        if _ucet_val.startswith('—'): _ucet_val = ''
+
         d = {
+            'ucet': _ucet_val,
             'cas_otevreni': cas_otevreni_entry.get(), 'cas_zavreni': cas_zavreni_entry.get(),
             'symbol': symbol_combo.get(), 'smer': smer_var.get(), 'vstupni_hodnota': vstupni_hodnota_entry.get(),
             'stoploss': stoploss_entry.get(), 'takeprofit': takeprofit_entry.get(), 'rrr': rrr_entry.get(),
@@ -2340,6 +2389,10 @@ def reset_form():
     for e in [vstupni_hodnota_entry, stoploss_entry, takeprofit_entry, rrr_entry, poznamka_entry, duvod_entry, news_event_entry, tags_entry]: e.delete(0, tk.END)
     cas_otevreni_entry.delete(0, tk.END); cas_otevreni_entry.insert(0, datetime.now().strftime("%Y-%m-%d %H:%M"))
     obrazky_list.set(""); editing_trade_index = None; news_var.set("Ne"); save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
+    if accounts_combo:
+        vals = get_account_dropdown_values()
+        accounts_combo['values'] = vals
+        accounts_combo.set(vals[0] if vals else '')
 
 def smazat_obchod():
     if trades_tree is None: return
@@ -2908,6 +2961,283 @@ def analyze_screenshot(image_path):
     except: pass
 
     return result
+
+# ==============================================================================
+# SPRÁVCE ÚČTŮ — FTMO Challenge / Verifikace / Funded / Osobní
+# ==============================================================================
+
+ACCOUNT_TYPES   = ['Challenge', 'Verifikace', 'Funded', 'Osobní', 'Jiný']
+ACCOUNT_FIRMS   = ['FTMO', 'MyForexFunds', 'FundedNext', 'The5ers', 'Topstep', 'Jiná']
+ACCOUNT_STATUSES = ['Aktivní', 'Splněn', 'Propadlý', 'Archivovaný']
+ACCOUNT_STATUS_COLORS = {
+    'Aktivní':     ('#166534', '#86efac'),   # tmavě zelená, světle zelená text
+    'Splněn':      ('#1e40af', '#93c5fd'),   # modrá
+    'Propadlý':    ('#7f1d1d', '#fca5a5'),   # červená
+    'Archivovaný': ('#374151', '#9ca3af'),   # šedá
+}
+
+
+def load_accounts():
+    """Načte seznam účtů ze souboru projektu."""
+    if not ACCOUNTS_FILE or not os.path.exists(ACCOUNTS_FILE):
+        return []
+    try:
+        with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return []
+
+
+def save_accounts(accounts):
+    """Uloží seznam účtů do souboru projektu."""
+    if not ACCOUNTS_FILE:
+        return
+    try:
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(accounts, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nelze uložit účty:\n{e}")
+
+
+def get_account_dropdown_values():
+    """Vrátí seznam pro dropdown ve formuláři (jen aktivní + prázdná volba)."""
+    accounts = load_accounts()
+    result = ['— (bez účtu) —']
+    for a in accounts:
+        if a.get('status', 'Aktivní') == 'Aktivní':
+            firma = a.get('firma', '')
+            vel   = a.get('velikost', '')
+            label = a['nazev']
+            if firma and vel:
+                label += f"  [{firma}  {int(float(vel)):,} {a.get('mena','USD')}]"
+            result.append(label)
+    return result
+
+
+def get_account_short_names():
+    """Vrátí {zobrazovaný_label: nazev} pro reverse lookup."""
+    accounts = load_accounts()
+    mapping = {}
+    for a in accounts:
+        firma = a.get('firma', '')
+        vel   = a.get('velikost', '')
+        label = a['nazev']
+        if firma and vel:
+            label_full = label + f"  [{firma}  {int(float(vel)):,} {a.get('mena','USD')}]"
+        else:
+            label_full = label
+        mapping[label_full] = a['nazev']
+    return mapping
+
+
+def refresh_accounts_combo():
+    """Aktualizuje hodnoty v dropdown formuláře (zavolat po změně účtů)."""
+    global accounts_combo
+    if accounts_combo:
+        vals = get_account_dropdown_values()
+        accounts_combo['values'] = vals
+        if accounts_combo.get() not in vals:
+            accounts_combo.set(vals[0] if vals else '')
+
+
+def open_accounts_manager():
+    """Otevře okno správce účtů."""
+    win = tk.Toplevel(root)
+    win.title("🏦 Správce účtů")
+    win.geometry("820x560")
+    win.configure(bg='#0f172a')
+    win.resizable(True, True)
+    win.grab_set()
+
+    # ── Hlavička ─────────────────────────────────────────────────────────────
+    hdr = tk.Frame(win, bg='#0f172a', pady=12)
+    hdr.pack(fill='x', padx=0)
+    tk.Label(hdr, text="🏦  Správce účtů — Challenge / Verifikace / Funded",
+             font=('Segoe UI', 12, 'bold'), bg='#0f172a', fg='white').pack(side='left', padx=18)
+    tk.Button(hdr, text="＋  Nový účet", bg='#16a34a', fg='white',
+              font=('Segoe UI', 9, 'bold'), relief='flat', padx=12, pady=5,
+              cursor='hand2', command=lambda: _open_edit_dialog(None)).pack(side='right', padx=14)
+
+    # ── Tabulka účtů ─────────────────────────────────────────────────────────
+    cols_frame = tk.Frame(win, bg='#1e293b', pady=6)
+    cols_frame.pack(fill='x', padx=14, pady=(0, 2))
+    col_defs = [('Název účtu', 220), ('Typ', 90), ('Firma', 100),
+                ('Velikost', 90), ('Měna', 55), ('Status', 95), ('Poznámka', 140)]
+    for cname, cw in col_defs:
+        tk.Label(cols_frame, text=cname, font=('Segoe UI', 8, 'bold'),
+                 bg='#1e293b', fg='#94a3b8', width=cw//7, anchor='center').pack(side='left')
+    tk.Label(cols_frame, text='Akce', bg='#1e293b', fg='#94a3b8',
+             font=('Segoe UI', 8, 'bold'), width=12).pack(side='left')
+
+    list_frame = tk.Frame(win, bg='#0f172a')
+    list_frame.pack(fill='both', expand=True, padx=14)
+
+    # ── Statistiky (summary bar) ──────────────────────────────────────────────
+    stats_bar = tk.Frame(win, bg='#1e293b', pady=8, padx=14)
+    stats_bar.pack(fill='x', padx=14, pady=(6, 14))
+
+    def _rebuild_list():
+        for w in list_frame.winfo_children():
+            w.destroy()
+        accounts = load_accounts()
+
+        if not accounts:
+            tk.Label(list_frame, text="Zatím žádné účty. Klikni '＋ Nový účet'.",
+                     bg='#0f172a', fg='#64748b', font=('Segoe UI', 10)).pack(pady=40)
+            return
+
+        for i, acc in enumerate(accounts):
+            st = acc.get('status', 'Aktivní')
+            st_bg, st_fg = ACCOUNT_STATUS_COLORS.get(st, ('#374151', '#9ca3af'))
+            row_bg = '#1e293b' if i % 2 == 0 else '#0f172a'
+            row = tk.Frame(list_frame, bg=row_bg, pady=5)
+            row.pack(fill='x')
+
+            try: vel_str = f"{int(float(acc.get('velikost', 0))):,}"
+            except: vel_str = acc.get('velikost', '')
+
+            cells = [
+                (acc.get('nazev', '—'),    '#e2e8f0', 220),
+                (acc.get('typ', '—'),      '#94a3b8', 90),
+                (acc.get('firma', '—'),    '#94a3b8', 100),
+                (vel_str,                  '#60a5fa', 90),
+                (acc.get('mena', 'USD'),   '#94a3b8', 55),
+            ]
+            for val, fg, cw in cells:
+                tk.Label(row, text=val, font=('Segoe UI', 9), bg=row_bg,
+                         fg=fg, width=cw//7, anchor='center').pack(side='left')
+
+            # Status badge
+            stf = tk.Frame(row, bg=st_bg, padx=7, pady=2)
+            stf.pack(side='left', padx=4)
+            tk.Label(stf, text=st, font=('Segoe UI', 8, 'bold'),
+                     bg=st_bg, fg=st_fg).pack()
+
+            # Poznámka
+            pozn = acc.get('poznamka', '')[:22] + ('…' if len(acc.get('poznamka', '')) > 22 else '')
+            tk.Label(row, text=pozn, font=('Segoe UI', 8), bg=row_bg,
+                     fg='#64748b', width=20, anchor='w').pack(side='left', padx=4)
+
+            # Akce
+            btn_f = tk.Frame(row, bg=row_bg)
+            btn_f.pack(side='left', padx=6)
+            tk.Button(btn_f, text="✏", bg='#1e40af', fg='white', font=('Segoe UI', 8),
+                      relief='flat', padx=5, cursor='hand2',
+                      command=lambda a=acc: _open_edit_dialog(a)).pack(side='left', padx=1)
+            tk.Button(btn_f, text="🗑", bg='#7f1d1d', fg='white', font=('Segoe UI', 8),
+                      relief='flat', padx=5, cursor='hand2',
+                      command=lambda a=acc: _delete_account(a)).pack(side='left', padx=1)
+
+        # Statistiky
+        for w in stats_bar.winfo_children(): w.destroy()
+        total = len(accounts)
+        aktivni   = sum(1 for a in accounts if a.get('status') == 'Aktivní')
+        splneny   = sum(1 for a in accounts if a.get('status') == 'Splněn')
+        propadly  = sum(1 for a in accounts if a.get('status') == 'Propadlý')
+
+        def _stat(lbl, val, bg, fg):
+            f = tk.Frame(stats_bar, bg=bg, padx=10, pady=5)
+            f.pack(side='left', padx=4)
+            tk.Label(f, text=str(val), font=('Segoe UI', 13, 'bold'), bg=bg, fg=fg).pack()
+            tk.Label(f, text=lbl,     font=('Segoe UI', 7),           bg=bg, fg=fg).pack()
+
+        _stat('Celkem',    total,    '#334155', '#e2e8f0')
+        _stat('Aktivní',   aktivni,  '#14532d', '#86efac')
+        _stat('Splněno',   splneny,  '#1e3a5f', '#93c5fd')
+        _stat('Propadlých',propadly, '#7f1d1d', '#fca5a5')
+
+    def _open_edit_dialog(acc_or_none):
+        """Dialog pro přidání nebo editaci účtu."""
+        is_new = acc_or_none is None
+        dlg = tk.Toplevel(win)
+        dlg.title("Nový účet" if is_new else f"Upravit: {acc_or_none.get('nazev','')}")
+        dlg.geometry("440x480")
+        dlg.configure(bg='#0f172a')
+        dlg.grab_set()
+
+        tk.Label(dlg, text="Nový účet" if is_new else "Upravit účet",
+                 font=('Segoe UI', 11, 'bold'), bg='#0f172a', fg='white').pack(pady=(14,10))
+
+        form = tk.Frame(dlg, bg='#1e293b', padx=20, pady=16)
+        form.pack(fill='x', padx=14)
+
+        fields = {}
+
+        def _row(label, key, widget_fn, default=''):
+            r = tk.Frame(form, bg='#1e293b')
+            r.pack(fill='x', pady=4)
+            tk.Label(r, text=label, font=('Segoe UI', 9), bg='#1e293b', fg='#94a3b8',
+                     width=14, anchor='w').pack(side='left')
+            val = (acc_or_none or {}).get(key, default)
+            w = widget_fn(r, val)
+            w.pack(side='left', fill='x', expand=True)
+            fields[key] = w
+
+        def _entry(parent, val):
+            e = tk.Entry(parent, bg='#334155', fg='white', insertbackground='white',
+                         font=('Segoe UI', 10), relief='flat', bd=0)
+            e.insert(0, str(val))
+            return e
+
+        def _combo(vals):
+            def _make(parent, val):
+                c = ttk.Combobox(parent, values=vals, state='readonly', font=('Segoe UI', 10))
+                c.set(val if val in vals else vals[0])
+                return c
+            return _make
+
+        _row("Název účtu:", 'nazev',    _entry,                  'Můj FTMO Challenge')
+        _row("Typ:",        'typ',      _combo(ACCOUNT_TYPES),   'Challenge')
+        _row("Prop firma:", 'firma',    _combo(ACCOUNT_FIRMS),   'FTMO')
+        _row("Velikost ($:","velikost", _entry,                  '100000')
+        _row("Měna:",       'mena',     _combo(['USD','EUR','GBP','CZK','GBP']), 'USD')
+        _row("Status:",     'status',   _combo(ACCOUNT_STATUSES),'Aktivní')
+        _row("Poznámka:",   'poznamka', _entry,                  '')
+
+        def _save():
+            data = {}
+            for key, widget in fields.items():
+                data[key] = widget.get()
+            if not data['nazev'].strip():
+                messagebox.showwarning("Chyba", "Název účtu nesmí být prázdný.", parent=dlg)
+                return
+            accounts = load_accounts()
+            if is_new:
+                data['id'] = f"acc_{int(__import__('time').time())}"
+                accounts.append(data)
+            else:
+                data['id'] = acc_or_none.get('id', data['nazev'])
+                for i, a in enumerate(accounts):
+                    if a.get('id') == data['id']:
+                        accounts[i] = data; break
+                else:
+                    accounts.append(data)
+            save_accounts(accounts)
+            refresh_accounts_combo()
+            dlg.destroy()
+            _rebuild_list()
+
+        tk.Button(dlg, text="💾  Uložit", bg='#16a34a', fg='white',
+                  font=('Segoe UI', 10, 'bold'), relief='flat', padx=18, pady=8,
+                  cursor='hand2', command=_save).pack(pady=14)
+        tk.Button(dlg, text="Zrušit", bg='#334155', fg='#94a3b8',
+                  font=('Segoe UI', 9), relief='flat', padx=12, pady=6,
+                  cursor='hand2', command=dlg.destroy).pack()
+
+    def _delete_account(acc):
+        if not messagebox.askyesno("Smazat účet",
+                f"Opravdu smazat účet '{acc.get('nazev')}'?\n"
+                "Obchody přiřazené k tomuto účtu zůstanou, jen bez přiřazení.",
+                parent=win):
+            return
+        accounts = load_accounts()
+        accounts = [a for a in accounts if a.get('id') != acc.get('id')]
+        save_accounts(accounts)
+        refresh_accounts_combo()
+        _rebuild_list()
+
+    _rebuild_list()
+
 
 # ==============================================================================
 # ZÁLOŽKA PERIODY — týdenní a měsíční přehled výkonnosti
@@ -3945,7 +4275,7 @@ def open_settings_window(initial_tab=0):
             PAIRS_FILE = os.path.join(p, 'pairs_config.json')
             TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json')
             RULES_FILE = os.path.join(p, 'rules.txt')
-            FILTERS_FILE = os.path.join(p, 'filters_config.json')
+            FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
             messagebox.showinfo("Uloženo", f"Složka projektu uložena:\n{new_path}")
             sw.destroy()
             show_main_screen(current_project_name)
@@ -4051,7 +4381,7 @@ def open_project_by_name(mode, name):
     IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
     SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json')
     TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-    FILTERS_FILE = os.path.join(p, 'filters_config.json')
+    FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
     current_mode = mode
     show_main_screen(name)
 
@@ -4121,6 +4451,7 @@ def show_main_screen(p_name):
     tk.Button(hb, text="✕  MENU", command=show_intro_screen, bg='#c0392b', fg='white', font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="⚙ NASTAVENÍ", command=open_settings_window, bg='#34495e', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="🔄 UPDATE", command=lambda: check_for_updates(silent=False), bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="🏦 ÚČTY", command=open_accounts_manager, bg='#1e40af', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📖 DENÍK", command=show_journal_screen, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📝 PRAVIDLA", command=open_checklist_editor, bg='#8e44ad', fg='white', font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
 
@@ -4175,6 +4506,20 @@ def show_main_screen(p_name):
     tk.Label(f, text="Čas otevření:").grid(row=r, column=0, sticky='w'); cas_otevreni_entry = tk.Entry(f, width=35); cas_otevreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Čas uzavření:").grid(row=r, column=0, sticky='w'); cas_zavreni_entry = tk.Entry(f, width=35); cas_zavreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Délka / Den:").grid(row=r, column=0, sticky='w'); fd = tk.Frame(f); fd.grid(row=r, column=1, sticky='w'); delka_obchodu_entry = tk.Entry(fd, width=15, state='readonly'); delka_obchodu_entry.pack(side='left'); den_tydne_entry = tk.Entry(fd, width=15, state='readonly', font=('Segoe UI', 9)); den_tydne_entry.pack(side='left', padx=5); r+=1
+    # ── Výběr účtu ────────────────────────────────────────────────────────────
+    ucet_row = tk.Frame(f); ucet_row.grid(row=r, column=0, columnspan=2, sticky='we', pady=(6,2)); r+=1
+    ucet_lbl = tk.Frame(ucet_row, bg='#1e293b', padx=8, pady=4); ucet_lbl.pack(fill='x')
+    tk.Label(ucet_lbl, text="🏦  ��čet:", font=('Segoe UI', 9, 'bold'),
+             bg='#1e293b', fg='#93c5fd').pack(side='left')
+    accounts_combo = ttk.Combobox(ucet_lbl, values=get_account_dropdown_values(),
+                                  state='readonly', width=42, font=('Segoe UI', 9))
+    acvals = get_account_dropdown_values()
+    accounts_combo.set(acvals[0] if acvals else '')
+    accounts_combo.pack(side='left', padx=8)
+    tk.Button(ucet_lbl, text="⚙ Spravovat", bg='#1e3a5f', fg='#93c5fd',
+              font=('Segoe UI', 8), relief='flat', padx=6, cursor='hand2',
+              command=open_accounts_manager).pack(side='left')
+
     tk.Label(f, text="Symbol:").grid(row=r, column=0, sticky='w'); symbol_combo = ttk.Combobox(f, values=PAIRS, width=33); symbol_combo.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Směr:").grid(row=r, column=0, sticky='w'); smer_var = tk.StringVar(value="Buy"); sf = tk.Frame(f); sf.grid(row=r, column=1, sticky='w'); tk.Radiobutton(sf, text="BUY", variable=smer_var, value="Buy", fg='green', font=('Arial', 9, 'bold')).pack(side='left'); tk.Radiobutton(sf, text="SELL", variable=smer_var, value="Sell", fg='red', font=('Arial', 9, 'bold')).pack(side='left'); r+=1
     tk.Label(f, text="ENTRY PRICE:", font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); vstupni_hodnota_entry = tk.Entry(f, width=35); vstupni_hodnota_entry.grid(row=r, column=1, pady=3); r+=1
@@ -4778,7 +5123,7 @@ def create_new_project(mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
         current_mode = mode
         if mode == "REAL": save_prop_config({"balance": 100000, "currency": "USD", "risk_per_trade_percent": 1.0})
         show_main_screen(n)
@@ -4808,7 +5153,7 @@ def open_project(lb, mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
         current_mode = mode
         show_main_screen(n)
 
