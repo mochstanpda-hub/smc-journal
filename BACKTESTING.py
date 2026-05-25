@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.30"
+VERSION = "1.5.31"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.31 | Kritická oprava — accounts_combo chyběl v global deklaraci show_main_screen(), takže přiřazený účet se při ukládání obchodu vždy ztratil (widget byl lokální proměnná, pridat_obchod() viděl None)
 1.5.30 | Správce účtů — kliknutí na účet nebo tlačítko 📋 otevře detail s kompletním seznamem připojených obchodů (datum, symbol, směr, výsledek, P&L, P&L%); KPI souhrn v detailu: Obchodů, W/L/BE, Winrate, Celk. P&L, Aktuální kapitál, P&L%; Robustnější parsování P&L hodnot (1000, -1000, +500, 1 000, 1000,50)
 1.5.29 | Záložka Analýza — kompletní redesign: KPI karty (Winrate, Profit Factor, Expectancy, Max DD, Streak…) + barevné tabulky v kartách místo monospace textu; Správce účtů — nové sloupce Aktuální kapitál a P&L% automaticky počítané z obchodů; Nové sloupce v seznamu obchodů: Zisk/Ztráta a P&L% (přidat přes konfiguraci sloupců)
 1.5.28 | Kompletní přepis OCR detekce cen ze screenshotu — úzký band strip (4.5%) vyhne se šumu z grafu; Entry/TP rozhodnutí podle Y-polohy (prostřední box = Entry) místo záměnné barvy; SL = červená (spolehlivé); BINARY+INVERT threshold jako první pokus pro bílé bg; lepší parsování cen (3 378,64)
@@ -5178,7 +5179,7 @@ def show_main_screen(p_name):
     global current_project_name, trades_tree, filter_col_var, filter_val_var, paned, v_paned, save_btn
     global cas_otevreni_entry, cas_zavreni_entry, symbol_combo, smer_var, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
-    global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry
+    global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
     global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
