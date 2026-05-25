@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.28"
+VERSION = "1.5.29"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.29 | Záložka Analýza — kompletní redesign: KPI karty (Winrate, Profit Factor, Expectancy, Max DD, Streak…) + barevné tabulky v kartách místo monospace textu; Správce účtů — nové sloupce Aktuální kapitál a P&L% automaticky počítané z obchodů; Nové sloupce v seznamu obchodů: Zisk/Ztráta a P&L% (přidat přes konfiguraci sloupců)
 1.5.28 | Kompletní přepis OCR detekce cen ze screenshotu — úzký band strip (4.5%) vyhne se šumu z grafu; Entry/TP rozhodnutí podle Y-polohy (prostřední box = Entry) místo záměnné barvy; SL = červená (spolehlivé); BINARY+INVERT threshold jako první pokus pro bílé bg; lepší parsování cen (3 378,64)
 1.5.27 | Oprava kritické chyby — ACCOUNTS_FILE chyběl v global deklaraci ve všech 4 funkcích otevření projektu; účty se nyní správně ukládají v otevřeném projektu
 1.5.26 | Oprava ukládání účtů — účty se nyní správně uloží a zobrazí v seznamu; Pole Zisk/Ztráta v záznamu obchodu — ručně zadáš částku v domácí měně; Tlačítko 💱 kalkulačka měn — přepočet z USD/EUR na CZK a jiné; Nastavení domácí měny v Obecném nastavení (CZK, EUR, USD, GBP…); Sloupec P&L v správci účtů — součet zaznamenaných obchodů per-účet; Robustnější správce účtů — chybová hláška při pokusu uložit bez projektu
@@ -885,6 +886,8 @@ stats_text = None
 pie_graph_frame = None
 stats_graph_frame = None
 heatmap_graph_frame = None
+kpi_frame = None
+tables_frame = None
 
 # UI prvky formuláře
 cas_otevreni_entry = None; cas_zavreni_entry = None; symbol_combo = None; smer_var = None
@@ -924,7 +927,9 @@ COL_TRANSLATION = {
     "den_tydne": "Den", "delka_obchodu": "Délka", "slippage": "Slippage", "kvalita": "Kvalita",
     "news": "News (Impact)", "news_event": "Fundament (Zpráva)", "checklist_ratio": "✅ Pravidla",
     "tags": "Štítky (Tags)",
-    "ucet": "Účet"
+    "ucet": "Účet",
+    "zisk_mena": "Zisk/Ztráta",
+    "pnl_pct": "P&L %",
 }
 
 DEFAULT_SCORING = {
@@ -1686,7 +1691,7 @@ def run_ab_simulation():
     canvas.get_tk_widget().pack(fill='both', expand=True)
 
 def update_statistics():
-    global best_performers_frame, stats_symbol_combo, prop_equity_label, prop_balance_label, bar_chart_canvases
+    global best_performers_frame, stats_symbol_combo, prop_equity_label, prop_balance_label, bar_chart_canvases, kpi_frame, tables_frame
     if not stats_graph_frame: return
     trades = load_data()
     prop_cfg = load_prop_config()
@@ -1709,13 +1714,18 @@ def update_statistics():
     heatmap_canvases.clear()
     for c in bar_chart_canvases: c.get_tk_widget().destroy()
     bar_chart_canvases.clear()
-    
-    stats_text.delete(1.0, tk.END)
-    
+    if kpi_frame:
+        for w in kpi_frame.winfo_children(): w.destroy()
+    if tables_frame:
+        for w in tables_frame.winfo_children(): w.destroy()
     if best_performers_frame:
         for w in best_performers_frame.winfo_children(): w.destroy()
-        
-    if not trades: stats_text.insert(tk.END, "Žádná data k zobrazení."); return
+
+    if not trades:
+        if tables_frame:
+            tk.Label(tables_frame, text="Žádná data k zobrazení.",
+                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 11)).pack(pady=40)
+        return
     
     # --- STATISTICS VARIABLES ---
     stats = {
@@ -1885,159 +1895,289 @@ def update_statistics():
         h, m = divmod(int(avg_min), 60)
         return f"{h}h {m}m"
 
-    out = f"=== PERFORMANCE DASHBOARD (Bez Víkendů) ===\n"
-    out += f"Obchody: {stats['total']} | Wins: {stats['wins']} | Winrate: {winrate:.2f}% | Profit: {stats['profit_r']:.2f} R\n"
-    out += f"Avg Cílené RRR: {avg_target_rrr:.2f} | Profit Factor: {profit_factor:.2f}\n\n"
-    
-    out += "--- TIME ANALYSIS (DÉLKA OBCHODŮ) ---\n"
-    out += f"Průměr (Vše):  {avg_time_str(stats['duration']['all'])}\n"
-    out += f"Průměr (WIN):  {avg_time_str(stats['duration']['win'])} (Optimální délka pro TP)\n"
-    out += f"Průměr (LOSS): {avg_time_str(stats['duration']['loss'])}\n\n"
-    
-    out += "--- SMĚR (DIRECTION) ---\n"
-    for d in ["Buy", "Sell"]:
-        data = stats['directions'].get(d)
-        if data:
-            wr = (data['wins'] / data['count'] * 100) if data['count'] > 0 else 0
-            out += f"{d:<15} | WR: {wr:>5.1f}% | R: {data['r']:>7.2f} | Count: {data['count']}\n"
-        else:
-             out += f"{d:<15} | WR:   0.0% | R:    0.00 | Count: 0\n"
-    out += "\n"
-
-    def print_detailed_table(title, data_dict, sort_keys=None):
-        res = f"--- {title} ---\n"
-        keys = sort_keys if sort_keys else sorted(data_dict.keys())
-        for k in keys:
-            v = data_dict.get(k)
-            if not v: continue
-            if v['count'] == 0: continue
-            wr = (v['wins'] / v['count']) * 100
-            avg_rrr = v['rrr_sum'] / v['count']
-            res += f"{k:<15} | WR: {wr:>5.1f}% | R: {v['r']:>7.2f} | AvgRRR: {avg_rrr:.2f} | Count: {v['count']}\n"
-        res += "\n"
-        return res
-
-    days_order = ["Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek"]
-    out += print_detailed_table("ANALÝZA: DNY (Po-Pá)", stats['days'], days_order)
-    out += print_detailed_table("ANALÝZA: SESSION", stats['sessions'], sorted(stats['sessions'].keys()))
-    out += print_detailed_table("ANALÝZA: SETUP", stats['setups'], sorted(stats['setups'].keys()))
-    
-    # Tabulka štítků
-    if stats['tags']:
-        out += print_detailed_table("ANALÝZA: ŠTÍTKY (TAGS)", stats['tags'], sorted(stats['tags'].keys()))
-
     # === STREAK TRACKER ===
     streak_cur = 0; streak_type = None
     best_win_streak = 0; best_loss_streak = 0
     temp_streak = 0; temp_type = None
     for t in trades:
-        r = t.get('vysledek','').lower()
-        if r not in ('win','loss'): continue
-        if r == temp_type:
-            temp_streak += 1
-        else:
-            temp_streak = 1; temp_type = r
+        r = t.get('vysledek', '').lower()
+        if r not in ('win', 'loss'): continue
+        if r == temp_type: temp_streak += 1
+        else: temp_streak = 1; temp_type = r
         if temp_type == 'win' and temp_streak > best_win_streak: best_win_streak = temp_streak
         if temp_type == 'loss' and temp_streak > best_loss_streak: best_loss_streak = temp_streak
     streak_cur = temp_streak; streak_type = temp_type
-    streak_emoji = "🔥" if streak_type == 'win' else "❄️" if streak_type == 'loss' else ""
-    out += f"--- STREAK TRACKER ---\n"
-    out += f"Aktuální série: {streak_emoji} {streak_cur}× {streak_type.upper() if streak_type else 'N/A'}\n"
-    out += f"Nejlepší WIN série:  {best_win_streak}  |  Nejhorší LOSS série: {best_loss_streak}\n\n"
 
     # --- KLÍČOVÉ METRIKY ---
-    avg_win_r = stats['gross_profit'] / stats['wins'] if stats['wins'] > 0 else 0
+    avg_win_r  = stats['gross_profit'] / stats['wins'] if stats['wins'] > 0 else 0
     avg_loss_r = stats['gross_loss'] / max(stats['total'] - stats['wins'] - cnt_be, 1)
     expectancy = (winrate/100 * avg_win_r) - ((1 - winrate/100) * avg_loss_r)
     min_rrr_be = (1 - winrate/100) / (winrate/100) if winrate > 0 else float('inf')
-    out += "--- KLÍČOVÉ METRIKY ---\n"
-    out += f"Expectancy / obchod: {expectancy:+.3f} R\n"
-    out += f"Avg RRR výhry:       {avg_win_r:.2f} R\n"
-    out += f"Min RRR pro BE:      {min_rrr_be:.2f} R  (při WR {winrate:.1f}%)\n\n"
 
-    # --- TIMEFRAME ---
-    if stats['timeframes']:
-        out += "--- ANALÝZA: TIMEFRAME VSTUPU ---\n"
-        for tf in sorted(stats['timeframes'].keys()):
-            v = stats['timeframes'][tf]
-            if v['count'] == 0: continue
-            wr = v['wins'] / v['count'] * 100
-            out += f"{tf:<8} | WR: {wr:>5.1f}% | R: {v['r']:>+7.2f} | Count: {v['count']}\n"
-        out += "\n"
+    # --- DRAWDOWN (předpočet pro KPI + graf) ---
+    dd_curve = []; peak_eq = equity_curve[0]
+    for val in equity_curve:
+        if val > peak_eq: peak_eq = val
+        dd = ((peak_eq - val) / abs(peak_eq) * 100) if peak_eq != 0 else 0
+        dd_curve.append(-dd)
+    max_dd_pct = abs(min(dd_curve)) if dd_curve else 0
 
-    # --- MĚSÍČNÍ PŘEHLED ---
-    if stats['monthly']:
-        out += "--- MĚSÍČNÍ PŘEHLED ---\n"
-        for month in sorted(stats['monthly'].keys()):
-            v = stats['monthly'][month]
-            if v['count'] == 0: continue
-            wr = v['wins'] / v['count'] * 100
-            out += f"{month} | WR: {wr:>5.1f}% | R: {v['r']:>+7.2f} | Obchodů: {v['count']}\n"
-        out += "\n"
-
-    # --- ROLLING WIN RATE ---
-    rolling = stats['rolling']
-    if len(rolling) >= 5:
-        out += "--- ROLLING WIN RATE ---\n"
-        for n in [10, 20, 50]:
-            last_n = [(r, rv) for r, rv in rolling[-n:] if r in ('win', 'loss', 'be')]
-            if len(last_n) >= min(n, 3):
-                wr_n = sum(1 for r, _ in last_n if r == 'win') / len(last_n) * 100
-                r_n  = sum(rv for _, rv in last_n)
-                out += f"Posledních {n:>2} obchodů:  WR {wr_n:.1f}%  |  {r_n:+.2f} R\n"
-        out += "\n"
-
-    # --- BEST CONDITIONS (TOP KOMBINACE) ---
-    out += "--- TOP KOMBINACE (Session | Symbol | Setup) — min. 3 obchody ---\n"
-    combos = [(k, v) for k, v in stats['combinations'].items() if v['count'] >= 3]
-    combos.sort(key=lambda x: x[1]['wins'] / x[1]['count'], reverse=True)
-    if combos:
-        for k, v in combos[:8]:
-            wr = v['wins'] / v['count'] * 100
-            out += f"  {wr:>5.1f}% WR | {v['r']:>+6.2f} R | {v['count']:>2}x | {k}\n"
-    else:
-        out += "  (potřeba min. 3 obchody na jednu kombinaci)\n"
-    out += "\n"
-
-    # ── Přehled per účet ─────────────────────────────────────────────────────
+    # --- PER ÚČET ---
     acct_stats = defaultdict(lambda: {'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
-    trades_all = load_data()
-    for t in trades_all:
-        raw_day = t.get('den_tydne', '').capitalize()
-        if raw_day in ('Sobota', 'Neděle'): continue
-        res = t.get('vysledek', '').lower()
-        if not res: continue
+    for t in load_data():
+        if t.get('den_tydne','').capitalize() in ('Sobota','Neděle'): continue
+        res2 = t.get('vysledek','').lower()
+        if not res2: continue
         if selected_symbol_filter != "VŠE" and t.get('symbol') != selected_symbol_filter: continue
-        ucet = t.get('ucet', '').strip() or '— (bez účtu) —'
-        try: rrr_v = float(str(t.get('rrr', 1)).replace(',', '.'))
+        ucet2 = t.get('ucet','').strip() or '— (bez účtu) —'
+        try: rrr_v = float(str(t.get('rrr',1)).replace(',','.'))
         except: rrr_v = 1.0
-        acct_stats[ucet]['count'] += 1
-        if res == 'win':
-            acct_stats[ucet]['wins'] += 1
-            acct_stats[ucet]['r'] += rrr_v
-            acct_stats[ucet]['gross_p'] += rrr_v
-        elif res == 'loss':
-            acct_stats[ucet]['losses'] += 1
-            acct_stats[ucet]['r'] -= 1.0
-            acct_stats[ucet]['gross_l'] += 1.0
-        else:
-            acct_stats[ucet]['be'] += 1
+        acct_stats[ucet2]['count'] += 1
+        if res2 == 'win':
+            acct_stats[ucet2]['wins'] += 1; acct_stats[ucet2]['r'] += rrr_v; acct_stats[ucet2]['gross_p'] += rrr_v
+        elif res2 == 'loss':
+            acct_stats[ucet2]['losses'] += 1; acct_stats[ucet2]['r'] -= 1.0; acct_stats[ucet2]['gross_l'] += 1.0
+        else: acct_stats[ucet2]['be'] += 1
 
-    if len(acct_stats) > 1 or (len(acct_stats) == 1 and list(acct_stats.keys())[0] != '— (bez účtu) —'):
-        out += "═" * 68 + "\n"
-        out += "  🏦 PŘEHLED PER ÚČET\n"
-        out += "─" * 68 + "\n"
-        out += f"  {'Účet':<28} {'Obc':>4} {'Win':>4} {'Loss':>5} {'WR%':>6} {'Celk.R':>8} {'PF':>7}\n"
-        out += "─" * 68 + "\n"
-        for acname, s in sorted(acct_stats.items(), key=lambda x: -x[1]['r']):
-            d  = s['wins'] + s['losses']
-            wr = s['wins'] / d * 100 if d > 0 else 0.0
-            pf = f"{s['gross_p']/s['gross_l']:.2f}" if s['gross_l'] > 0 else ('∞' if s['gross_p'] > 0 else '—')
-            nm = (acname[:27] + '…') if len(acname) > 28 else acname
-            out += f"  {nm:<28} {s['count']:>4} {s['wins']:>4} {s['losses']:>5} {wr:>5.1f}% {s['r']:>+7.2f}R {pf:>7}\n"
-        out += "\n"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # KPI KARTY
+    # ═══════════════════════════════════════════════════════════════════════════
+    if kpi_frame:
+        _kpi_items = [
+            ("OBCHODŮ",       str(stats['total']),              DT_TEXT),
+            ("W / L / BE",    f"{stats['wins']} / {cnt_loss} / {cnt_be}", DT_SUBTEXT),
+            ("WINRATE",       f"{winrate:.1f}%",                '#4ade80' if winrate >= 50 else '#f87171'),
+            ("PROFIT",        f"{stats['profit_r']:+.2f} R",   '#4ade80' if stats['profit_r'] >= 0 else '#f87171'),
+            ("PROFIT FACTOR", f"{profit_factor:.2f}",           '#4ade80' if profit_factor >= 1.5 else '#fbbf24' if profit_factor >= 1 else '#f87171'),
+            ("EXPECTANCY",    f"{expectancy:+.3f} R",           '#4ade80' if expectancy > 0 else '#f87171'),
+            ("MAX DRAWDOWN",  f"{max_dd_pct:.1f}%",            '#f87171' if max_dd_pct > 10 else '#fbbf24' if max_dd_pct > 5 else '#4ade80'),
+            ("AVG RRR CÍL",   f"{avg_target_rrr:.2f}",         DT_TEXT),
+            ("WIN SÉRIE",     f"{best_win_streak}×",            '#4ade80'),
+            ("LOSS SÉRIE",    f"{best_loss_streak}×",           '#f87171'),
+        ]
+        for label, value, color in _kpi_items:
+            c = tk.Frame(kpi_frame, bg=DT_SURFACE, padx=12, pady=8)
+            c.pack(side='left', padx=3, pady=2)
+            tk.Label(c, text=value, font=('Segoe UI', 13, 'bold'),
+                     bg=DT_SURFACE, fg=color).pack()
+            tk.Label(c, text=label, font=('Segoe UI', 7),
+                     bg=DT_SURFACE, fg=DT_SUBTEXT).pack()
 
-    stats_text.insert(tk.END, out)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TABULKY STATISTIK — styled cards
+    # ═══════════════════════════════════════════════════════════════════════════
+    days_order = ["Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek"]
+
+    def _wr_fg(wr): return '#4ade80' if wr >= 55 else '#fbbf24' if wr >= 45 else '#f87171'
+    def _r_fg(r):   return '#4ade80' if r > 0 else '#f87171' if r < 0 else DT_SUBTEXT
+
+    def _stat_card(parent, title, headers, rows, accent=None):
+        """Render a styled statistics card."""
+        accent_c = accent or DT_ACCENT
+        card = tk.Frame(parent, bg=DT_SURFACE)
+        card.pack(fill='x', pady=(0, 6))
+        hf = tk.Frame(card, bg=accent_c)
+        hf.pack(fill='x')
+        tk.Label(hf, text=f"  {title}", font=('Segoe UI', 9, 'bold'),
+                 bg=accent_c, fg='white', pady=4, anchor='w').pack(fill='x')
+        hrow = tk.Frame(card, bg=DT_PANEL)
+        hrow.pack(fill='x')
+        for h in headers:
+            tk.Label(hrow, text=h, font=('Segoe UI', 7, 'bold'), bg=DT_PANEL,
+                     fg=DT_SUBTEXT, padx=8, pady=2, anchor='center').pack(side='left', expand=True, fill='x')
+        for ri, row_vals in enumerate(rows):
+            rbg = DT_SURFACE if ri % 2 == 0 else DT_BG
+            rf  = tk.Frame(card, bg=rbg); rf.pack(fill='x')
+            for (val, fg_c) in row_vals:
+                tk.Label(rf, text=val, font=('Segoe UI', 9), bg=rbg,
+                         fg=fg_c or DT_TEXT, padx=8, pady=3, anchor='center').pack(side='left', expand=True, fill='x')
+
+    if tables_frame:
+        # ── 2-sloupcový layout ─────────────────────────────────────────────────
+        _col_l = tk.Frame(tables_frame, bg=DT_BG)
+        _col_r = tk.Frame(tables_frame, bg=DT_BG)
+        _col_l.pack(side='left', fill='both', expand=True, padx=(0, 4))
+        _col_r.pack(side='right', fill='both', expand=True, padx=(4, 0))
+
+        # ── LEVÝ SLOUPEC ──────────────────────────────────────────────────────
+        # Klíčové metriky
+        _stat_card(_col_l, "KLÍČOVÉ METRIKY", ["Metrika", "Hodnota"], [
+            [("Expectancy / obchod", DT_SUBTEXT), (f"{expectancy:+.3f} R", _r_fg(expectancy))],
+            [("Avg RRR výhry",       DT_SUBTEXT), (f"{avg_win_r:.2f} R", '#4ade80')],
+            [("Min RRR pro breakeven",DT_SUBTEXT),(f"{min_rrr_be:.2f} R (WR {winrate:.1f}%)", DT_TEXT)],
+            [("Délka obchodu (vše)", DT_SUBTEXT), (avg_time_str(stats['duration']['all']), DT_TEXT)],
+            [("Délka obchodu (WIN)", DT_SUBTEXT), (avg_time_str(stats['duration']['win']), '#4ade80')],
+            [("Délka obchodu (LOSS)",DT_SUBTEXT), (avg_time_str(stats['duration']['loss']), '#f87171')],
+        ], accent='#1e40af')
+
+        # DNY
+        _days_rows = []
+        for dk in days_order:
+            v = stats['days'].get(dk)
+            if not v or v['count'] == 0: continue
+            wr2 = v['wins']/v['count']*100
+            _days_rows.append([
+                (dk, DT_TEXT),
+                (f"{wr2:.1f}%", _wr_fg(wr2)),
+                (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                (f"{v['rrr_sum']/v['count']:.2f}", DT_TEXT),
+                (str(v['count']), DT_SUBTEXT),
+            ])
+        if _days_rows:
+            _stat_card(_col_l, "DNY OBCHODOVÁNÍ", ["Den", "WR%", "R celkem", "Avg RRR", "Počet"], _days_rows)
+
+        # SESSION
+        _sess_rows = []
+        for sk in sorted(stats['sessions'].keys()):
+            v = stats['sessions'][sk]
+            if v['count'] == 0: continue
+            wr2 = v['wins']/v['count']*100
+            _sess_rows.append([
+                (sk, DT_TEXT),
+                (f"{wr2:.1f}%", _wr_fg(wr2)),
+                (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                (f"{v['rrr_sum']/v['count']:.2f}", DT_TEXT),
+                (str(v['count']), DT_SUBTEXT),
+            ])
+        if _sess_rows:
+            _stat_card(_col_l, "SESSION", ["Seance", "WR%", "R celkem", "Avg RRR", "Počet"], _sess_rows)
+
+        # TIMEFRAME
+        if stats['timeframes']:
+            _tf_rows = []
+            for tf in sorted(stats['timeframes'].keys()):
+                v = stats['timeframes'][tf]
+                if v['count'] == 0: continue
+                wr2 = v['wins']/v['count']*100
+                _tf_rows.append([
+                    (tf, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            if _tf_rows:
+                _stat_card(_col_l, "TIMEFRAME VSTUPU", ["Timeframe", "WR%", "R celkem", "Počet"], _tf_rows)
+
+        # TAGS
+        if stats['tags']:
+            _tag_rows = []
+            for tg in sorted(stats['tags'].keys()):
+                v = stats['tags'][tg]
+                if v['count'] == 0: continue
+                wr2 = v['wins']/v['count']*100
+                _tag_rows.append([
+                    (tg, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            if _tag_rows:
+                _stat_card(_col_l, "ŠTÍTKY (TAGS)", ["Tag", "WR%", "R celkem", "Počet"], _tag_rows)
+
+        # ── PRAVÝ SLOUPEC ─────────────────────────────────────────────────────
+        # Streak & Rolling
+        streak_emoji = "🔥" if streak_type == 'win' else "❄️" if streak_type == 'loss' else ""
+        rolling = stats['rolling']
+        _rolling_rows = []
+        for n in [10, 20, 50]:
+            last_n = [(r, rv) for r, rv in rolling[-n:] if r in ('win','loss','be')]
+            if len(last_n) >= min(n, 3):
+                wr_n = sum(1 for r,_ in last_n if r == 'win') / len(last_n) * 100
+                r_n  = sum(rv for _,rv in last_n)
+                _rolling_rows.append([
+                    (f"Posl. {n} obchodů", DT_SUBTEXT),
+                    (f"{wr_n:.1f}%", _wr_fg(wr_n)),
+                    (f"{r_n:+.2f} R", _r_fg(r_n)),
+                ])
+        _stat_card(_col_r, "STREAK & ROLLING WINRATE", ["", "WR%", "R"], [
+            [("Aktuální série", DT_SUBTEXT), (f"{streak_emoji} {streak_cur}× {streak_type.upper() if streak_type else 'N/A'}", '#4ade80' if streak_type == 'win' else '#f87171')],
+            [("Nejlepší WIN série", DT_SUBTEXT), (f"{best_win_streak}×", '#4ade80')],
+            [("Nejhorší LOSS série", DT_SUBTEXT), (f"{best_loss_streak}×", '#f87171')],
+        ] + _rolling_rows, accent='#065f46')
+
+        # SETUP / FIBO
+        _setup_rows = []
+        for sk in sorted(stats['setups'].keys()):
+            v = stats['setups'][sk]
+            if v['count'] == 0: continue
+            wr2 = v['wins']/v['count']*100
+            _setup_rows.append([
+                (sk, DT_TEXT),
+                (f"{wr2:.1f}%", _wr_fg(wr2)),
+                (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                (f"{v['rrr_sum']/v['count']:.2f}", DT_TEXT),
+                (str(v['count']), DT_SUBTEXT),
+            ])
+        if _setup_rows:
+            _stat_card(_col_r, "SETUP / FIBO", ["Setup", "WR%", "R celkem", "Avg RRR", "Počet"], _setup_rows)
+
+        # SMĚR
+        _dir_rows = []
+        for d2 in ["Buy", "Sell"]:
+            v = stats['directions'].get(d2, {'wins':0,'count':0,'r':0.0})
+            wr2 = v['wins']/v['count']*100 if v['count'] > 0 else 0
+            _dir_rows.append([
+                (d2, '#4ade80' if d2 == 'Buy' else '#f87171'),
+                (f"{wr2:.1f}%", _wr_fg(wr2)),
+                (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                (str(v['count']), DT_SUBTEXT),
+            ])
+        _stat_card(_col_r, "SMĚR OBCHODU", ["Směr", "WR%", "R celkem", "Počet"], _dir_rows)
+
+        # MĚSÍČNÍ PŘEHLED (full width)
+        if stats['monthly']:
+            _mo_rows = []
+            for month in sorted(stats['monthly'].keys()):
+                v = stats['monthly'][month]
+                if v['count'] == 0: continue
+                wr2 = v['wins']/v['count']*100
+                _mo_rows.append([
+                    (month, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (f"{v['wins']}/{v['count']-v['wins']}", DT_SUBTEXT),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            _stat_card(_col_r, "MĚSÍČNÍ PŘEHLED", ["Měsíc", "WR%", "R", "W/L", "Obc"], _mo_rows, accent='#7c3aed')
+
+        # TOP KOMBINACE (full-width pod sloupci)
+        _combo_section = tk.Frame(tables_frame, bg=DT_BG)
+        _combo_section.pack(fill='x', pady=(4, 0))
+        combos = [(k, v) for k, v in stats['combinations'].items() if v['count'] >= 3]
+        combos.sort(key=lambda x: x[1]['wins']/x[1]['count'], reverse=True)
+        _combo_rows = []
+        for k, v in combos[:10]:
+            wr2 = v['wins']/v['count']*100
+            _combo_rows.append([
+                (k, DT_TEXT),
+                (f"{wr2:.1f}%", _wr_fg(wr2)),
+                (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                (str(v['count']), DT_SUBTEXT),
+            ])
+        if not _combo_rows:
+            _combo_rows = [[("Potřeba min. 3 obchody na jednu kombinaci", DT_SUBTEXT), ("—",DT_SUBTEXT),("—",DT_SUBTEXT),("—",DT_SUBTEXT)]]
+        _stat_card(_combo_section, "TOP KOMBINACE  (Session | Symbol | Setup)  — min. 3 obchody",
+                   ["Kombinace", "WR%", "R celkem", "Počet"], _combo_rows, accent='#92400e')
+
+        # PER ÚČET
+        _acc_section = tk.Frame(tables_frame, bg=DT_BG)
+        _acc_section.pack(fill='x', pady=(4, 0))
+        if len(acct_stats) > 1 or (len(acct_stats)==1 and list(acct_stats.keys())[0]!='— (bez účtu) —'):
+            _acc_rows = []
+            for acname, s in sorted(acct_stats.items(), key=lambda x: -x[1]['r']):
+                d3  = s['wins'] + s['losses']
+                wr3 = s['wins'] / d3 * 100 if d3 > 0 else 0.0
+                pf3 = f"{s['gross_p']/s['gross_l']:.2f}" if s['gross_l'] > 0 else ('∞' if s['gross_p'] > 0 else '—')
+                nm  = (acname[:30]+'…') if len(acname) > 31 else acname
+                _acc_rows.append([
+                    (nm, DT_TEXT),
+                    (str(s['count']), DT_SUBTEXT),
+                    (f"{wr3:.1f}%", _wr_fg(wr3)),
+                    (f"{s['r']:+.2f} R", _r_fg(s['r'])),
+                    (pf3, DT_TEXT),
+                ])
+            _stat_card(_acc_section, "🏦  PŘEHLED PER ÚČET",
+                       ["Účet", "Obc", "WR%", "R celkem", "P. Factor"], _acc_rows, accent='#1e3a5f')
 
     # Pie Charts (Winrate & Timeframes)
     if stats['total'] > 0:
@@ -2057,9 +2197,9 @@ def update_statistics():
             ax_pie.set_title("WINRATE", color=DT_TEXT, fontsize=10, pad=10)
 
         ax_tf = fig_pie.add_subplot(122)
-        tf_items = sorted(stats['timeframes'].items(), key=lambda x: x[1], reverse=True)
+        tf_items = sorted(stats['timeframes'].items(), key=lambda x: x[1]['count'], reverse=True)
         if tf_items:
-            ax_tf.pie([x[1] for x in tf_items], labels=[x[0] for x in tf_items], autopct='%1.0f%%', startangle=90, pctdistance=0.75, textprops={'color':DT_TEXT, 'fontsize': 8})
+            ax_tf.pie([x[1]['count'] for x in tf_items], labels=[x[0] for x in tf_items], autopct='%1.0f%%', startangle=90, pctdistance=0.75, textprops={'color':DT_TEXT, 'fontsize': 8})
             ax_tf.add_artist(plt.Circle((0,0),0.60,fc='#ffffff'))
             ax_tf.set_title("TIMEFRAMES", color=DT_TEXT, fontsize=10, pad=10)
 
@@ -2069,16 +2209,7 @@ def update_statistics():
         canvas_pie.get_tk_widget().pack(fill='both', expand=True)
         pie_canvases.append(canvas_pie)
 
-    # === EQUITY + DRAWDOWN (2 subploty) ===
-    # Drawdown výpočet
-    dd_curve = []
-    peak_eq = equity_curve[0]
-    for val in equity_curve:
-        if val > peak_eq: peak_eq = val
-        dd = ((peak_eq - val) / abs(peak_eq) * 100) if peak_eq != 0 else 0
-        dd_curve.append(-dd)
-    max_dd_pct = abs(min(dd_curve)) if dd_curve else 0
-
+    # === EQUITY + DRAWDOWN (2 subploty) — dd_curve/max_dd_pct computed above ===
     fig = plt.Figure(figsize=(9, 5), dpi=100)
     fig.patch.set_facecolor('#ffffff')
 
@@ -2512,6 +2643,34 @@ def update_gallery():
             if col >= cols: col = 0; row += 1
         except Exception: pass
 
+def _save_trades_file(trades, reference_trade=None):
+    """
+    Uloží všechny obchody do CSV s jednotnými sloupci.
+    Sjednotí klíče ze všech obchodů + reference_trade (nový/editovaný).
+    Vyplní chybějící hodnoty prázdným stringem.
+    Tím se zabrání posunutí sloupců při přidání nového pole.
+    """
+    if not trades and not reference_trade:
+        return
+    # Sestav pořadí sloupců: reference_trade má nejaktuálnější klíče
+    ref_keys = list(reference_trade.keys()) if reference_trade else []
+    # Přidej klíče ze starých obchodů pokud nejsou v ref
+    extra_keys = []
+    for t in trades:
+        for k in t.keys():
+            if k not in ref_keys and k not in extra_keys:
+                extra_keys.append(k)
+    all_keys = ref_keys + extra_keys
+    # Vyplň chybějící klíče v každém obchodu
+    for t in trades:
+        for k in all_keys:
+            if k not in t:
+                t[k] = ''
+    with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
+        w = csv.DictWriter(f, fieldnames=all_keys, extrasaction='ignore')
+        w.writeheader()
+        w.writerows(trades)
+
 def pridat_obchod():
     global editing_trade_index
     if not DATA_FILE: messagebox.showerror("Chyba", "Není vybrán žádný projekt!"); return
@@ -2546,15 +2705,11 @@ def pridat_obchod():
         if editing_trade_index is not None:
             if editing_trade_index < len(trades):
                 trades[editing_trade_index] = d
-                with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-                    w = csv.DictWriter(f, fieldnames=list(d.keys())); w.writeheader(); w.writerows(trades)
+                _save_trades_file(trades, d)
                 messagebox.showinfo("OK", "Obchod aktualizován."); editing_trade_index = None; save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
         else:
-            ex = os.path.exists(DATA_FILE)
-            with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
-                w = csv.DictWriter(f, fieldnames=list(d.keys()))
-                if not ex: w.writeheader()
-                w.writerow(d)
+            trades.append(d)
+            _save_trades_file(trades, d)
             messagebox.showinfo("OK", "Obchod uložen.")
         update_listbox(); reset_form(); update_statistics()
     except Exception as e:
@@ -2566,8 +2721,7 @@ def delete_specific_image(trade_idx, img_name):
     t = trades[trade_idx]; current_imgs = [n for n in t.get('obrazky','').split(';') if n]
     if img_name in current_imgs:
         current_imgs.remove(img_name); t['obrazky'] = ";".join(current_imgs)
-        with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-            if trades: w = csv.DictWriter(f, fieldnames=list(trades[0].keys())); w.writeheader(); w.writerows(trades)
+        _save_trades_file(trades)
         class MockEvent: pass
         show_trade_details(MockEvent()); messagebox.showinfo("Smazáno", "Obrázek odstraněn.")
 
@@ -2658,8 +2812,7 @@ def smazat_obchod():
         idx = int(sel[0]); tr = load_data()
         if idx < len(tr):
             del tr[idx]
-            with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-                if tr: w = csv.DictWriter(f, fieldnames=list(tr[0].keys())); w.writeheader(); w.writerows(tr)
+            _save_trades_file(tr)
             update_listbox(); update_statistics(); reset_form()
 
 def update_listbox():
@@ -2672,6 +2825,18 @@ def update_listbox():
     trades_tree.tag_configure('other', background=DT_PANEL,  foreground=DT_TEXT)
 
     cfg = load_scoring_config(); current_cols = cfg.get("columns", DEFAULT_SCORING["columns"]); trades = load_data()
+
+    # P&L% lookup: mapa název_účtu → počáteční kapitál
+    _acct_cap_lookup = {}
+    if ACCOUNTS_FILE and os.path.exists(ACCOUNTS_FILE):
+        try:
+            for _a in load_accounts():
+                _n = _a.get('nazev', '').strip()
+                _v = _a.get('velikost', '')
+                if _n and _v:
+                    try: _acct_cap_lookup[_n] = float(str(_v).replace(',', '.').replace(' ', ''))
+                    except: pass
+        except: pass
 
     # Hodnoty filtrů
     f_symbol  = filter_symbol_var.get()    if filter_symbol_var  else "VŠE"
@@ -2703,7 +2868,17 @@ def update_listbox():
                 if float(str(t.get('rrr', '0')).replace(',', '.')) > float(f_rrr_max): continue
             except: pass
 
-        vals = [t.get(c, "") for c in current_cols]
+        # Vypočítej P&L% pokud je sloupec aktivní
+        _t_display = dict(t)
+        if 'pnl_pct' in current_cols:
+            _ucet = t.get('ucet', '').strip()
+            _zm   = t.get('zisk_mena', '').strip().replace(',', '.').replace(' ', '')
+            _cap  = _acct_cap_lookup.get(_ucet, 0)
+            if _zm and _cap > 0:
+                try: _t_display['pnl_pct'] = f"{float(_zm) / _cap * 100:+.2f}%"
+                except: _t_display['pnl_pct'] = ''
+            else: _t_display['pnl_pct'] = ''
+        vals = [_t_display.get(c, "") for c in current_cols]
         tag = 'win' if res == 'win' else 'loss' if res == 'loss' else 'be' if res == 'be' else 'other'
         trades_tree.insert("", "end", iid=i, values=vals, tags=(tag,))
 
@@ -3366,7 +3541,7 @@ def open_accounts_manager():
     """Otevře okno správce účtů."""
     win = tk.Toplevel(root)
     win.title("🏦 Správce účtů")
-    win.geometry("960x580")
+    win.geometry("1200x580")
     win.configure(bg='#0f172a')
     win.resizable(True, True)
     win.grab_set()
@@ -3383,14 +3558,14 @@ def open_accounts_manager():
     # ── Tabulka účtů ─────────────────────────────────────────────────────────
     cols_frame = tk.Frame(win, bg='#1e293b', pady=6)
     cols_frame.pack(fill='x', padx=14, pady=(0, 2))
-    col_defs = [('Název účtu', 220), ('Typ', 90), ('Firma', 100),
-                ('Velikost', 90), ('Měna', 55), ('Status', 95),
-                ('Začátek → Konec', 154), ('P&L', 90), ('Poznámka', 100)]
+    col_defs = [('Název účtu', 196), ('Typ', 77), ('Firma', 91),
+                ('Počáteční', 84), ('Měna', 49), ('Status', 91),
+                ('Začátek → Konec', 140), ('Aktuální', 91), ('P&L %', 63), ('P&L', 91), ('Poznámka', 91)]
     for cname, cw in col_defs:
         tk.Label(cols_frame, text=cname, font=('Segoe UI', 8, 'bold'),
                  bg='#1e293b', fg='#94a3b8', width=cw//7, anchor='center').pack(side='left')
     tk.Label(cols_frame, text='Akce', bg='#1e293b', fg='#94a3b8',
-             font=('Segoe UI', 8, 'bold'), width=12).pack(side='left')
+             font=('Segoe UI', 8, 'bold'), width=10).pack(side='left')
 
     list_frame = tk.Frame(win, bg='#0f172a')
     list_frame.pack(fill='both', expand=True, padx=14)
@@ -3430,13 +3605,14 @@ def open_accounts_manager():
             row.pack(fill='x')
 
             vel_str = _fmt_vel(acc.get('velikost', ''))
+            _acc_name = acc.get('nazev', '')
 
             cells = [
-                (acc.get('nazev', '—'),    '#e2e8f0', 220),
-                (acc.get('typ', '—'),      '#94a3b8', 90),
-                (acc.get('firma', '—'),    '#94a3b8', 100),
-                (vel_str,                  '#60a5fa', 90),
-                (acc.get('mena', 'USD'),   '#94a3b8', 55),
+                (acc.get('nazev', '—'),    '#e2e8f0', 196),
+                (acc.get('typ', '—'),      '#94a3b8', 77),
+                (acc.get('firma', '—'),    '#94a3b8', 91),
+                (vel_str,                  '#60a5fa', 84),
+                (acc.get('mena', 'USD'),   '#94a3b8', 49),
             ]
             for val, fg, cw in cells:
                 tk.Label(row, text=val, font=('Segoe UI', 9), bg=row_bg,
@@ -3453,11 +3629,41 @@ def open_accounts_manager():
             dk = acc.get('datum_konec', '')
             datum_str = f"{ds or '?'}  →  {dk or '…'}" if (ds or dk) else ''
             tk.Label(row, text=datum_str, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#60a5fa', width=22, anchor='center').pack(side='left', padx=4)
+                     fg='#60a5fa', width=20, anchor='center').pack(side='left', padx=2)
 
-            # P&L z obchodů
-            _pnl_val = _acc_pnl.get(acc.get('nazev', ''), None)
+            # Výpočty: Aktuální kapitál, P&L%
+            _pnl_val = _acc_pnl.get(_acc_name, None)
             _cur_sym  = get_app_currency()
+            _vel_num = None
+            try: _vel_num = float(str(acc.get('velikost', '')).replace(',', '.').replace(' ', ''))
+            except: pass
+
+            # Aktuální kapitál
+            if _vel_num is not None and _pnl_val is not None:
+                _akt_num = _vel_num + _pnl_val
+                _akt_str = f"{_akt_num:,.0f}"
+                _akt_fg  = '#4ade80' if _akt_num >= _vel_num else '#f87171'
+            elif _vel_num is not None:
+                _akt_str = vel_str
+                _akt_fg  = '#94a3b8'
+            else:
+                _akt_str = '—'
+                _akt_fg  = '#475569'
+            tk.Label(row, text=_akt_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
+                     fg=_akt_fg, width=13, anchor='center').pack(side='left', padx=2)
+
+            # P&L %
+            if _vel_num and _vel_num != 0 and _pnl_val is not None:
+                _pct = _pnl_val / _vel_num * 100
+                _pct_str = f"{_pct:+.2f}%"
+                _pct_fg  = '#4ade80' if _pct >= 0 else '#f87171'
+            else:
+                _pct_str = '—'
+                _pct_fg  = '#475569'
+            tk.Label(row, text=_pct_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
+                     fg=_pct_fg, width=9, anchor='center').pack(side='left', padx=2)
+
+            # P&L absolutní (v app-měně)
             if _pnl_val is not None:
                 _pnl_str = f"{_pnl_val:+,.0f} {_cur_sym}"
                 _pnl_fg  = '#4ade80' if _pnl_val >= 0 else '#f87171'
@@ -3468,9 +3674,9 @@ def open_accounts_manager():
                      fg=_pnl_fg, width=13, anchor='center').pack(side='left', padx=2)
 
             # Poznámka
-            pozn = acc.get('poznamka', '')[:15] + ('…' if len(acc.get('poznamka', '')) > 15 else '')
+            pozn = acc.get('poznamka', '')[:12] + ('…' if len(acc.get('poznamka', '')) > 12 else '')
             tk.Label(row, text=pozn, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#64748b', width=14, anchor='w').pack(side='left', padx=2)
+                     fg='#64748b', width=13, anchor='w').pack(side='left', padx=2)
 
             # Akce
             btn_f = tk.Frame(row, bg=row_bg)
@@ -4814,7 +5020,7 @@ def show_main_screen(p_name):
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
-    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases
+    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
 
     current_project_name = p_name
@@ -5291,38 +5497,76 @@ def show_main_screen(p_name):
     details_text = tk.Text(bottom_pane, height=10, font=('Consolas', 9), bg='#f8f9fa'); details_text.pack(fill='both', expand=True, pady=5)
     img_scroll = tk.Canvas(bottom_pane, height=120); img_scroll.pack(fill='x', pady=(5,0)); image_frame = tk.Frame(img_scroll); img_scroll.create_window((0,0), window=image_frame, anchor='nw')
 
-    # TAB 2
+    # TAB 2 — ANALÝZA (redesigned)
     tab2 = ttk.Frame(nb); nb.add(tab2, text='  ANALÝZA  ')
-    st_canv = tk.Canvas(tab2); st_scb = ttk.Scrollbar(tab2, command=st_canv.yview); st_canv.pack(side='left', fill='both', expand=True); st_scb.pack(side='right', fill='y')
-    st_f = tk.Frame(st_canv); st_canv.create_window((0,0), window=st_f, anchor='nw'); st_f.bind("<Configure>", lambda e: st_canv.configure(scrollregion=st_canv.bbox("all"))); st_canv.configure(yscrollcommand=st_scb.set)
-    
+    st_canv = tk.Canvas(tab2, bg=DT_BG, highlightthickness=0)
+    st_scb  = ttk.Scrollbar(tab2, command=st_canv.yview)
+    st_canv.pack(side='left', fill='both', expand=True)
+    st_scb.pack(side='right', fill='y')
+    st_f = tk.Frame(st_canv, bg=DT_BG)
+    st_canv.create_window((0, 0), window=st_f, anchor='nw')
+    st_f.bind("<Configure>", lambda e: st_canv.configure(scrollregion=st_canv.bbox("all")))
+    st_canv.configure(yscrollcommand=st_scb.set)
+
+    # Mousewheel scroll
+    def _an_scroll(event):
+        try: st_canv.yview_scroll(int(-1*(event.delta/120)), "units")
+        except: pass
+    st_canv.bind_all("<MouseWheel>", _an_scroll)
+
     if current_mode == "REAL":
-        prop_header = tk.Frame(st_f, bg="#34495e", pady=5, padx=5); prop_header.pack(fill='x', padx=10, pady=5)
-        tk.Label(prop_header, text="NASTAVENÍ ÚČTU (KAPITÁL)", bg="#34495e", fg="white", font=("Arial", 9, "bold")).pack(side="left")
-        tk.Button(prop_header, text="ZMĚNIT BALANCE", command=open_prop_settings, bg="#f1c40f").pack(side="right")
-        
-    stats_ctrl_frame = tk.Frame(st_f, bg="#ecf0f1", pady=5, padx=5); stats_ctrl_frame.pack(fill='x', padx=10, pady=5)
-    tk.Label(stats_ctrl_frame, text="FILTROVAT STATISTIKY PODLE SYMBOLU:", bg="#ecf0f1", font=("Arial", 9, "bold")).pack(side="left")
-    stats_symbol_var = tk.StringVar(value="VŠE"); stats_symbol_combo = ttk.Combobox(stats_ctrl_frame, textvariable=stats_symbol_var, state="readonly"); stats_symbol_combo.pack(side="left", padx=10); stats_symbol_combo.bind("<<ComboboxSelected>>", lambda e: update_statistics())
-    
-    # NOVÉ: TLAČÍTKO SIMULACE
-    tk.Button(stats_ctrl_frame, text="🧪 SPUSTIT A/B SIMULACI", command=run_ab_simulation, bg="#9b59b6", fg="white", font=("Arial", 9, "bold")).pack(side="right", padx=10)
+        prop_header = tk.Frame(st_f, bg=DT_PANEL, pady=6, padx=12)
+        prop_header.pack(fill='x', padx=10, pady=(8, 0))
+        tk.Label(prop_header, text="⚙  NASTAVENÍ ÚČTU (KAPITÁL)", bg=DT_PANEL,
+                 fg=DT_TEXT, font=("Segoe UI", 9, "bold")).pack(side="left")
+        tk.Button(prop_header, text="ZMĚNIT BALANCE", command=open_prop_settings,
+                  bg=DT_BTN, fg=DT_TEXT, relief='flat', padx=10).pack(side="right")
 
-    tk.Label(st_f, text="TOP VÝKON (CO FUNGUJE)", font=('Arial', 11, 'bold'), pady=5).pack(anchor="w", padx=10)
-    best_performers_frame = tk.Frame(st_f); best_performers_frame.pack(fill='x', padx=10, pady=5)
-    
-    stats_container = tk.Frame(st_f)
-    stats_container.pack(fill='x', padx=10, pady=10)
-    
-    stats_text = tk.Text(stats_container, height=35, font=('Consolas', 10), bg=DT_PANEL, fg=DT_TEXT, padx=15, pady=15, width=90)
-    stats_text.pack(side='left', fill='both', expand=True)
+    # Filter bar
+    stats_ctrl_frame = tk.Frame(st_f, bg=DT_PANEL, pady=8, padx=14)
+    stats_ctrl_frame.pack(fill='x', padx=10, pady=(8, 4))
+    tk.Label(stats_ctrl_frame, text="SYMBOL:", bg=DT_PANEL,
+             fg=DT_SUBTEXT, font=("Segoe UI", 9, "bold")).pack(side="left")
+    stats_symbol_var = tk.StringVar(value="VŠE")
+    stats_symbol_combo = ttk.Combobox(stats_ctrl_frame, textvariable=stats_symbol_var,
+                                      state="readonly", width=14)
+    stats_symbol_combo.pack(side="left", padx=8)
+    stats_symbol_combo.bind("<<ComboboxSelected>>", lambda e: update_statistics())
+    tk.Button(stats_ctrl_frame, text="🧪  A/B SIMULACE", command=run_ab_simulation,
+              bg=DT_BTN, fg=DT_SUBTEXT, font=("Segoe UI", 9, "bold"),
+              relief='flat', padx=12, pady=4).pack(side="right", padx=4)
 
-    pie_graph_frame = tk.Frame(stats_container, bg=DT_BG)
-    pie_graph_frame.pack(side='right', fill='y', padx=(10,0))
-    
-    stats_graph_frame = tk.Frame(st_f, bg=DT_BG); stats_graph_frame.pack(fill='both', expand=True, padx=10)
-    heatmap_graph_frame = tk.Frame(st_f, bg=DT_BG); heatmap_graph_frame.pack(fill='both', expand=True, padx=10, pady=(5,0))
-    bar_chart_frame = tk.Frame(st_f, bg=DT_BG); bar_chart_frame.pack(fill='both', expand=True, padx=10, pady=(5,10))
+    # ── KPI karty ──────────────────────────────────────────────────────────────
+    kpi_frame = tk.Frame(st_f, bg=DT_BG)
+    kpi_frame.pack(fill='x', padx=10, pady=(6, 2))
+
+    # ── Řada grafů: equity vlevo, koláče vpravo ────────────────────────────────
+    _charts_row = tk.Frame(st_f, bg=DT_BG)
+    _charts_row.pack(fill='x', padx=10, pady=(4, 0))
+    stats_graph_frame = tk.Frame(_charts_row, bg=DT_BG)
+    stats_graph_frame.pack(side='left', fill='both', expand=True)
+    pie_graph_frame = tk.Frame(_charts_row, bg=DT_BG)
+    pie_graph_frame.pack(side='right', fill='y')
+
+    # ── Top výkon (best performers) ────────────────────────────────────────────
+    _bp_hdr = tk.Frame(st_f, bg=DT_PANEL, padx=12, pady=5)
+    _bp_hdr.pack(fill='x', padx=10, pady=(6, 0))
+    tk.Label(_bp_hdr, text="🏆  TOP VÝKON — BEST CONDITIONS", bg=DT_PANEL,
+             fg=DT_TEXT, font=("Segoe UI", 9, "bold")).pack(side='left')
+    best_performers_frame = tk.Frame(st_f, bg=DT_BG)
+    best_performers_frame.pack(fill='x', padx=10, pady=(2, 4))
+
+    # ── Bar charts ─────────────────────────────────────────────────────────────
+    bar_chart_frame = tk.Frame(st_f, bg=DT_BG)
+    bar_chart_frame.pack(fill='both', expand=True, padx=10, pady=(4, 0))
+
+    # ── Heatmapa ───────────────────────────────────────────────────────────────
+    heatmap_graph_frame = tk.Frame(st_f, bg=DT_BG)
+    heatmap_graph_frame.pack(fill='both', expand=True, padx=10, pady=(4, 0))
+
+    # ── Tabulky statistik (nahrazuje stats_text) ───────────────────────────────
+    tables_frame = tk.Frame(st_f, bg=DT_BG)
+    tables_frame.pack(fill='both', expand=True, padx=10, pady=(4, 14))
 
     # TAB 3, 4
     tab3 = ttk.Frame(nb); nb.add(tab3, text='  GALERIE  '); _build_gallery_tab(tab3)
