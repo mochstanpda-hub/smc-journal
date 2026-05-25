@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.27"
+VERSION = "1.5.28"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.28 | Kompletní přepis OCR detekce cen ze screenshotu — úzký band strip (4.5%) vyhne se šumu z grafu; Entry/TP rozhodnutí podle Y-polohy (prostřední box = Entry) místo záměnné barvy; SL = červená (spolehlivé); BINARY+INVERT threshold jako první pokus pro bílé bg; lepší parsování cen (3 378,64)
 1.5.27 | Oprava kritické chyby — ACCOUNTS_FILE chyběl v global deklaraci ve všech 4 funkcích otevření projektu; účty se nyní správně ukládají v otevřeném projektu
 1.5.26 | Oprava ukládání účtů — účty se nyní správně uloží a zobrazí v seznamu; Pole Zisk/Ztráta v záznamu obchodu — ručně zadáš částku v domácí měně; Tlačítko 💱 kalkulačka měn — přepočet z USD/EUR na CZK a jiné; Nastavení domácí měny v Obecném nastavení (CZK, EUR, USD, GBP…); Sloupec P&L v správci účtů — součet zaznamenaných obchodů per-účet; Robustnější správce účtů — chybová hláška při pokusu uložit bez projektu
 1.5.25 | Okno Co je nového — zobrazí se automaticky po aktualizaci s přehledem všech změn od předchozí verze; Funguje i při přeskočení více verzí najednou; Zobrazí se jen jednou při prvním spuštění nové verze; Verze se ukládá do last_version.txt
@@ -2869,196 +2870,245 @@ def analyze_screenshot(image_path):
     result = {}
     debug_lines = []
 
-    # ── 1. ŘÁDKOVÁ BGR ANALÝZA pravého okraje (price labely) ─────────────────
-    # Detekce tmavého motivu: průměrný jas horního pravého rohu
-    _bg_sample    = img[70:130, max(0, w - 60):]
-    _is_dark_bg   = float(np.mean(_bg_sample)) < 80
-    # Světlé pozadí: 8 % (307 px pro 4K) — zachytí labely kdekoliv na y-ose
-    # Tmavé pozadí: 2 % (77 px pro 4K) — vyhne se barevným Kill Zone / Session zónám
-    # které se táhnou přes celý graf a zasahují do širšího pruhu
-    label_w = max(60, int(w * (0.020 if _is_dark_bg else 0.08)))
-    debug_lines.append(f"[DEBUG] img={w}x{h}  dark_bg={_is_dark_bg}  label_w={label_w}")
-    label_strip = img[:, max(0, w - label_w):]
+    # ── 1. Detekce světlého/tmavého pozadí ───────────────────────────────────
+    _bg_sample  = img[70:130, max(0, w - 60):]
+    _is_dark_bg = float(np.mean(_bg_sample)) < 80
+    debug_lines.append(f"[DEBUG] img={w}x{h}  dark_bg={_is_dark_bg}")
 
-    bands = []
-    cur_color = None
+    # ── 2. Scan úzkého pruhu vpravo — jen price scale oblast ─────────────────
+    # Záměrně úzký (4 % pro světlé bg) aby se vyhnul barevným zónám v grafu
+    # (fibonacci úrovně, rectangly, kill zóny táhnou se přes celý graf)
+    label_pct   = 0.025 if _is_dark_bg else 0.045
+    label_w     = max(50, int(w * label_pct))
+    label_strip = img[:, max(0, w - label_w):]
+    debug_lines.append(f"  label_w={label_w}")
+
+    raw_bands = []   # (y_start, y_end, color_class)  color_class = 'red' | 'other'
+    cur_cls   = None
     cur_start = None
 
     for y in range(h):
-        row  = label_strip[y].astype(np.float32)
-        b_arr, g_arr, r_arr = row[:, 0], row[:, 1], row[:, 2]
-        mx = np.maximum(np.maximum(b_arr, g_arr), r_arr)
-        mn = np.minimum(np.minimum(b_arr, g_arr), r_arr)
-        mask = (mx - mn) > 40
-        if not np.any(mask):
-            color = None
+        row   = label_strip[y].astype(np.float32)
+        b_arr = row[:, 0]; g_arr = row[:, 1]; r_arr = row[:, 2]
+        mx    = np.maximum(np.maximum(b_arr, g_arr), r_arr)
+        mn    = np.minimum(np.minimum(b_arr, g_arr), r_arr)
+        sat_m = (mx - mn) > 35
+        if not np.any(sat_m):
+            cls = None
         else:
-            b = float(np.mean(b_arr[mask]))
-            g = float(np.mean(g_arr[mask]))
-            r = float(np.mean(r_arr[mask]))
+            b = float(np.mean(b_arr[sat_m]))
+            g = float(np.mean(g_arr[sat_m]))
+            r = float(np.mean(r_arr[sat_m]))
             sat = max(b, g, r) - min(b, g, r)
-            if sat > 30:
-                if   r > b * 1.15 and r > g * 1.15:           color = 'sl'
-                elif b > r * 1.15 and b > g * 0.85:           color = 'entry'
-                elif g >= b * 0.75 and g > r * 1.05:          color = 'tp'
-                else:                                           color = None
+            if sat < 25:
+                cls = None
+            elif r > b * 1.2 and r > g * 1.2:   # RED → jednoznačně SL
+                cls = 'red'
+            elif (b > r * 1.4 or g > r * 1.4):  # Cokoliv nenasycené červenou = Entry nebo TP
+                cls = 'other'
             else:
-                color = None
+                cls = None
 
-        if color != cur_color:
-            if cur_color and cur_start is not None and (y - cur_start) >= 4:
-                bands.append((cur_start, y, cur_color))
-            cur_color = color
-            cur_start = y if color else None
+        if cls != cur_cls:
+            if cur_cls and cur_start is not None and (y - cur_start) >= 3:
+                raw_bands.append((cur_start, y, cur_cls))
+            cur_cls   = cls
+            cur_start = y if cls else None
 
-    def merge_bands(bl, gap=8):
+    # Merge sousedních stejnobarevných pásů
+    def _merge(bl, gap=10):
         if not bl: return []
-        bl = sorted(bl, key=lambda x: x[0])
-        out = [bl[0]]
+        bl = sorted(bl)
+        out = [list(bl[0])]
         for b in bl[1:]:
             p = out[-1]
             if b[2] == p[2] and b[0] - p[1] <= gap:
-                out[-1] = (p[0], b[1], p[2])
+                p[1] = b[1]
             else:
-                out.append(b)
-        return out
+                out.append(list(b))
+        return [tuple(x) for x in out]
 
-    bands_raw = list(merge_bands(bands))
-    # Filtruj příliš vysoká pásma — price label je max 60 px, Kill Zone / Session zóna je stovky px
-    bands = [b for b in bands_raw if (b[1] - b[0]) <= 60]
-    debug_lines.append(f"  bands_raw={bands_raw}")
-    debug_lines.append(f"  bands_filtered={bands}")
+    merged = _merge(raw_bands)
+    # Price label box: max ~50 px tall. Zóny Kill Zone / Session = stovky px → vyhodíme
+    bands = [b for b in merged if (b[1] - b[0]) <= 55]
+    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
 
-    # ── 2. OCR price boxů ────────────────────────────────────────────────────
-    # Světlé pozadí: 15 % (576 px) — labely mohou být dále od okraje
-    # Tmavé pozadí: 5 % (192 px) — price scale, dost široký pro label box
-    ocr_w     = max(80, int(w * (0.05 if _is_dark_bg else 0.15)))
+    # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
+    # Širší pruh pro OCR (samotný text může být trochu dál od okraje)
+    ocr_w     = max(90, int(w * (0.06 if _is_dark_bg else 0.11)))
     ocr_strip = img[:, max(0, w - ocr_w):]
     debug_lines.append(f"  ocr_w={ocr_w}")
 
-    def ocr_price_band(y_s, y_e, band_tag=''):
+    def _parse_price(text):
+        """Parsuje string s cenou: '3,378.64' nebo '3378.64' nebo '337864' → float."""
+        text = text.strip().replace(' ', '')
+        nums = re.findall(r'\d+', text)
+        if len(nums) >= 2:
+            try:
+                dec = nums[-1][:2]            # max 2 decimal digits
+                v   = float(''.join(nums[:-1]) + '.' + dec)
+                if v > 0.1: return v
+            except: pass
+        # Fallback: hledej čísla >= 3 cifer s tečkou
+        for n in re.findall(r'\d{3,}\.?\d*', text.replace(',', '.')):
+            try:
+                v = float(n)
+                if v > 0.1: return v
+            except: pass
+        return None
+
+    def ocr_price_band(y_s, y_e, tag=''):
         pad = 8
         roi = ocr_strip[max(0, y_s - pad):min(h, y_e + pad), :]
-        if roi.size == 0: return None, []
+        if roi.size == 0: return None
         roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
+        gray    = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
+
+        # Pro SVĚTLÉ BG: cena je bílý text na barevném boxu
+        #   → BINARY(160) dá bílý text / černé pozadí → INVERT → černý text na bílém → Tesseract
+        # Pro TMAVÉ BG: cena je bílý text na tmavém bg
+        #   → stejný postup ale threshold nižší
+        if _is_dark_bg:
+            attempts = [(130, True), (100, True), (160, False)]
+        else:
+            attempts = [(160, True), (120, True), (80, True), (160, False)]
+
         best_val = None
-        ocr_log = []
-        # Pro dark bg: priority na inverted (bílý text na tmavém → po inverzi černý text na bílém)
-        attempts = [(160, True), (160, False), (100, False), (0, True, True)] if _is_dark_bg else [(160, False), (100, False), (160, True)]
-        for attempt in attempts:
-            if len(attempt) == 3:
-                # Adaptive threshold
-                thr = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                            cv2.THRESH_BINARY_INV, 21, 5)
-            else:
-                thr_val, inv = attempt
-                _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
-                if inv: thr = cv2.bitwise_not(thr)
-            text = pytesseract.image_to_string(
+        for thr_val, do_inv in attempts:
+            _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
+            if do_inv: thr = cv2.bitwise_not(thr)
+            txt = pytesseract.image_to_string(
                 thr, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'
-            ).strip().replace(' ', '')
-            ocr_log.append(f"'{text}'")
-            if len(re.findall(r'\d', text)) < 3: continue
-            # Spoj číselné skupiny: "4,672.80" → parts=["4","672","80"] → 4672.80
-            parts = re.findall(r'\d+', text)
-            if len(parts) >= 2:
-                try:
-                    v = float(''.join(parts[:-1]) + '.' + parts[-1])
-                    if v > 0.1: best_val = v; break
-                except: pass
-            text_n = text.replace(',', '.')
-            for n in re.findall(r'\d{2,}\.?\d*', text_n):
-                try:
-                    v = float(n)
-                    if v > 0.1: best_val = v; break
-                except: pass
-            if best_val: break
-        # Uložit debug PNG pro diagnostiku
+            )
+            debug_lines.append(f"    ocr[{tag}] thr={thr_val} inv={do_inv}: '{txt.strip()}'")
+            v = _parse_price(txt)
+            if v:
+                best_val = v
+                break
         try:
-            if band_tag and roi_big is not None:
-                cv2.imwrite(f'C:\\obd\\debug_roi_{band_tag}.png', roi_big)
-                if 'thr' in dir() and thr is not None:
-                    cv2.imwrite(f'C:\\obd\\debug_thr_{band_tag}.png', thr)
+            cv2.imwrite(f'C:\\obd\\debug_band_{tag}.png', roi_big)
         except: pass
-        return best_val, ocr_log
+        return best_val
 
-    color_key_map = {'sl': 'stoploss', 'entry': 'vstupni_hodnota', 'tp': 'takeprofit'}
-    for y_s, y_e, color in bands:
-        v, ocr_log = ocr_price_band(y_s, y_e, band_tag=f"{color}_{y_s}")
-        debug_lines.append(f"  band {color}[{y_s}-{y_e}]: ocr={ocr_log} val={v}")
-        if v and v > 0.1:
-            key = color_key_map[color]
-            if key not in result:
-                result[key] = f"{v:.6g}"
+    # Sbírej (y_mid, color_class, price) pro každý band
+    detected = []   # list of dict {y_mid, cls, price}
+    for y_s, y_e, cls in bands:
+        tag   = f"{cls}_{y_s}"
+        price = ocr_price_band(y_s, y_e, tag=tag)
+        y_mid = (y_s + y_e) / 2
+        debug_lines.append(f"  band {cls}[{y_s}-{y_e}] y_mid={y_mid:.0f} → price={price}")
+        if price and price > 0.1:
+            detected.append({'y_mid': y_mid, 'cls': cls, 'price': price})
 
-    # ── 3. HSV contour fallback — doplní chybějící hodnoty ───────────────────
+    # ── 4. Přiřazení SL / Entry / TP podle pozice a barvy ───────────────────
+    # Pravidla:
+    #   • RED band → vždy SL (TradingView červená = stop loss)
+    #   • Ze 3 bandů: prostřední (mediánové Y) = Entry, krajní = TP
+    #   • Ze 2 bandů bez červené: menší Y (výše na obrazovce) = Entry nebo TP
+    #     → rozhodneme pomocí ceny (po post-processingu)
+
+    red_bands   = [d for d in detected if d['cls'] == 'red']
+    other_bands = [d for d in detected if d['cls'] == 'other']
+
+    # SL z červeného bandu
+    if red_bands:
+        # Vezmi nejpravější / nejčistší červený band (největší Y rozsah)
+        best_sl = sorted(red_bands, key=lambda d: d['price'])[0]
+        result['stoploss'] = f"{best_sl['price']:.6g}"
+        debug_lines.append(f"  → SL(red)={best_sl['price']}")
+
+    # Zbývající bary seřaď podle Y polohy (nahoře = malé Y = vyšší cena)
+    all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
+
+    if len(all_non_sl) == 1:
+        result['vstupni_hodnota'] = f"{all_non_sl[0]['price']:.6g}"
+        debug_lines.append(f"  → Entry(only)={all_non_sl[0]['price']}")
+
+    elif len(all_non_sl) >= 2:
+        if red_bands:
+            sl_y   = red_bands[0]['y_mid']
+            # Entry = non-SL band nejblíže k SL (na ose Y)
+            by_dist = sorted(all_non_sl, key=lambda d: abs(d['y_mid'] - sl_y))
+            entry   = by_dist[0]
+            tp      = by_dist[1]
+        else:
+            # Bez červené: prostřední = entry (tři bary) nebo první = entry (dva)
+            if len(all_non_sl) >= 3:
+                mid   = len(all_non_sl) // 2
+                entry = all_non_sl[mid]
+                others_sorted = sorted([d for i, d in enumerate(all_non_sl) if i != mid],
+                                        key=lambda d: d['price'])
+                # SL = větší cena (Sell) nebo menší (Buy) — porovná s Entry
+                if others_sorted[-1]['price'] > entry['price']:
+                    result['stoploss']    = f"{others_sorted[-1]['price']:.6g}"
+                    tp = others_sorted[0]
+                else:
+                    result['stoploss']    = f"{others_sorted[0]['price']:.6g}"
+                    tp = others_sorted[-1]
+            else:
+                # 2 bary bez červené: vyšší na obrazovce = bud entry (sell) nebo tp (buy)
+                # Prozatím přiřaď vyšší cenu = entry (nejčastější případ Sell)
+                prices_sorted = sorted(all_non_sl, key=lambda d: d['price'], reverse=True)
+                entry = prices_sorted[0]
+                tp    = prices_sorted[1]
+
+        result['vstupni_hodnota'] = f"{entry['price']:.6g}"
+        result['takeprofit']      = f"{tp['price']:.6g}"
+        debug_lines.append(f"  → Entry={entry['price']}  TP={tp['price']}")
+
+    # ── 5. HSV fallback — pokud chybí některá hodnota ────────────────────────
     def _is_plausible(s):
-        # Jakákoliv kladná cena je plausibilní — >= 50 bylo špatné pro EURUSD (~1.0)
         try: return float(s) > 0.1
         except: return False
 
-    search_w    = max(200, int(w * 0.20))
-    right_panel = img[:, max(0, w - search_w):]
-    hsv_rp      = cv2.cvtColor(right_panel, cv2.COLOR_BGR2HSV)
+    if not all(_is_plausible(result.get(k)) for k in ('vstupni_hodnota', 'stoploss', 'takeprofit')):
+        search_w    = max(200, int(w * 0.18))
+        right_panel = img[:, max(0, w - search_w):]
+        hsv_rp      = cv2.cvtColor(right_panel, cv2.COLOR_BGR2HSV)
 
-    color_ranges = {
-        'sl':    [(np.array([0,   100,  80]), np.array([12,  255, 255])),
-                  (np.array([165, 100,  80]), np.array([179, 255, 255]))],
-        'entry': [(np.array([85,   70,  70]), np.array([145, 255, 255]))],
-        'tp':    [(np.array([60,   60,  60]), np.array([100, 255, 255])),
-                  (np.array([155,  60,  60]), np.array([175, 255, 255]))],
-    }
+        hsv_ranges = {
+            'stoploss':       [(np.array([0,  120, 80]), np.array([10,  255, 255])),
+                               (np.array([165,120, 80]), np.array([179, 255, 255]))],
+            'vstupni_hodnota':[(np.array([85, 60,  60]), np.array([145, 255, 255]))],
+            'takeprofit':     [(np.array([55, 60,  60]), np.array([100, 255, 255])),
+                               (np.array([140,60,  60]), np.array([179, 255, 255]))],
+        }
 
-    for cname, ranges in color_ranges.items():
-        key = color_key_map[cname]
-        already = result.get(key, '')
-        if already and _is_plausible(already):
-            debug_lines.append(f"  hsv_{cname}: skip (already={already})")
-            continue
-        mask = np.zeros(right_panel.shape[:2], np.uint8)
-        for lo, hi in ranges:
-            mask |= cv2.inRange(hsv_rp, lo, hi)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        all_cnts = [(cv2.boundingRect(c), cv2.contourArea(c)) for c in contours]
-        best = None
-        for cnt in contours:
-            x, y, cw, ch = cv2.boundingRect(cnt)
-            if 8 < ch < 80 and cw > 20 and cv2.contourArea(cnt) > 150:
-                score = x + cw
-                if best is None or score > best[0]:
-                    best = (score, x, y, cw, ch)
-        debug_lines.append(f"  hsv_{cname}: total_cnts={len(contours)} valid_cnts={sum(1 for (x,y,cw,ch),a in all_cnts if 8<ch<80 and cw>20 and a>150)} best={best}")
-        if not best: continue
-        _, bx, by, bw2, bh2 = best
-        roi_r = right_panel[max(0, by-3):min(right_panel.shape[0], by+bh2+3),
-                            max(0, bx-3):min(right_panel.shape[1], bx+bw2+3)]
-        if roi_r.size == 0: continue
-        try: cv2.imwrite(f'C:\\obd\\debug_hsv_{cname}.png', roi_r)
-        except: pass
-        roi_big  = cv2.resize(roi_r, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        gray_r   = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
-        _, thr_r  = cv2.threshold(gray_r, 160, 255, cv2.THRESH_BINARY)
-        _, thr_r2 = cv2.threshold(gray_r, 160, 255, cv2.THRESH_BINARY_INV)
-        for txt in (
-            pytesseract.image_to_string(thr_r,  config='--psm 7 -c tessedit_char_whitelist=0123456789.,'),
-            pytesseract.image_to_string(thr_r2, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'),
-        ):
-            txt = txt.strip().replace(' ', '')
-            debug_lines.append(f"  hsv_{cname} ocr: '{txt}'")
-            parts = re.findall(r'\d+', txt)
-            if len(parts) >= 2:
-                try:
-                    v = float(''.join(parts[:-1]) + '.' + parts[-1])
-                    if v > 0.1: result[key] = f"{v:.6g}"; break
-                except: pass
-            for n in re.findall(r'\d{2,}\.?\d*', txt.replace(',', '.')):
-                try:
-                    v = float(n)
-                    if v > 0.1: result[key] = f"{v:.6g}"; break
-                except: pass
-            if result.get(key): break
+        for key, ranges in hsv_ranges.items():
+            if _is_plausible(result.get(key)):
+                debug_lines.append(f"  hsv_{key}: skip (already={result.get(key)})")
+                continue
+            mask_h = np.zeros(right_panel.shape[:2], np.uint8)
+            for lo, hi in ranges:
+                mask_h |= cv2.inRange(hsv_rp, lo, hi)
+            mask_h = cv2.morphologyEx(mask_h, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+            cnts, _ = cv2.findContours(mask_h, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            best_c = None
+            for cnt in cnts:
+                x, y, cw, ch = cv2.boundingRect(cnt)
+                if 6 < ch < 60 and cw > 15 and cv2.contourArea(cnt) > 100:
+                    score = x + cw
+                    if best_c is None or score > best_c[0]:
+                        best_c = (score, x, y, cw, ch)
+            debug_lines.append(f"  hsv_{key}: best={best_c}")
+            if not best_c: continue
+            _, bx, by, bw2, bh2 = best_c
+            roi_h = right_panel[max(0, by-3):min(right_panel.shape[0], by+bh2+3),
+                                max(0, bx-3):min(right_panel.shape[1], bx+bw2+3)]
+            if roi_h.size == 0: continue
+            try: cv2.imwrite(f'C:\\obd\\debug_hsv_{key}.png', roi_h)
+            except: pass
+            roi_h_big = cv2.resize(roi_h, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+            gray_h    = cv2.cvtColor(roi_h_big, cv2.COLOR_BGR2GRAY)
+            for thr_val, do_inv in [(160, True), (160, False)]:
+                _, thr_h = cv2.threshold(gray_h, thr_val, 255, cv2.THRESH_BINARY)
+                if do_inv: thr_h = cv2.bitwise_not(thr_h)
+                txt_h = pytesseract.image_to_string(thr_h, config='--psm 7 -c tessedit_char_whitelist=0123456789.,').strip()
+                debug_lines.append(f"  hsv_{key} ocr thr={thr_val} inv={do_inv}: '{txt_h}'")
+                v_h = _parse_price(txt_h)
+                if v_h:
+                    result[key] = f"{v_h:.6g}"
+                    break
 
     # ── 4. Symbol ─────────────────────────────────────────────────────────────
     title_h = max(65, int(h * 0.045))
