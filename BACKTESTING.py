@@ -3585,16 +3585,22 @@ def open_accounts_manager():
             return
 
         # Spočítej P&L per-account z obchodů
+        def _parse_pnl_val(raw):
+            """Parsuje P&L hodnotu: '1000', '-1000', '+500', '1 000', '1000,50' → float nebo None."""
+            if not raw: return None
+            s = raw.strip().replace(' ', '').replace(',', '.')
+            try: return float(s)
+            except ValueError: return None
+
         _acc_pnl = {}
         if DATA_FILE and os.path.exists(DATA_FILE):
             try:
                 _trades = load_data()
                 for _t in _trades:
                     _aname = _t.get('ucet', '').strip()
-                    _val   = _t.get('zisk_mena', '').strip()
-                    if _aname and _val:
-                        try: _acc_pnl[_aname] = _acc_pnl.get(_aname, 0.0) + float(_val.replace(',', '.').replace(' ', ''))
-                        except ValueError: pass
+                    _v = _parse_pnl_val(_t.get('zisk_mena', ''))
+                    if _aname and _v is not None:
+                        _acc_pnl[_aname] = _acc_pnl.get(_aname, 0.0) + _v
             except Exception: pass
 
         for i, acc in enumerate(accounts):
@@ -3681,12 +3687,24 @@ def open_accounts_manager():
             # Akce
             btn_f = tk.Frame(row, bg=row_bg)
             btn_f.pack(side='left', padx=6)
+            tk.Button(btn_f, text="📋", bg='#0f4c75', fg='white', font=('Segoe UI', 8),
+                      relief='flat', padx=5, cursor='hand2',
+                      command=lambda a=acc: _show_account_detail(a)).pack(side='left', padx=1)
             tk.Button(btn_f, text="✏", bg='#1e40af', fg='white', font=('Segoe UI', 8),
                       relief='flat', padx=5, cursor='hand2',
                       command=lambda a=acc: _open_edit_dialog(a)).pack(side='left', padx=1)
             tk.Button(btn_f, text="🗑", bg='#7f1d1d', fg='white', font=('Segoe UI', 8),
                       relief='flat', padx=5, cursor='hand2',
                       command=lambda a=acc: _delete_account(a)).pack(side='left', padx=1)
+
+            # Klik na celý řádek → detail účtu
+            def _bind_row_click(frame, a):
+                def _on_click(e): _show_account_detail(a)
+                frame.bind('<Button-1>', _on_click)
+                for child in frame.winfo_children():
+                    if not isinstance(child, tk.Button) and not isinstance(child, tk.Frame):
+                        child.bind('<Button-1>', _on_click)
+            _bind_row_click(row, acc)
 
         # Statistiky
         for w in stats_bar.winfo_children(): w.destroy()
@@ -3802,6 +3820,147 @@ def open_accounts_manager():
         tk.Button(dlg, text="Zrušit", bg='#334155', fg='#94a3b8',
                   font=('Segoe UI', 9), relief='flat', padx=12, pady=6,
                   cursor='hand2', command=dlg.destroy).pack()
+
+    def _show_account_detail(acc):
+        """Zobrazí detail účtu — seznam připojených obchodů."""
+        acc_name = acc.get('nazev', '').strip()
+        cur_sym  = get_app_currency()
+
+        dlg = tk.Toplevel(win)
+        dlg.title(f"📋  Obchody — {acc_name}")
+        dlg.geometry("960x640")
+        dlg.configure(bg='#0f172a')
+
+        # ── Hlavička ──────────────────────────────────────────────────────────
+        hdr = tk.Frame(dlg, bg='#1e293b', padx=16, pady=12)
+        hdr.pack(fill='x')
+        tk.Label(hdr, text=f"🏦  {acc_name}", font=('Segoe UI', 12, 'bold'),
+                 bg='#1e293b', fg='white').pack(side='left')
+        st_h = acc.get('status', '')
+        st_bg_h, st_fg_h = ACCOUNT_STATUS_COLORS.get(st_h, ('#374151', '#9ca3af'))
+        sf_h = tk.Frame(hdr, bg=st_bg_h, padx=8, pady=3)
+        sf_h.pack(side='left', padx=10)
+        tk.Label(sf_h, text=st_h, font=('Segoe UI', 8, 'bold'), bg=st_bg_h, fg=st_fg_h).pack()
+        info_ln = f"{acc.get('typ','')}  ·  {acc.get('firma','')}  ·  {_fmt_vel(acc.get('velikost',''))} {acc.get('mena','')}"
+        tk.Label(hdr, text=info_ln, font=('Segoe UI', 9), bg='#1e293b', fg='#94a3b8').pack(side='left', padx=8)
+
+        # ── Načtení obchodů ───────────────────────────────────────────────────
+        acc_trades = []
+        if DATA_FILE and os.path.exists(DATA_FILE):
+            try:
+                for t in load_data():
+                    if t.get('ucet', '').strip() == acc_name:
+                        acc_trades.append(t)
+            except Exception: pass
+
+        # Pomocná funkce pro parsování P&L hodnoty
+        def _parse_pnl(raw):
+            if not raw: return None
+            s = raw.strip().replace(' ', '').replace(',', '.')
+            try: return float(s)
+            except ValueError: return None
+
+        vel_num = _parse_pnl(acc.get('velikost', ''))
+        total_pnl = sum(v for t in acc_trades if (v := _parse_pnl(t.get('zisk_mena', ''))) is not None)
+
+        # ── KPI souhrn ────────────────────────────────────────────────────────
+        sumf = tk.Frame(dlg, bg='#0f172a', pady=8, padx=10)
+        sumf.pack(fill='x')
+
+        wins_c   = sum(1 for t in acc_trades if t.get('vysledek','').lower()=='win')
+        losses_c = sum(1 for t in acc_trades if t.get('vysledek','').lower()=='loss')
+        bes_c    = sum(1 for t in acc_trades if t.get('vysledek','').lower()=='be')
+        wr_c     = wins_c / len(acc_trades) * 100 if acc_trades else 0
+
+        def _kpi(lbl, val, clr):
+            c = tk.Frame(sumf, bg='#1e293b', padx=14, pady=8); c.pack(side='left', padx=3)
+            tk.Label(c, text=val, font=('Segoe UI', 13, 'bold'), bg='#1e293b', fg=clr).pack()
+            tk.Label(c, text=lbl, font=('Segoe UI', 7),          bg='#1e293b', fg='#64748b').pack()
+
+        _kpi("OBCHODŮ",          str(len(acc_trades)),  '#e2e8f0')
+        _kpi("W / L / BE",       f"{wins_c} / {losses_c} / {bes_c}", '#94a3b8')
+        _kpi("WINRATE",          f"{wr_c:.1f}%",        '#4ade80' if wr_c >= 50 else '#f87171')
+        pnl_clr = '#4ade80' if total_pnl >= 0 else '#f87171'
+        _kpi(f"CELK. P&L ({cur_sym})", f"{total_pnl:+,.0f}", pnl_clr)
+        if vel_num and vel_num != 0:
+            akt = vel_num + total_pnl
+            pct = total_pnl / vel_num * 100
+            _kpi("AKTUÁLNÍ KAPITÁL",
+                 f"{akt:,.0f} {acc.get('mena','')}",
+                 '#4ade80' if akt >= vel_num else '#f87171')
+            _kpi("P&L %", f"{pct:+.2f}%", '#4ade80' if pct >= 0 else '#f87171')
+
+        # ── Záhlaví tabulky ───────────────────────────────────────────────────
+        col_spec = [
+            ("Datum / čas",     130), ("Symbol", 75), ("Směr", 55),
+            ("Výsledek",         80), ("RRR",    50),
+            (f"Zisk/Ztráta ({cur_sym})", 115), ("P&L %", 72), ("Délka", 70),
+        ]
+        thdr = tk.Frame(dlg, bg='#1e293b', pady=4, padx=8)
+        thdr.pack(fill='x', padx=14)
+        for h, w in col_spec:
+            tk.Label(thdr, text=h, font=('Segoe UI', 8, 'bold'),
+                     bg='#1e293b', fg='#94a3b8',
+                     width=w//7, anchor='center').pack(side='left')
+
+        # ── Scrollovatelný seznam ──────────────────────────────────────────────
+        lf     = tk.Frame(dlg, bg='#0f172a'); lf.pack(fill='both', expand=True, padx=14, pady=(0, 6))
+        lcanv  = tk.Canvas(lf, bg='#0f172a', highlightthickness=0)
+        lscb   = ttk.Scrollbar(lf, command=lcanv.yview)
+        lcanv.pack(side='left', fill='both', expand=True); lscb.pack(side='right', fill='y')
+        linner = tk.Frame(lcanv, bg='#0f172a')
+        lcanv.create_window((0, 0), window=linner, anchor='nw')
+        linner.bind("<Configure>", lambda e: lcanv.configure(scrollregion=lcanv.bbox("all")))
+        lcanv.configure(yscrollcommand=lscb.set)
+        lcanv.bind("<MouseWheel>", lambda e: lcanv.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        if not acc_trades:
+            tk.Label(linner,
+                     text=f"Žádné obchody přiřazené k účtu '{acc_name}'.\n\n"
+                          "Při zadávání obchodu vyber tento účet v poli 'Účet'.",
+                     bg='#0f172a', fg='#64748b',
+                     font=('Segoe UI', 10), justify='center').pack(pady=50)
+        else:
+            for i, t in enumerate(reversed(acc_trades)):  # nejnovější nahoře
+                res = t.get('vysledek', '').lower()
+                if   res == 'win':  row_bg2 = '#0d2e1a'; res_fg = '#4ade80'; res_txt = '✔  WIN'
+                elif res == 'loss': row_bg2 = '#2d0e0e'; res_fg = '#f87171'; res_txt = '✘  LOSS'
+                elif res == 'be':   row_bg2 = '#2a1a07'; res_fg = '#fbbf24'; res_txt = '—  BE'
+                else:               row_bg2 = '#0f172a'; res_fg = '#94a3b8'; res_txt = res or '?'
+
+                if i % 2 == 0:
+                    bg_r = row_bg2
+                else:
+                    # Slightly lighter shade for alternating
+                    bg_r = '#1e293b' if res not in ('win','loss','be') else row_bg2
+
+                row_w = tk.Frame(linner, bg=bg_r, pady=5); row_w.pack(fill='x')
+
+                zm_num  = _parse_pnl(t.get('zisk_mena', ''))
+                zm_str  = f"{zm_num:+,.0f}" if zm_num is not None else (t.get('zisk_mena','') or '—')
+                zm_clr  = ('#4ade80' if (zm_num or 0) >= 0 else '#f87171') if zm_num is not None else '#64748b'
+                pct_str = f"{zm_num/vel_num*100:+.2f}%" if (zm_num is not None and vel_num and vel_num != 0) else '—'
+                pct_clr = zm_clr if zm_num is not None else '#64748b'
+
+                cols_v = [
+                    (t.get('cas_otevreni','')[:16], '#94a3b8', 130),
+                    (t.get('symbol','—'),            '#e2e8f0', 75),
+                    (t.get('smer','—'),              '#60a5fa', 55),
+                    (res_txt,                         res_fg,   80),
+                    (t.get('rrr','—'),               '#e2e8f0', 50),
+                    (zm_str,                          zm_clr,  115),
+                    (pct_str,                         pct_clr,  72),
+                    (t.get('delka_obchodu','—'),      '#94a3b8', 70),
+                ]
+                for val, fg, cw in cols_v:
+                    tk.Label(row_w, text=val, font=('Segoe UI', 9),
+                             bg=bg_r, fg=fg,
+                             width=cw//7, anchor='center').pack(side='left')
+
+        # ── Zavřít ────────────────────────────────────────────────────────────
+        tk.Button(dlg, text="Zavřít", bg='#334155', fg='#94a3b8',
+                  font=('Segoe UI', 9), relief='flat', padx=16, pady=6,
+                  cursor='hand2', command=dlg.destroy).pack(pady=8)
 
     def _delete_account(acc):
         if not messagebox.askyesno("Smazat účet",
