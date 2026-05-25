@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.29"
+VERSION = "1.5.30"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.30 | Správce účtů — kliknutí na účet nebo tlačítko 📋 otevře detail s kompletním seznamem připojených obchodů (datum, symbol, směr, výsledek, P&L, P&L%); KPI souhrn v detailu: Obchodů, W/L/BE, Winrate, Celk. P&L, Aktuální kapitál, P&L%; Robustnější parsování P&L hodnot (1000, -1000, +500, 1 000, 1000,50)
 1.5.29 | Záložka Analýza — kompletní redesign: KPI karty (Winrate, Profit Factor, Expectancy, Max DD, Streak…) + barevné tabulky v kartách místo monospace textu; Správce účtů — nové sloupce Aktuální kapitál a P&L% automaticky počítané z obchodů; Nové sloupce v seznamu obchodů: Zisk/Ztráta a P&L% (přidat přes konfiguraci sloupců)
 1.5.28 | Kompletní přepis OCR detekce cen ze screenshotu — úzký band strip (4.5%) vyhne se šumu z grafu; Entry/TP rozhodnutí podle Y-polohy (prostřední box = Entry) místo záměnné barvy; SL = červená (spolehlivé); BINARY+INVERT threshold jako první pokus pro bílé bg; lepší parsování cen (3 378,64)
 1.5.27 | Oprava kritické chyby — ACCOUNTS_FILE chyběl v global deklaraci ve všech 4 funkcích otevření projektu; účty se nyní správně ukládají v otevřeném projektu
