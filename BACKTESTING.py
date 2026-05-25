@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.31"
+VERSION = "1.5.32"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.32 | Správce účtů — tabulka přepsána na ttk.Treeview: perfektní zarovnání sloupců, resize tažením, výběr řádku aktivuje toolbar (📋 Detail / ✏ Upravit / 🗑 Smazat), dvojklik otevře detail; barevné řádky dle statusu (Aktivní/Funded/Propadlý…)
 1.5.31 | Kritická oprava — accounts_combo chyběl v global deklaraci show_main_screen(), takže přiřazený účet se při ukládání obchodu vždy ztratil (widget byl lokální proměnná, pridat_obchod() viděl None)
 1.5.30 | Správce účtů — kliknutí na účet nebo tlačítko 📋 otevře detail s kompletním seznamem připojených obchodů (datum, symbol, směr, výsledek, P&L, P&L%); KPI souhrn v detailu: Obchodů, W/L/BE, Winrate, Celk. P&L, Aktuální kapitál, P&L%; Robustnější parsování P&L hodnot (1000, -1000, +500, 1 000, 1000,50)
 1.5.29 | Záložka Analýza — kompletní redesign: KPI karty (Winrate, Profit Factor, Expectancy, Max DD, Streak…) + barevné tabulky v kartách místo monospace textu; Správce účtů — nové sloupce Aktuální kapitál a P&L% automaticky počítané z obchodů; Nové sloupce v seznamu obchodů: Zisk/Ztráta a P&L% (přidat přes konfiguraci sloupců)
@@ -3557,163 +3558,215 @@ def open_accounts_manager():
               font=('Segoe UI', 9, 'bold'), relief='flat', padx=12, pady=5,
               cursor='hand2', command=lambda: _open_edit_dialog(None)).pack(side='right', padx=14)
 
-    # ── Tabulka účtů ─────────────────────────────────────────────────────────
-    cols_frame = tk.Frame(win, bg='#1e293b', pady=6)
-    cols_frame.pack(fill='x', padx=14, pady=(0, 2))
-    col_defs = [('Název účtu', 196), ('Typ', 77), ('Firma', 91),
-                ('Počáteční', 84), ('Měna', 49), ('Status', 91),
-                ('Začátek → Konec', 140), ('Aktuální', 91), ('P&L %', 63), ('P&L', 91), ('Poznámka', 91)]
-    for cname, cw in col_defs:
-        tk.Label(cols_frame, text=cname, font=('Segoe UI', 8, 'bold'),
-                 bg='#1e293b', fg='#94a3b8', width=cw//7, anchor='center').pack(side='left')
-    tk.Label(cols_frame, text='Akce', bg='#1e293b', fg='#94a3b8',
-             font=('Segoe UI', 8, 'bold'), width=10).pack(side='left')
+    # ── Treeview tabulka ─────────────────────────────────────────────────────
+    _tree_outer = tk.Frame(win, bg='#0f172a')
+    _tree_outer.pack(fill='both', expand=True, padx=14, pady=(4, 0))
 
-    list_frame = tk.Frame(win, bg='#0f172a')
-    list_frame.pack(fill='both', expand=True, padx=14)
+    # Styl Treeview — tmavý
+    _sty = ttk.Style()
+    _sty.theme_use('clam')
+    _sty.configure('Acc.Treeview',
+        background='#1e293b', fieldbackground='#1e293b',
+        foreground='#e2e8f0', font=('Segoe UI', 9), rowheight=30,
+        borderwidth=0)
+    _sty.configure('Acc.Treeview.Heading',
+        background='#0f172a', foreground='#94a3b8',
+        font=('Segoe UI', 8, 'bold'), relief='flat', padding=(6, 4))
+    _sty.map('Acc.Treeview',
+        background=[('selected', '#334155')],
+        foreground=[('selected', '#ffffff')])
+    _sty.map('Acc.Treeview.Heading',
+        background=[('active', '#1e293b'), ('pressed', '#1e293b')])
+
+    _COLS = ('nazev', 'typ', 'firma', 'pocatecni', 'mena', 'status',
+             'datum', 'aktualni', 'pnl_pct', 'pnl', 'poznamka')
+
+    tree = ttk.Treeview(_tree_outer, columns=_COLS, show='headings',
+                        selectmode='browse', style='Acc.Treeview')
+    _vsb = ttk.Scrollbar(_tree_outer, orient='vertical',   command=tree.yview)
+    _hsb = ttk.Scrollbar(_tree_outer, orient='horizontal', command=tree.xview)
+    tree.configure(yscrollcommand=_vsb.set, xscrollcommand=_hsb.set)
+    tree.grid(row=0, column=0, sticky='nsew')
+    _vsb.grid(row=0, column=1, sticky='ns')
+    _hsb.grid(row=1, column=0, sticky='ew')
+    _tree_outer.grid_rowconfigure(0, weight=1)
+    _tree_outer.grid_columnconfigure(0, weight=1)
+
+    # Definice sloupců: (id, nadpis, šířka, anchor, stretch)
+    _col_cfg = [
+        ('nazev',     'Název účtu',      180, 'w',      True),
+        ('typ',       'Typ',              90, 'center', False),
+        ('firma',     'Firma',           100, 'center', False),
+        ('pocatecni', 'Počáteční',        95, 'e',      False),
+        ('mena',      'Měna',             55, 'center', False),
+        ('status',    'Status',           90, 'center', False),
+        ('datum',     'Začátek → Konec', 155, 'center', False),
+        ('aktualni',  'Aktuální',         95, 'e',      False),
+        ('pnl_pct',   'P&L %',            75, 'e',      False),
+        ('pnl',       'P&L',             115, 'e',      False),
+        ('poznamka',  'Poznámka',        130, 'w',      True),
+    ]
+    for cid, heading, width, anchor, stretch in _col_cfg:
+        tree.heading(cid, text=heading, anchor='center')
+        tree.column(cid, width=width, minwidth=40, anchor=anchor, stretch=stretch)
+
+    # Barevné tagy dle statusu + P&L
+    tree.tag_configure('aktivni',  background='#0f1e0f', foreground='#86efac')
+    tree.tag_configure('funded',   background='#0a1628', foreground='#93c5fd')
+    tree.tag_configure('splnen',   background='#0f1628', foreground='#7dd3fc')
+    tree.tag_configure('propadly', background='#1c0a0a', foreground='#fca5a5')
+    tree.tag_configure('archiv',   background='#1e293b', foreground='#64748b')
+    tree.tag_configure('normal',   background='#1e293b', foreground='#e2e8f0')
+    tree.tag_configure('normal2',  background='#0f172a', foreground='#e2e8f0')
+
+    # Akční toolbar pod tabulkou
+    _act_bar = tk.Frame(win, bg='#1e293b', pady=6, padx=10)
+    _act_bar.pack(fill='x', padx=14, pady=(2, 0))
+    _lbl_sel = tk.Label(_act_bar, text="Vyber účet v tabulce →",
+                        font=('Segoe UI', 8), bg='#1e293b', fg='#475569')
+    _lbl_sel.pack(side='left', padx=6)
+    _btn_detail = tk.Button(_act_bar, text="📋  Detail", bg='#0f4c75', fg='white',
+                            font=('Segoe UI', 8, 'bold'), relief='flat', padx=10, pady=4,
+                            cursor='hand2', state='disabled')
+    _btn_detail.pack(side='left', padx=3)
+    _btn_edit = tk.Button(_act_bar, text="✏  Upravit", bg='#1e40af', fg='white',
+                          font=('Segoe UI', 8, 'bold'), relief='flat', padx=10, pady=4,
+                          cursor='hand2', state='disabled')
+    _btn_edit.pack(side='left', padx=3)
+    _btn_del = tk.Button(_act_bar, text="🗑  Smazat", bg='#7f1d1d', fg='white',
+                         font=('Segoe UI', 8, 'bold'), relief='flat', padx=10, pady=4,
+                         cursor='hand2', state='disabled')
+    _btn_del.pack(side='left', padx=3)
 
     # ── Statistiky (summary bar) ──────────────────────────────────────────────
     stats_bar = tk.Frame(win, bg='#1e293b', pady=8, padx=14)
-    stats_bar.pack(fill='x', padx=14, pady=(6, 14))
+    stats_bar.pack(fill='x', padx=14, pady=(4, 14))
+
+    # Sdílený seznam účtů pro akce
+    _accounts_ref = []
+
+    def _get_selected_acc():
+        sel = tree.selection()
+        if not sel: return None
+        idx = tree.index(sel[0])
+        return _accounts_ref[idx] if idx < len(_accounts_ref) else None
+
+    def _on_tree_select(event=None):
+        acc = _get_selected_acc()
+        state = 'normal' if acc else 'disabled'
+        _btn_detail.config(state=state)
+        _btn_edit.config(state=state)
+        _btn_del.config(state=state)
+        if acc:
+            _lbl_sel.config(text=f"Vybrán:  {acc.get('nazev','')}", fg='#94a3b8')
+        else:
+            _lbl_sel.config(text="Vyber účet v tabulce →", fg='#475569')
+
+    tree.bind('<<TreeviewSelect>>', _on_tree_select)
+    tree.bind('<Double-1>', lambda e: (_get_selected_acc() and _show_account_detail(_get_selected_acc())))
+
+    _btn_detail.config(command=lambda: (_get_selected_acc() and _show_account_detail(_get_selected_acc())))
+    _btn_edit.config(command=lambda: (_get_selected_acc() and _open_edit_dialog(_get_selected_acc())))
+    _btn_del.config(command=lambda: (_get_selected_acc() and _delete_account(_get_selected_acc())))
+
+    def _parse_pnl_val(raw):
+        if not raw: return None
+        s = raw.strip().replace(' ', '').replace(',', '.')
+        try: return float(s)
+        except ValueError: return None
 
     def _rebuild_list():
-        for w in list_frame.winfo_children():
-            w.destroy()
+        # Zapamatuj vybraný účet
+        _prev_sel_id = tree.selection()[0] if tree.selection() else None
+        _prev_name   = None
+        if _prev_sel_id:
+            try: _prev_name = _accounts_ref[tree.index(_prev_sel_id)].get('nazev')
+            except: pass
+
+        for iid in tree.get_children(): tree.delete(iid)
+        _accounts_ref.clear()
         accounts = load_accounts()
 
-        if not accounts:
-            tk.Label(list_frame, text="Zatím žádné účty. Klikni '＋ Nový účet'.",
-                     bg='#0f172a', fg='#64748b', font=('Segoe UI', 10)).pack(pady=40)
-            return
-
-        # Spočítej P&L per-account z obchodů
-        def _parse_pnl_val(raw):
-            """Parsuje P&L hodnotu: '1000', '-1000', '+500', '1 000', '1000,50' → float nebo None."""
-            if not raw: return None
-            s = raw.strip().replace(' ', '').replace(',', '.')
-            try: return float(s)
-            except ValueError: return None
-
+        # P&L per-account
         _acc_pnl = {}
         if DATA_FILE and os.path.exists(DATA_FILE):
             try:
-                _trades = load_data()
-                for _t in _trades:
+                for _t in load_data():
                     _aname = _t.get('ucet', '').strip()
                     _v = _parse_pnl_val(_t.get('zisk_mena', ''))
                     if _aname and _v is not None:
                         _acc_pnl[_aname] = _acc_pnl.get(_aname, 0.0) + _v
             except Exception: pass
 
+        cur_sym = get_app_currency()
+        restore_iid = None
+
         for i, acc in enumerate(accounts):
-            st = acc.get('status', 'Aktivní')
-            st_bg, st_fg = ACCOUNT_STATUS_COLORS.get(st, ('#374151', '#9ca3af'))
-            row_bg = '#1e293b' if i % 2 == 0 else '#0f172a'
-            row = tk.Frame(list_frame, bg=row_bg, pady=5)
-            row.pack(fill='x')
+            _accounts_ref.append(acc)
+            st       = acc.get('status', 'Aktivní')
+            acc_name = acc.get('nazev', '')
 
-            vel_str = _fmt_vel(acc.get('velikost', ''))
-            _acc_name = acc.get('nazev', '')
+            vel_str  = _fmt_vel(acc.get('velikost', ''))
+            ds       = acc.get('datum_start', '')
+            dk       = acc.get('datum_konec', '')
+            datum_str = f"{ds}  →  {dk or '…'}" if (ds or dk) else ''
 
-            cells = [
-                (acc.get('nazev', '—'),    '#e2e8f0', 196),
-                (acc.get('typ', '—'),      '#94a3b8', 77),
-                (acc.get('firma', '—'),    '#94a3b8', 91),
-                (vel_str,                  '#60a5fa', 84),
-                (acc.get('mena', 'USD'),   '#94a3b8', 49),
-            ]
-            for val, fg, cw in cells:
-                tk.Label(row, text=val, font=('Segoe UI', 9), bg=row_bg,
-                         fg=fg, width=cw//7, anchor='center').pack(side='left')
-
-            # Status badge
-            stf = tk.Frame(row, bg=st_bg, padx=7, pady=2)
-            stf.pack(side='left', padx=4)
-            tk.Label(stf, text=st, font=('Segoe UI', 8, 'bold'),
-                     bg=st_bg, fg=st_fg).pack()
-
-            # Datum začátek → konec
-            ds = acc.get('datum_start', '')
-            dk = acc.get('datum_konec', '')
-            datum_str = f"{ds or '?'}  →  {dk or '…'}" if (ds or dk) else ''
-            tk.Label(row, text=datum_str, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#60a5fa', width=20, anchor='center').pack(side='left', padx=2)
-
-            # Výpočty: Aktuální kapitál, P&L%
-            _pnl_val = _acc_pnl.get(_acc_name, None)
-            _cur_sym  = get_app_currency()
-            _vel_num = None
-            try: _vel_num = float(str(acc.get('velikost', '')).replace(',', '.').replace(' ', ''))
-            except: pass
+            _pnl_val = _acc_pnl.get(acc_name, None)
+            _vel_num = _parse_pnl_val(acc.get('velikost', ''))
 
             # Aktuální kapitál
             if _vel_num is not None and _pnl_val is not None:
-                _akt_num = _vel_num + _pnl_val
-                _akt_str = f"{_akt_num:,.0f}"
-                _akt_fg  = '#4ade80' if _akt_num >= _vel_num else '#f87171'
+                _akt_str = f"{_vel_num + _pnl_val:,.0f}"
             elif _vel_num is not None:
                 _akt_str = vel_str
-                _akt_fg  = '#94a3b8'
             else:
                 _akt_str = '—'
-                _akt_fg  = '#475569'
-            tk.Label(row, text=_akt_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
-                     fg=_akt_fg, width=13, anchor='center').pack(side='left', padx=2)
 
             # P&L %
             if _vel_num and _vel_num != 0 and _pnl_val is not None:
-                _pct = _pnl_val / _vel_num * 100
-                _pct_str = f"{_pct:+.2f}%"
-                _pct_fg  = '#4ade80' if _pct >= 0 else '#f87171'
+                _pct_str = f"{_pnl_val / _vel_num * 100:+.2f}%"
             else:
                 _pct_str = '—'
-                _pct_fg  = '#475569'
-            tk.Label(row, text=_pct_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
-                     fg=_pct_fg, width=9, anchor='center').pack(side='left', padx=2)
 
-            # P&L absolutní (v app-měně)
-            if _pnl_val is not None:
-                _pnl_str = f"{_pnl_val:+,.0f} {_cur_sym}"
-                _pnl_fg  = '#4ade80' if _pnl_val >= 0 else '#f87171'
-            else:
-                _pnl_str = '—'
-                _pnl_fg  = '#475569'
-            tk.Label(row, text=_pnl_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
-                     fg=_pnl_fg, width=13, anchor='center').pack(side='left', padx=2)
+            # P&L absolutní
+            _pnl_str = f"{_pnl_val:+,.0f} {cur_sym}" if _pnl_val is not None else '—'
 
-            # Poznámka
-            pozn = acc.get('poznamka', '')[:12] + ('…' if len(acc.get('poznamka', '')) > 12 else '')
-            tk.Label(row, text=pozn, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#64748b', width=13, anchor='w').pack(side='left', padx=2)
+            pozn = acc.get('poznamka', '')
 
-            # Akce
-            btn_f = tk.Frame(row, bg=row_bg)
-            btn_f.pack(side='left', padx=6)
-            tk.Button(btn_f, text="📋", bg='#0f4c75', fg='white', font=('Segoe UI', 8),
-                      relief='flat', padx=5, cursor='hand2',
-                      command=lambda a=acc: _show_account_detail(a)).pack(side='left', padx=1)
-            tk.Button(btn_f, text="✏", bg='#1e40af', fg='white', font=('Segoe UI', 8),
-                      relief='flat', padx=5, cursor='hand2',
-                      command=lambda a=acc: _open_edit_dialog(a)).pack(side='left', padx=1)
-            tk.Button(btn_f, text="🗑", bg='#7f1d1d', fg='white', font=('Segoe UI', 8),
-                      relief='flat', padx=5, cursor='hand2',
-                      command=lambda a=acc: _delete_account(a)).pack(side='left', padx=1)
+            values = (
+                acc_name,
+                acc.get('typ', ''),
+                acc.get('firma', ''),
+                vel_str,
+                acc.get('mena', 'USD'),
+                st,
+                datum_str,
+                _akt_str,
+                _pct_str,
+                _pnl_str,
+                pozn,
+            )
 
-            # Klik na celý řádek → detail účtu
-            def _bind_row_click(frame, a):
-                def _on_click(e): _show_account_detail(a)
-                frame.bind('<Button-1>', _on_click)
-                for child in frame.winfo_children():
-                    if not isinstance(child, tk.Button) and not isinstance(child, tk.Frame):
-                        child.bind('<Button-1>', _on_click)
-            _bind_row_click(row, acc)
+            # Tag dle statusu
+            st_tag = {'Aktivní': 'aktivni', 'Funded': 'funded', 'Splněn': 'splnen',
+                      'Propadlý': 'propadly', 'Archiv': 'archiv'}.get(st, 'normal' if i%2==0 else 'normal2')
+
+            iid = tree.insert('', 'end', values=values, tags=(st_tag,))
+            if _prev_name and acc_name == _prev_name:
+                restore_iid = iid
+
+        # Obnov výběr
+        if restore_iid:
+            tree.selection_set(restore_iid)
+            tree.see(restore_iid)
+        _on_tree_select()
 
         # Statistiky
         for w in stats_bar.winfo_children(): w.destroy()
-        total = len(accounts)
-        aktivni   = sum(1 for a in accounts if a.get('status') == 'Aktivní')
-        splneny   = sum(1 for a in accounts if a.get('status') == 'Splněn')
-        propadly  = sum(1 for a in accounts if a.get('status') == 'Propadlý')
+        total    = len(accounts)
+        aktivni  = sum(1 for a in accounts if a.get('status') == 'Aktivní')
+        splneny  = sum(1 for a in accounts if a.get('status') == 'Splněn')
+        propadly = sum(1 for a in accounts if a.get('status') == 'Propadlý')
 
         def _stat(lbl, val, bg, fg):
             f = tk.Frame(stats_bar, bg=bg, padx=10, pady=5)
