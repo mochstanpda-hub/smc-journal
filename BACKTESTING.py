@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.25"
+VERSION = "1.5.26"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.26 | Oprava ukládání účtů — účty se nyní správně uloží a zobrazí v seznamu; Pole Zisk/Ztráta v záznamu obchodu — ručně zadáš částku v domácí měně; Tlačítko 💱 kalkulačka měn — přepočet z USD/EUR na CZK a jiné; Nastavení domácí měny v Obecném nastavení (CZK, EUR, USD, GBP…); Sloupec P&L v správci účtů — součet zaznamenaných obchodů per-účet; Robustnější správce účtů — chybová hláška při pokusu uložit bez projektu
 1.5.25 | Okno Co je nového — zobrazí se automaticky po aktualizaci s přehledem všech změn od předchozí verze; Funguje i při přeskočení více verzí najednou; Zobrazí se jen jednou při prvním spuštění nové verze; Verze se ukládá do last_version.txt
 1.5.24 | Redesign tmavého motivu — harmonická slate paleta bez křiklavých barev; Toolbar sjednocen (jedno tlačítko = jeden styl); TAKE PROFIT a STOP LOSS labely reagují na motiv; Intro karty projektů mají jednotnou barvu hlavičky; Vylepšené WIN/LOSS/BE odstíny
 1.5.23 | Intro obrazovka plně přizpůsobena motivu — karty projektů, pozadí a texty reagují na zvolený motiv; Tmavý a Tmavý modrý motiv dostupný přímo z intro obrazovky; Přepínač motivů na intro obrazovce obsahuje všechny 5 motivů
@@ -802,6 +803,15 @@ def save_global_settings(data):
     except Exception as e:
         messagebox.showerror("Chyba", f"Nepodařilo se uložit nastavení: {e}")
 
+def get_app_currency():
+    """Vrátí zvolenou domácí měnu (výchozí CZK). Ukládá se v global_settings.json."""
+    return load_global_settings().get('app_currency', 'CZK')
+
+def set_app_currency(cur):
+    cfg = load_global_settings()
+    cfg['app_currency'] = cur
+    save_global_settings(cfg)
+
 def get_browser_exe():
     """Vrátí cestu k prohlížeči z nastavení nebo auto-detekuje Edge/Chrome/Firefox."""
     cfg = load_global_settings()
@@ -883,6 +893,7 @@ duvod_entry = None; poznamka_entry = None; vysledek_combo = None; den_tydne_entr
 delka_obchodu_entry = None; slippage_entry = None; obrazky_list = None; score_label = None
 news_var = None; news_event_entry = None
 tags_entry = None # NOVÉ: Štítky
+zisk_mena_entry = None  # Ručně zadaná částka zisku/ztráty v domácí měně
 details_text = None; image_frame = None; gallery_inner = None
 checklist_display_label = None
 
@@ -2526,7 +2537,8 @@ def pridat_obchod():
             'kvalita': qual, 'obrazky': obrazky_list.get(), 'news': news_var.get(),
             'news_event': news_event_entry.get(),
             'checklist_ratio': checklist_res,
-            'tags': tags_entry.get() # Ukládáme TAGS
+            'tags': tags_entry.get(),
+            'zisk_mena': zisk_mena_entry.get() if zisk_mena_entry else '',
         }
         trades = load_data()
         if editing_trade_index is not None:
@@ -2626,7 +2638,10 @@ def pridat_obrazky():
 
 def reset_form():
     global editing_trade_index
-    for e in [vstupni_hodnota_entry, stoploss_entry, takeprofit_entry, rrr_entry, poznamka_entry, duvod_entry, news_event_entry, tags_entry]: e.delete(0, tk.END)
+    _clear = [e for e in [vstupni_hodnota_entry, stoploss_entry, takeprofit_entry, rrr_entry,
+                           poznamka_entry, duvod_entry, news_event_entry, tags_entry, zisk_mena_entry]
+              if e is not None]
+    for e in _clear: e.delete(0, tk.END)
     cas_otevreni_entry.delete(0, tk.END); cas_otevreni_entry.insert(0, datetime.now().strftime("%Y-%m-%d %H:%M"))
     obrazky_list.set(""); editing_trade_index = None; news_var.set("Ne"); save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
     if accounts_combo:
@@ -2827,7 +2842,8 @@ def naci_obchod_pro_upravu():
     slippage_entry.delete(0, tk.END); slippage_entry.insert(0, t.get('slippage','0'))
     news_var.set(t.get('news', 'Ne'))
     news_event_entry.delete(0, tk.END); news_event_entry.insert(0, t.get('news_event', ''))
-    tags_entry.delete(0, tk.END); tags_entry.insert(0, t.get('tags', '')) # Načíst TAGS
+    tags_entry.delete(0, tk.END); tags_entry.insert(0, t.get('tags', ''))
+    if zisk_mena_entry: zisk_mena_entry.delete(0, tk.END); zisk_mena_entry.insert(0, t.get('zisk_mena', ''))
     update_calculated_fields(); calculate_auto_score(); save_btn.config(text="AKTUALIZOVAT OBCHOD", bg="#e67e22")
 
 # ==============================================================================
@@ -3239,6 +3255,13 @@ def save_accounts(accounts):
         messagebox.showerror("Chyba", f"Nelze uložit účty:\n{e}")
 
 
+def _fmt_vel(vel):
+    """Bezpečně zformátuje číslo velikosti účtu; při chybě vrátí původní string."""
+    try:
+        return f"{int(float(vel)):,}" if vel else ''
+    except (ValueError, TypeError):
+        return str(vel)
+
 def get_account_dropdown_values():
     """Vrátí seznam pro dropdown ve formuláři (jen aktivní + prázdná volba)."""
     accounts = load_accounts()
@@ -3247,9 +3270,13 @@ def get_account_dropdown_values():
         if a.get('status', 'Aktivní') == 'Aktivní':
             firma = a.get('firma', '')
             vel   = a.get('velikost', '')
-            label = a['nazev']
-            if firma and vel:
-                label += f"  [{firma}  {int(float(vel)):,} {a.get('mena','USD')}]"
+            label = a.get('nazev', '?')
+            if firma or vel:
+                vel_fmt = _fmt_vel(vel)
+                parts = []
+                if firma: parts.append(firma)
+                if vel_fmt: parts.append(f"{vel_fmt} {a.get('mena','USD')}")
+                label += f"  [{' · '.join(parts)}]"
             result.append(label)
     return result
 
@@ -3261,12 +3288,16 @@ def get_account_short_names():
     for a in accounts:
         firma = a.get('firma', '')
         vel   = a.get('velikost', '')
-        label = a['nazev']
-        if firma and vel:
-            label_full = label + f"  [{firma}  {int(float(vel)):,} {a.get('mena','USD')}]"
+        label = a.get('nazev', '?')
+        if firma or vel:
+            vel_fmt = _fmt_vel(vel)
+            parts = []
+            if firma: parts.append(firma)
+            if vel_fmt: parts.append(f"{vel_fmt} {a.get('mena','USD')}")
+            label_full = label + f"  [{' · '.join(parts)}]"
         else:
             label_full = label
-        mapping[label_full] = a['nazev']
+        mapping[label_full] = a.get('nazev', label)
     return mapping
 
 
@@ -3303,7 +3334,7 @@ def open_accounts_manager():
     cols_frame.pack(fill='x', padx=14, pady=(0, 2))
     col_defs = [('Název účtu', 220), ('Typ', 90), ('Firma', 100),
                 ('Velikost', 90), ('Měna', 55), ('Status', 95),
-                ('Začátek → Konec', 154), ('Poznámka', 112)]
+                ('Začátek → Konec', 154), ('P&L', 90), ('Poznámka', 100)]
     for cname, cw in col_defs:
         tk.Label(cols_frame, text=cname, font=('Segoe UI', 8, 'bold'),
                  bg='#1e293b', fg='#94a3b8', width=cw//7, anchor='center').pack(side='left')
@@ -3327,6 +3358,19 @@ def open_accounts_manager():
                      bg='#0f172a', fg='#64748b', font=('Segoe UI', 10)).pack(pady=40)
             return
 
+        # Spočítej P&L per-account z obchodů
+        _acc_pnl = {}
+        if DATA_FILE and os.path.exists(DATA_FILE):
+            try:
+                _trades = load_data()
+                for _t in _trades:
+                    _aname = _t.get('ucet', '').strip()
+                    _val   = _t.get('zisk_mena', '').strip()
+                    if _aname and _val:
+                        try: _acc_pnl[_aname] = _acc_pnl.get(_aname, 0.0) + float(_val.replace(',', '.').replace(' ', ''))
+                        except ValueError: pass
+            except Exception: pass
+
         for i, acc in enumerate(accounts):
             st = acc.get('status', 'Aktivní')
             st_bg, st_fg = ACCOUNT_STATUS_COLORS.get(st, ('#374151', '#9ca3af'))
@@ -3334,8 +3378,7 @@ def open_accounts_manager():
             row = tk.Frame(list_frame, bg=row_bg, pady=5)
             row.pack(fill='x')
 
-            try: vel_str = f"{int(float(acc.get('velikost', 0))):,}"
-            except: vel_str = acc.get('velikost', '')
+            vel_str = _fmt_vel(acc.get('velikost', ''))
 
             cells = [
                 (acc.get('nazev', '—'),    '#e2e8f0', 220),
@@ -3357,17 +3400,26 @@ def open_accounts_manager():
             # Datum začátek → konec
             ds = acc.get('datum_start', '')
             dk = acc.get('datum_konec', '')
-            if ds or dk:
-                datum_str = f"{ds or '?'}  →  {dk or '…'}"
-            else:
-                datum_str = ''
+            datum_str = f"{ds or '?'}  →  {dk or '…'}" if (ds or dk) else ''
             tk.Label(row, text=datum_str, font=('Segoe UI', 8), bg=row_bg,
                      fg='#60a5fa', width=22, anchor='center').pack(side='left', padx=4)
 
+            # P&L z obchodů
+            _pnl_val = _acc_pnl.get(acc.get('nazev', ''), None)
+            _cur_sym  = get_app_currency()
+            if _pnl_val is not None:
+                _pnl_str = f"{_pnl_val:+,.0f} {_cur_sym}"
+                _pnl_fg  = '#4ade80' if _pnl_val >= 0 else '#f87171'
+            else:
+                _pnl_str = '—'
+                _pnl_fg  = '#475569'
+            tk.Label(row, text=_pnl_str, font=('Segoe UI', 8, 'bold'), bg=row_bg,
+                     fg=_pnl_fg, width=13, anchor='center').pack(side='left', padx=2)
+
             # Poznámka
-            pozn = acc.get('poznamka', '')[:18] + ('…' if len(acc.get('poznamka', '')) > 18 else '')
+            pozn = acc.get('poznamka', '')[:15] + ('…' if len(acc.get('poznamka', '')) > 15 else '')
             tk.Label(row, text=pozn, font=('Segoe UI', 8), bg=row_bg,
-                     fg='#64748b', width=16, anchor='w').pack(side='left', padx=2)
+                     fg='#64748b', width=14, anchor='w').pack(side='left', padx=2)
 
             # Akce
             btn_f = tk.Frame(row, bg=row_bg)
@@ -3461,8 +3513,11 @@ def open_accounts_manager():
             data = {}
             for key, widget in fields.items():
                 data[key] = widget.get()
-            if not data['nazev'].strip():
+            if not data.get('nazev', '').strip():
                 messagebox.showwarning("Chyba", "Název účtu nesmí být prázdný.", parent=dlg)
+                return
+            if not ACCOUNTS_FILE:
+                messagebox.showwarning("Žádný projekt", "Nejprve otevři nebo vytvoř projekt.", parent=dlg)
                 return
             accounts = load_accounts()
             if is_new:
@@ -3476,7 +3531,8 @@ def open_accounts_manager():
                 else:
                     accounts.append(data)
             save_accounts(accounts)
-            refresh_accounts_combo()
+            try: refresh_accounts_combo()
+            except Exception: pass
             dlg.destroy()
             _rebuild_list()
 
@@ -4434,6 +4490,37 @@ def open_settings_window(initial_tab=0):
         tk.Label(row, text=tdesc, bg=DT_BG, fg=DT_SUBTEXT,
                  font=('Segoe UI', 9)).pack(side='left', padx=12)
 
+    # ── Tab: Obecné (měna, jazyk) ─────────────────────────────────────────────
+    t_gen = ttk.Frame(nb); nb.add(t_gen, text='  ⚙ Obecné  ')
+    _gen_frame = tk.Frame(t_gen, bg=DT_BG, padx=28, pady=24)
+    _gen_frame.pack(fill='both', expand=True)
+    tk.Label(_gen_frame, text="Obecné nastavení", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 20))
+
+    # Měna
+    _cur_box = tk.Frame(_gen_frame, bg=DT_SURFACE, padx=18, pady=14)
+    _cur_box.pack(fill='x', pady=(0, 14))
+    tk.Label(_cur_box, text="🪙  Domácí měna", bg=DT_SURFACE, fg=DT_TEXT,
+             font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 6))
+    tk.Label(_cur_box, text="Měna, ve které sleduješ zisk/ztrátu svých obchodů (zobrazuje se v poli Zisk/Ztráta ve formuláři).",
+             bg=DT_SURFACE, fg=DT_SUBTEXT, font=('Segoe UI', 9), wraplength=580, justify='left').pack(anchor='w', pady=(0, 10))
+    _cur_row = tk.Frame(_cur_box, bg=DT_SURFACE); _cur_row.pack(anchor='w')
+    tk.Label(_cur_row, text="Měna:", bg=DT_SURFACE, fg=DT_SUBTEXT,
+             font=('Segoe UI', 10), width=10, anchor='w').pack(side='left')
+    _CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'PLN', 'HUF', 'CHF']
+    _cur_var = tk.StringVar(value=get_app_currency())
+    _cur_combo = ttk.Combobox(_cur_row, values=_CURRENCIES, textvariable=_cur_var,
+                               state='readonly', width=10, font=('Segoe UI', 10))
+    _cur_combo.pack(side='left')
+
+    def _save_currency():
+        set_app_currency(_cur_var.get())
+        messagebox.showinfo("✓ Uloženo", f"Domácí měna nastavena na: {_cur_var.get()}\n\nZměna se projeví při příštím otevření formuláře.", parent=sw)
+
+    tk.Button(_cur_row, text="Uložit", command=_save_currency,
+              bg=DT_ACCENT, fg='#ffffff', font=('Segoe UI', 9, 'bold'),
+              padx=12, pady=4, relief='flat', cursor='hand2').pack(side='left', padx=10)
+
     # ── Tab: Aktualizace ─────────────────────────────────────────────────────
     t_upd = ttk.Frame(nb); nb.add(t_upd, text='  🔄 Aktualizace  ')
     _upd_frame = tk.Frame(t_upd, bg=DT_BG, padx=28, pady=24)
@@ -4671,7 +4758,7 @@ def show_main_screen(p_name):
     global current_project_name, trades_tree, filter_col_var, filter_val_var, paned, v_paned, save_btn
     global cas_otevreni_entry, cas_zavreni_entry, symbol_combo, smer_var, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
-    global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame
+    global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
     global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
@@ -4840,6 +4927,75 @@ def show_main_screen(p_name):
     
     tk.Label(f, text="Důvod vstupu:").grid(row=r, column=0, sticky='w'); duvod_entry = tk.Entry(f, width=35); duvod_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Poznámka:").grid(row=r, column=0, sticky='w'); poznamka_entry = tk.Entry(f, width=35); poznamka_entry.grid(row=r, column=1, pady=3); r+=1
+
+    # ── Zisk / Ztráta — ruční zápis částky ────────────────────────────────────
+    _cur = get_app_currency()
+    tk.Label(f, text=f"Zisk/Ztráta ({_cur}):").grid(row=r, column=0, sticky='w')
+    _pnl_frame = tk.Frame(f)
+    _pnl_frame.grid(row=r, column=1, sticky='w', pady=4)
+    zisk_mena_entry = tk.Entry(_pnl_frame, width=16, font=('Arial', 10))
+    zisk_mena_entry.pack(side='left')
+    tk.Label(_pnl_frame, text=f" {_cur}", fg=DT_SUBTEXT, font=('Arial', 9)).pack(side='left')
+
+    def _open_currency_calc():
+        """Mini kalkulačka měn — přepočet částky na domácí měnu."""
+        cc = tk.Toplevel(root)
+        cc.title("💱 Kalkulačka měn")
+        cc.configure(bg=DT_BG)
+        cc.geometry("320x230")
+        cc.resizable(False, False)
+        cc.grab_set()
+        # Nadpis
+        tk.Label(cc, text="💱  Kalkulačka měn", bg=DT_BG, fg=DT_TEXT,
+                 font=('Segoe UI', 11, 'bold')).pack(pady=(14, 10))
+        frm = tk.Frame(cc, bg=DT_BG, padx=20)
+        frm.pack(fill='x')
+        def _lbl(text): return tk.Label(frm, text=text, bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9), anchor='w', width=16)
+        def _ent(default=''): e = tk.Entry(frm, bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT, font=('Segoe UI', 10), relief='flat', bd=4); e.insert(0, str(default)); return e
+
+        r2 = tk.Frame(frm, bg=DT_BG); r2.pack(fill='x', pady=3)
+        _lbl("Částka:").pack(in_=r2, side='left')
+        _from_e = _ent(zisk_mena_entry.get() or '0'); _from_e.pack(in_=r2, side='left', fill='x', expand=True)
+
+        r3 = tk.Frame(frm, bg=DT_BG); r3.pack(fill='x', pady=3)
+        _lbl("Kurz (1 → CZK):").pack(in_=r3, side='left')
+        _rate_e = _ent('23.5'); _rate_e.pack(in_=r3, side='left', fill='x', expand=True)
+
+        res_var = tk.StringVar(value='—')
+        res_lbl = tk.Label(cc, textvariable=res_var, bg=DT_SURFACE, fg=DT_ACCENT,
+                           font=('Segoe UI', 13, 'bold'), pady=8)
+        res_lbl.pack(fill='x', padx=20, pady=(8, 4))
+
+        def _calc():
+            try:
+                amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
+                rate = float(_rate_e.get().replace(',', '.'))
+                result = amt * rate
+                res_var.set(f"{result:+,.2f} {_cur}")
+            except ValueError:
+                res_var.set("Neplatné číslo")
+
+        def _use():
+            try:
+                amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
+                rate = float(_rate_e.get().replace(',', '.'))
+                result = amt * rate
+                zisk_mena_entry.delete(0, tk.END)
+                zisk_mena_entry.insert(0, f"{result:.2f}")
+            except ValueError: pass
+            cc.destroy()
+
+        bf = tk.Frame(cc, bg=DT_BG); bf.pack(pady=6)
+        tk.Button(bf, text="Vypočítat", command=_calc, bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 9), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
+        tk.Button(bf, text="✓ Použít výsledek", command=_use, bg=DT_ACCENT, fg='#fff',
+                  font=('Segoe UI', 9, 'bold'), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
+
+    tk.Button(_pnl_frame, text="💱", command=_open_currency_calc,
+              bg=DT_SURFACE, fg=DT_ACCENT, font=('Segoe UI', 10),
+              relief='flat', padx=6, pady=1, cursor='hand2').pack(side='left', padx=(6, 0))
+    r += 1
+
     tk.Label(f, text="VÝSLEDEK:").grid(row=r, column=0, sticky='w'); vysledek_combo = ttk.Combobox(f, values=["Win", "Loss", "BE"], width=33); vysledek_combo.grid(row=r, column=1, pady=10); r+=1
     obrazky_list = tk.StringVar(); tk.Button(f, text="+ SCREENSHOTY", command=pridat_obrazky, bg='#3498db', fg='white', width=30).grid(row=r, column=1, sticky='w'); r+=1
     score_label = tk.Label(f, text="BODOVÁNÍ: 0 | SKÓRE: C", font=('Arial', 11, 'bold'), pady=10); score_label.grid(row=r, column=0, columnspan=2); r+=1
