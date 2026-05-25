@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.32"
+VERSION = "1.5.33"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.33 | Oprava výpočtu Aktuální kapitál a P&L% — robustní parser čísel zvládne všechny formáty: 252285, 252285,42, 252 285,42, 252.285,42, 252,285.42; Aktuální vždy zobrazuje alespoň počáteční kapitál
 1.5.32 | Správce účtů — tabulka přepsána na ttk.Treeview: perfektní zarovnání sloupců, resize tažením, výběr řádku aktivuje toolbar (📋 Detail / ✏ Upravit / 🗑 Smazat), dvojklik otevře detail; barevné řádky dle statusu (Aktivní/Funded/Propadlý…)
 1.5.31 | Kritická oprava — accounts_combo chyběl v global deklaraci show_main_screen(), takže přiřazený účet se při ukládání obchodu vždy ztratil (widget byl lokální proměnná, pridat_obchod() viděl None)
 1.5.30 | Správce účtů — kliknutí na účet nebo tlačítko 📋 otevře detail s kompletním seznamem připojených obchodů (datum, symbol, směr, výsledek, P&L, P&L%); KPI souhrn v detailu: Obchodů, W/L/BE, Winrate, Celk. P&L, Aktuální kapitál, P&L%; Robustnější parsování P&L hodnot (1000, -1000, +500, 1 000, 1000,50)
@@ -3669,11 +3670,30 @@ def open_accounts_manager():
     _btn_edit.config(command=lambda: (_get_selected_acc() and _open_edit_dialog(_get_selected_acc())))
     _btn_del.config(command=lambda: (_get_selected_acc() and _delete_account(_get_selected_acc())))
 
-    def _parse_pnl_val(raw):
+    def _parse_amount(raw):
+        """Robustní parsování čísla ze všech běžných formátů:
+        '252285', '252285.42', '252285,42', '252 285,42',
+        '252.285,42', '252,285.42', '-1000', '+500' → float nebo None."""
         if not raw: return None
-        s = raw.strip().replace(' ', '').replace(',', '.')
+        s = raw.strip().replace(' ', '')  # odstraň mezery (CZ oddělovač tisíců)
+        if '.' in s and ',' in s:
+            # Oba separátory — poslední je desetinný
+            if s.rindex('.') > s.rindex(','):
+                s = s.replace(',', '')          # čárka=tisíce, tečka=desetinná
+            else:
+                s = s.replace('.', '').replace(',', '.')  # tečka=tisíce, čárka=desetinná
+        elif ',' in s:
+            # Jen čárka — pokud za ní jsou max 2 číslice, jde o desetinnou
+            after = s.rsplit(',', 1)[-1].lstrip('-+')
+            if len(after) <= 2:
+                s = s.replace(',', '.')   # desetinná čárka
+            else:
+                s = s.replace(',', '')    # čárka jako oddělovač tisíců
         try: return float(s)
         except ValueError: return None
+
+    # Zpětná kompatibilita
+    _parse_pnl_val = _parse_amount
 
     def _rebuild_list():
         # Zapamatuj vybraný účet
@@ -3712,19 +3732,22 @@ def open_accounts_manager():
             datum_str = f"{ds}  →  {dk or '…'}" if (ds or dk) else ''
 
             _pnl_val = _acc_pnl.get(acc_name, None)
-            _vel_num = _parse_pnl_val(acc.get('velikost', ''))
+            # Parsuj velikost — zkus surovou hodnotu, pak fallback na vel_str
+            _vel_num = _parse_amount(acc.get('velikost', '')) or _parse_amount(vel_str)
 
             # Aktuální kapitál
             if _vel_num is not None and _pnl_val is not None:
-                _akt_str = f"{_vel_num + _pnl_val:,.0f}"
+                _akt_str = f"{_vel_num + _pnl_val:,.0f} {acc.get('mena','')}"
             elif _vel_num is not None:
-                _akt_str = vel_str
+                _akt_str = f"{vel_str} {acc.get('mena','')}".strip()
             else:
-                _akt_str = '—'
+                _akt_str = vel_str or '—'
 
             # P&L %
             if _vel_num and _vel_num != 0 and _pnl_val is not None:
                 _pct_str = f"{_pnl_val / _vel_num * 100:+.2f}%"
+            elif _pnl_val is not None:
+                _pct_str = '?'   # P&L máme, ale chybí velikost pro výpočet %
             else:
                 _pct_str = '—'
 
@@ -3909,14 +3932,11 @@ def open_accounts_manager():
             except Exception: pass
 
         # Pomocná funkce pro parsování P&L hodnoty
-        def _parse_pnl(raw):
-            if not raw: return None
-            s = raw.strip().replace(' ', '').replace(',', '.')
-            try: return float(s)
-            except ValueError: return None
+        # Sdílí _parse_amount z vnějšího scope open_accounts_manager
+        _parse_pnl = _parse_amount
 
-        vel_num = _parse_pnl(acc.get('velikost', ''))
-        total_pnl = sum(v for t in acc_trades if (v := _parse_pnl(t.get('zisk_mena', ''))) is not None)
+        vel_num = _parse_amount(acc.get('velikost', '')) or _parse_amount(_fmt_vel(acc.get('velikost', '')))
+        total_pnl = sum(v for t in acc_trades if (v := _parse_amount(t.get('zisk_mena', ''))) is not None)
 
         # ── KPI souhrn ────────────────────────────────────────────────────────
         sumf = tk.Frame(dlg, bg='#0f172a', pady=8, padx=10)
