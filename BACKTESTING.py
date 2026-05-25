@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.33"
+VERSION = "1.5.34"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.34 | Oprava výpočtu Aktuální kapitál a P&L% — strip() na názvu účtu zabraňuje nespárování s obchody; výpočet Aktuální = Počáteční + Σ(zisky/ztráty připojených obchodů), P&L% = Σ P&L / Počáteční × 100
 1.5.33 | Oprava výpočtu Aktuální kapitál a P&L% — robustní parser čísel zvládne všechny formáty: 252285, 252285,42, 252 285,42, 252.285,42, 252,285.42; Aktuální vždy zobrazuje alespoň počáteční kapitál
 1.5.32 | Správce účtů — tabulka přepsána na ttk.Treeview: perfektní zarovnání sloupců, resize tažením, výběr řádku aktivuje toolbar (📋 Detail / ✏ Upravit / 🗑 Smazat), dvojklik otevře detail; barevné řádky dle statusu (Aktivní/Funded/Propadlý…)
 1.5.31 | Kritická oprava — accounts_combo chyběl v global deklaraci show_main_screen(), takže přiřazený účet se při ukládání obchodu vždy ztratil (widget byl lokální proměnná, pridat_obchod() viděl None)
@@ -3671,29 +3672,39 @@ def open_accounts_manager():
     _btn_del.config(command=lambda: (_get_selected_acc() and _delete_account(_get_selected_acc())))
 
     def _parse_amount(raw):
-        """Robustní parsování čísla ze všech běžných formátů:
-        '252285', '252285.42', '252285,42', '252 285,42',
-        '252.285,42', '252,285.42', '-1000', '+500' → float nebo None."""
-        if not raw: return None
-        s = raw.strip().replace(' ', '')  # odstraň mezery (CZ oddělovač tisíců)
-        if '.' in s and ',' in s:
-            # Oba separátory — poslední je desetinný
-            if s.rindex('.') > s.rindex(','):
-                s = s.replace(',', '')          # čárka=tisíce, tečka=desetinná
+        """Robustní parsování čísla — zvládne všechny formáty:
+        252285 | 252285.42 | 252285,42 | 252 285,42 | 252.285,42 | -1000 | +500"""
+        import re as _re
+        if raw is None: return None
+        s = str(raw).strip()
+        if not s: return None
+        # Zachyť znaménko
+        sign = -1 if s.startswith('-') else 1
+        # Odstraň vše kromě číslic, tečky a čárky
+        s = _re.sub(r'[^\d.,]', '', s)
+        if not s: return None
+        # Urči desetinný oddělovač
+        last_dot   = s.rfind('.')
+        last_comma = s.rfind(',')
+        if last_dot > 0 and last_comma > 0:
+            # Oba přítomné → poslední je desetinný
+            if last_dot > last_comma:
+                s = s.replace(',', '')                        # čárka=tisíce
             else:
-                s = s.replace('.', '').replace(',', '.')  # tečka=tisíce, čárka=desetinná
-        elif ',' in s:
-            # Jen čárka — pokud za ní jsou max 2 číslice, jde o desetinnou
-            after = s.rsplit(',', 1)[-1].lstrip('-+')
-            if len(after) <= 2:
-                s = s.replace(',', '.')   # desetinná čárka
+                s = s.replace('.', '').replace(',', '.')      # tečka=tisíce
+        elif last_comma > 0:
+            # Jen čárka → pokud za ní jsou ≤ 2 číslice = desetinná
+            if len(s) - last_comma - 1 <= 2:
+                s = s.replace(',', '.')
             else:
-                s = s.replace(',', '')    # čárka jako oddělovač tisíců
-        try: return float(s)
-        except ValueError: return None
+                s = s.replace(',', '')
+        # Jen tečka nebo žádný oddělovač → necháme jak je
+        try:
+            return sign * float(s)
+        except (ValueError, TypeError):
+            return None
 
-    # Zpětná kompatibilita
-    _parse_pnl_val = _parse_amount
+    _parse_pnl_val = _parse_amount  # alias pro zpětnou kompatibilitu
 
     def _rebuild_list():
         # Zapamatuj vybraný účet
@@ -3724,7 +3735,7 @@ def open_accounts_manager():
         for i, acc in enumerate(accounts):
             _accounts_ref.append(acc)
             st       = acc.get('status', 'Aktivní')
-            acc_name = acc.get('nazev', '')
+            acc_name = acc.get('nazev', '').strip()
 
             vel_str  = _fmt_vel(acc.get('velikost', ''))
             ds       = acc.get('datum_start', '')
