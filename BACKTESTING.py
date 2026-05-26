@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.34"
+VERSION = "1.5.35"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.35 | XP Bodovací systém — rank žebříček (Nováček → Elite); XP za backtest/reálný obchod, WIN bonus, disciplína (LOSS+SL), foto, poznámka, checklist 100%, zápis do deníku; 8 konfigurovatelných pravidel (denní/týdenní limit, bez revenge, min. RRR, série výher…); 16 odznaků/achievements; XP badge v toolbaru; přehledové okno s progress barem a historií; záložka ⭐ XP Systém v Nastavení
 1.5.34 | Oprava výpočtu Aktuální kapitál a P&L% — strip() na názvu účtu zabraňuje nespárování s obchody; výpočet Aktuální = Počáteční + Σ(zisky/ztráty připojených obchodů), P&L% = Σ P&L / Počáteční × 100
 1.5.33 | Oprava výpočtu Aktuální kapitál a P&L% — robustní parser čísel zvládne všechny formáty: 252285, 252285,42, 252 285,42, 252.285,42, 252,285.42; Aktuální vždy zobrazuje alespoň počáteční kapitál
 1.5.32 | Správce účtů — tabulka přepsána na ttk.Treeview: perfektní zarovnání sloupců, resize tažením, výběr řádku aktivuje toolbar (📋 Detail / ✏ Upravit / 🗑 Smazat), dvojklik otevře detail; barevné řádky dle statusu (Aktivní/Funded/Propadlý…)
@@ -764,6 +765,10 @@ RULES_FILE = '' # NOVÉ: Soubor pro pravidla
 FILTERS_FILE = '' # Soubor pro uložené filtry
 ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
 
+# XP Systém — bodovací žebříček (globální, napříč projekty)
+XP_FILE        = os.path.join(_APP_DIR, 'xp_data.json')
+XP_CONFIG_FILE = os.path.join(_APP_DIR, 'xp_config.json')
+
 # Soubor s vlastními cestami projektů (globální, mimo projekt)
 PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
 
@@ -892,6 +897,7 @@ pie_graph_frame = None
 stats_graph_frame = None
 heatmap_graph_frame = None
 kpi_frame = None
+xp_badge_btn = None   # tlačítko v toolbaru zobrazující aktuální XP
 tables_frame = None
 
 # UI prvky formuláře
@@ -1156,12 +1162,20 @@ def save_current_journal_entry():
     text = journal_text.get("1.0", tk.END).strip()
     data = load_journal_data()
     date_str = selected_journal_date.strftime("%Y-%m-%d")
+    is_new_entry = (text and date_str not in data)
     if text: data[date_str] = text
     else:
         if date_str in data: del data[date_str]
     save_journal_data(data)
     messagebox.showinfo("Uloženo", "Zápis byl uložen.")
     render_calendar()
+    # XP za nový zápis do deníku (jen pokud to je nový záznam — ne přepisování)
+    if is_new_entry:
+        try:
+            award_xp('xp_journal_entry', note=date_str)
+            _show_xp_toast(root, f"⭐ +{get_xp_config().get('xp_journal_entry', 8)} XP  ·  Zápis do deníku")
+        except Exception:
+            pass
 
 def open_trade_from_journal(trade_index):
     show_main_screen(current_project_name)
@@ -2712,10 +2726,14 @@ def pridat_obchod():
                 trades[editing_trade_index] = d
                 _save_trades_file(trades, d)
                 messagebox.showinfo("OK", "Obchod aktualizován."); editing_trade_index = None; save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
+                try: award_xp_for_trade(d, is_edit=True, parent_win=root)
+                except Exception: pass
         else:
             trades.append(d)
             _save_trades_file(trades, d)
             messagebox.showinfo("OK", "Obchod uložen.")
+            try: award_xp_for_trade(d, is_edit=False, parent_win=root)
+            except Exception: pass
         update_listbox(); reset_form(); update_statistics()
     except Exception as e:
         messagebox.showerror("Chyba ukládání", f"Nastala chyba:\n{e}\n\n{traceback.format_exc()}")
@@ -3484,6 +3502,580 @@ def save_accounts(accounts):
             json.dump(accounts, f, ensure_ascii=False, indent=2)
     except Exception as e:
         messagebox.showerror("Chyba", f"Nelze uložit účty:\n{e}")
+
+
+# ==============================================================================
+# XP SYSTÉM — bodovací engine, ranky, pravidla
+# ==============================================================================
+
+# Prahové hodnoty: (min_xp, emoji, název ranku, xp_pro_další_level)
+_XP_RANKS = [
+    (0,     "🌱", "Nováček",          100),
+    (100,   "📊", "Začátečník",       300),
+    (300,   "💼", "Junior Trader",    600),
+    (600,   "⚡", "Trader",          1000),
+    (1000,  "🎯", "Zkušený Trader",  2000),
+    (2000,  "🏆", "Expert",          4000),
+    (4000,  "💎", "Profesionál",     8000),
+    (8000,  "👑", "Master Trader",  15000),
+    (15000, "🔥", "Elite",          99999),
+]
+
+_XP_ACHIEVEMENTS = [
+    ("first_trade",   "🐣", "První krok",         "Přidal/a jsi první obchod."),
+    ("trades_10",     "📈", "Začátečník",          "10 obchodů celkem."),
+    ("trades_50",     "📊", "Půl stovky",          "50 obchodů celkem."),
+    ("trades_100",    "💯", "Stovka",              "100 obchodů celkem."),
+    ("trades_500",    "🚀", "Výzva přijata",       "500 obchodů celkem."),
+    ("first_win",     "✅", "První výhra",         "První WIN obchod."),
+    ("wins_10",       "🏅", "10 výher",            "10 WIN obchodů celkem."),
+    ("streak_3",      "🔥", "Série 3",             "3 výhry v řadě."),
+    ("streak_5",      "⚡", "Série 5",             "5 výher v řadě."),
+    ("streak_10",     "👑", "Neporazitelný",       "10 výher v řadě."),
+    ("journal_7",     "📔", "Týden zápisků",       "7 různých dní zápisu v deníku."),
+    ("journal_30",    "📚", "Měsíc zápisků",       "30 různých dní zápisu v deníku."),
+    ("checklist_10",  "✔️", "Perfekcionista",      "10× kompletní checklist (100%)."),
+    ("xp_500",        "⭐", "500 XP",              "Nasbíral/a jsi 500 XP."),
+    ("xp_2000",       "🌟", "2000 XP",             "Nasbíral/a jsi 2000 XP."),
+    ("xp_5000",       "💫", "5000 XP",             "Nasbíral/a jsi 5000 XP."),
+]
+
+_XP_DEFAULT_CONFIG = {
+    # ── Základní XP za akci ──────────────────────────────────────────────────
+    "xp_backtest_trade":   10,   # přidání backtest obchodu
+    "xp_real_trade":       15,   # přidání reálného obchodu
+    "xp_edit_trade":        3,   # úprava existujícího obchodu
+    "xp_journal_entry":     8,   # uložení záznamu v deníku
+    # ── Bonusy za kvalitu obchodu ────────────────────────────────────────────
+    "xp_win_bonus":        20,   # WIN výsledek
+    "xp_be_bonus":          5,   # BE výsledek
+    "xp_loss_with_sl":      8,   # LOSS, ale SL byl nastaven (disciplína)
+    "xp_with_photo":        5,   # obchod má screenshot/foto
+    "xp_with_note":         5,   # obchod má vyplněnou poznámku
+    "xp_checklist_full":   12,   # checklist splněn na 100%
+    # ── Pravidla (bonus za dodržení) ─────────────────────────────────────────
+    "rules": {
+        "daily_limit": {
+            "enabled": True,
+            "name":    "Denní limit obchodů",
+            "desc":    "Bonus za den kdy počet obchodů nepřekročí limit.",
+            "xp":      25,
+            "value":   3,        # max. počet obchodů za den
+        },
+        "weekly_limit": {
+            "enabled": True,
+            "name":    "Týdenní limit obchodů",
+            "desc":    "Bonus za týden kdy počet obchodů nepřekročí limit.",
+            "xp":      50,
+            "value":   15,
+        },
+        "no_revenge": {
+            "enabled": True,
+            "name":    "Bez revenge tradingu",
+            "desc":    "Bonus za obchod kdy nemáš X a více ztrát za sebou.",
+            "xp":      15,
+            "value":   2,        # max. po sobě jdoucí ztráty
+        },
+        "rrr_min": {
+            "enabled": True,
+            "name":    "Minimální RRR",
+            "desc":    "Bonus za obchod s RRR ≥ nastavenou hodnotou.",
+            "xp":      10,
+            "value":   1.5,
+        },
+        "always_sl": {
+            "enabled": True,
+            "name":    "Vždy Stop Loss",
+            "desc":    "Bonus za obchod kde je vyplněn Stop Loss.",
+            "xp":       5,
+            "value":    0,
+        },
+        "win_streak_3": {
+            "enabled": True,
+            "name":    "Série 3 výher",
+            "desc":    "Bonus za dosažení série 3 výher v řadě.",
+            "xp":      40,
+            "value":    3,
+        },
+        "win_streak_5": {
+            "enabled": True,
+            "name":    "Série 5 výher",
+            "desc":    "Bonus za dosažení série 5 výher v řadě.",
+            "xp":      80,
+            "value":    5,
+        },
+        "with_tags": {
+            "enabled": True,
+            "name":    "Vyplněné tagy",
+            "desc":    "Bonus za obchod kde jsou vyplněny tagy.",
+            "xp":       3,
+            "value":    0,
+        },
+    }
+}
+
+
+def load_xp_data():
+    """Načte XP data (globální napříč projekty)."""
+    try:
+        if os.path.exists(XP_FILE):
+            with open(XP_FILE, 'r', encoding='utf-8') as _f:
+                return json.load(_f)
+    except Exception:
+        pass
+    return {"total_xp": 0, "history": [], "achievements": []}
+
+
+def save_xp_data(data):
+    try:
+        with open(XP_FILE, 'w', encoding='utf-8') as _f:
+            json.dump(data, _f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def get_xp_config():
+    """Načte konfiguraci XP systému; doplní chybějící klíče z výchozí konfigurace."""
+    cfg = {}
+    try:
+        if os.path.exists(XP_CONFIG_FILE):
+            with open(XP_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+                cfg = json.load(_f)
+    except Exception:
+        pass
+    # Doplň chybějící top-level klíče
+    for k, v in _XP_DEFAULT_CONFIG.items():
+        if k not in cfg:
+            cfg[k] = v
+    # Doplň chybějící pravidla
+    for rk, rv in _XP_DEFAULT_CONFIG['rules'].items():
+        cfg['rules'].setdefault(rk, rv)
+    return cfg
+
+
+def save_xp_config(cfg):
+    try:
+        with open(XP_CONFIG_FILE, 'w', encoding='utf-8') as _f:
+            json.dump(cfg, _f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def get_rank_info(total_xp):
+    """Vrátí dict s info o aktuálním ranku pro dané XP."""
+    rank_idx = 0
+    for i, (thr, _em, _nm, _nx) in enumerate(_XP_RANKS):
+        if total_xp >= thr:
+            rank_idx = i
+    thr, emoji, name, next_thr = _XP_RANKS[rank_idx]
+    is_max = (rank_idx == len(_XP_RANKS) - 1)
+    progress = (total_xp - thr) / (next_thr - thr) if (next_thr > thr and not is_max) else 1.0
+    return {
+        'emoji':        emoji,
+        'name':         name,
+        'threshold':    thr,
+        'next_threshold': next_thr,
+        'progress':     min(max(progress, 0.0), 1.0),
+        'xp_to_next':   max(0, next_thr - total_xp),
+        'is_max':       is_max,
+        'rank_idx':     rank_idx,
+    }
+
+
+def _refresh_xp_badge():
+    """Aktualizuje XP badge tlačítko v toolbaru."""
+    global xp_badge_btn
+    if xp_badge_btn is None:
+        return
+    try:
+        if not xp_badge_btn.winfo_exists():
+            return
+        data = load_xp_data()
+        xp   = data.get('total_xp', 0)
+        ri   = get_rank_info(xp)
+        xp_badge_btn.config(text=f"{ri['emoji']} {xp} XP")
+    except Exception:
+        pass
+
+
+def _check_xp_achievements(data):
+    """Zkontroluje a udělí odznaky podle aktuálního stavu. Vrátí seznam nových odznaků."""
+    earned    = set(data.get('achievements', []))
+    history   = data.get('history', [])
+    total_xp  = data.get('total_xp', 0)
+    new_badges = []
+
+    # Počítadla z history
+    trade_adds  = [h for h in history if h.get('source') in ('xp_backtest_trade', 'xp_real_trade')]
+    wins        = [h for h in history if h.get('source') == 'xp_win_bonus']
+    journal_days = set(h['date'][:10] for h in history if h.get('source') == 'xp_journal_entry')
+    checklist_fulls = [h for h in history if h.get('source') == 'xp_checklist_full']
+
+    # Max výherní série — zjistíme z notes (source streak)
+    streak_3_reached = any(h.get('source') == 'rule_win_streak_3' for h in history)
+    streak_5_reached = any(h.get('source') == 'rule_win_streak_5' for h in history)
+    streak_10_any   = any(h.get('source') == 'achievement_streak_10' for h in history)
+
+    checks = [
+        ("first_trade",  len(trade_adds) >= 1),
+        ("trades_10",    len(trade_adds) >= 10),
+        ("trades_50",    len(trade_adds) >= 50),
+        ("trades_100",   len(trade_adds) >= 100),
+        ("trades_500",   len(trade_adds) >= 500),
+        ("first_win",    len(wins) >= 1),
+        ("wins_10",      len(wins) >= 10),
+        ("streak_3",     streak_3_reached),
+        ("streak_5",     streak_5_reached),
+        ("journal_7",    len(journal_days) >= 7),
+        ("journal_30",   len(journal_days) >= 30),
+        ("checklist_10", len(checklist_fulls) >= 10),
+        ("xp_500",       total_xp >= 500),
+        ("xp_2000",      total_xp >= 2000),
+        ("xp_5000",      total_xp >= 5000),
+    ]
+    for aid, condition in checks:
+        if condition and aid not in earned:
+            earned.add(aid)
+            new_badges.append(aid)
+
+    data['achievements'] = list(earned)
+    return new_badges
+
+
+def _award_xp_internal(source, amount, note, project):
+    """Interní přidání XP — vrátí (nové_total_xp, [nové odznaky])."""
+    data = load_xp_data()
+    data['total_xp'] = data.get('total_xp', 0) + amount
+    data.setdefault('history', []).append({
+        'date':    datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'source':  source,
+        'xp':      amount,
+        'note':    note,
+        'project': project,
+    })
+    if len(data['history']) > 2000:
+        data['history'] = data['history'][-2000:]
+    new_badges = _check_xp_achievements(data)
+    save_xp_data(data)
+    return data['total_xp'], new_badges
+
+
+def award_xp(source, note='', amount=None):
+    """
+    Přidá XP body a zaktualizuje badge.
+    source  — klíč z konfigurace (např. 'xp_real_trade') nebo interní ('rule_daily_limit')
+    note    — volitelný popis (symbol, datum…)
+    amount  — pokud None, načte se z konfigurace
+    """
+    cfg = get_xp_config()
+    if amount is None:
+        # Zkus top-level klíč, pak pravidla
+        amount = cfg.get(source, 0)
+        if amount == 0 and source.startswith('rule_'):
+            rule_id = source[5:]
+            amount  = cfg.get('rules', {}).get(rule_id, {}).get('xp', 0)
+    if amount <= 0:
+        return 0, []
+    total, new_badges = _award_xp_internal(source, amount, note, current_project_name or '')
+    _refresh_xp_badge()
+    return total, new_badges
+
+
+def _show_xp_toast(parent, text, color='#854d0e'):
+    """Krátká toast notifikace v rohu okna."""
+    try:
+        t = tk.Toplevel(parent)
+        t.overrideredirect(True)
+        t.attributes('-topmost', True)
+        t.configure(bg=color)
+        lbl = tk.Label(t, text=text, bg=color, fg='#fef3c7',
+                       font=('Segoe UI', 10, 'bold'), padx=14, pady=8)
+        lbl.pack()
+        # Umístění — pravý dolní roh parent okna
+        parent.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width()  - 240
+        py = parent.winfo_rooty() + parent.winfo_height() - 60
+        t.geometry(f"+{max(0, px)}+{max(0, py)}")
+        t.after(2500, t.destroy)
+    except Exception:
+        pass
+
+
+def award_xp_for_trade(trade_dict, is_edit=False, parent_win=None):
+    """
+    Udělí XP za přidání / úpravu obchodu a zkontroluje pravidla.
+    Vrátí celkový počet přidaných XP a zobrazí toast.
+    """
+    if not DATA_FILE:
+        return
+    cfg     = get_xp_config()
+    mode    = current_mode or ''
+    symbol  = trade_dict.get('symbol', '')
+    vysl    = trade_dict.get('vysledek', '').lower()
+    sl_val  = trade_dict.get('stoploss', '').strip()
+    rrr_val = trade_dict.get('rrr', '').strip()
+    note_val= trade_dict.get('poznamka', '').strip()
+    foto_val= trade_dict.get('obrazky', '').strip()
+    tags_val= trade_dict.get('tags', '').strip()
+    chk_val = trade_dict.get('checklist_ratio', '')   # např. "3/4"
+    date_val= trade_dict.get('cas_otevreni', '')[:10]
+
+    earned_now = 0
+    msgs = []
+
+    if is_edit:
+        amt = cfg.get('xp_edit_trade', 3)
+        award_xp('xp_edit_trade', note=symbol, amount=amt)
+        earned_now += amt
+    else:
+        # Základ za typ projektu
+        if 'REAL' in mode.upper():
+            base = cfg.get('xp_real_trade', 15)
+            award_xp('xp_real_trade', note=symbol, amount=base)
+        else:
+            base = cfg.get('xp_backtest_trade', 10)
+            award_xp('xp_backtest_trade', note=symbol, amount=base)
+        earned_now += base
+        msgs.append(f"+{base} XP za obchod")
+
+        # Bonus: výsledek
+        if vysl == 'win':
+            b = cfg.get('xp_win_bonus', 20)
+            award_xp('xp_win_bonus', note=symbol, amount=b)
+            earned_now += b; msgs.append(f"+{b} WIN bonus")
+        elif vysl == 'be':
+            b = cfg.get('xp_be_bonus', 5)
+            award_xp('xp_be_bonus', note=symbol, amount=b)
+            earned_now += b
+        elif vysl == 'loss' and sl_val:
+            b = cfg.get('xp_loss_with_sl', 8)
+            award_xp('xp_loss_with_sl', note=symbol, amount=b)
+            earned_now += b; msgs.append(f"+{b} disciplína")
+
+        # Bonus: foto
+        if foto_val:
+            b = cfg.get('xp_with_photo', 5)
+            award_xp('xp_with_photo', note=symbol, amount=b)
+            earned_now += b
+
+        # Bonus: poznámka
+        if note_val:
+            b = cfg.get('xp_with_note', 5)
+            award_xp('xp_with_note', note=symbol, amount=b)
+            earned_now += b
+
+        # Bonus: checklist 100%
+        try:
+            parts = chk_val.split('/') if '/' in chk_val else []
+            if len(parts) == 2 and int(parts[0]) == int(parts[1]) and int(parts[1]) > 0:
+                b = cfg.get('xp_checklist_full', 12)
+                award_xp('xp_checklist_full', note=symbol, amount=b)
+                earned_now += b; msgs.append(f"+{b} checklist 100%")
+        except Exception:
+            pass
+
+        # ── Pravidla ─────────────────────────────────────────────────────────
+        rules = cfg.get('rules', {})
+        all_trades = []
+        try:
+            all_trades = load_data()
+        except Exception:
+            pass
+
+        # Pravidlo: always_sl
+        r_sl = rules.get('always_sl', {})
+        if r_sl.get('enabled') and sl_val:
+            b = r_sl.get('xp', 5)
+            award_xp('rule_always_sl', note='SL nastaven', amount=b)
+            earned_now += b
+
+        # Pravidlo: rrr_min
+        r_rrr = rules.get('rrr_min', {})
+        if r_rrr.get('enabled'):
+            try:
+                rrr_f = float(rrr_val.replace(',', '.'))
+                if rrr_f >= float(r_rrr.get('value', 1.5)):
+                    b = r_rrr.get('xp', 10)
+                    award_xp('rule_rrr_min', note=f"RRR {rrr_f:.1f}", amount=b)
+                    earned_now += b; msgs.append(f"+{b} RRR≥{r_rrr['value']}")
+            except Exception:
+                pass
+
+        # Pravidlo: with_tags
+        r_tags = rules.get('with_tags', {})
+        if r_tags.get('enabled') and tags_val:
+            b = r_tags.get('xp', 3)
+            award_xp('rule_with_tags', note='tagy', amount=b)
+            earned_now += b
+
+        # Pravidlo: no_revenge — počítej ztráty za sebou z historických obchodů
+        r_nrv = rules.get('no_revenge', {})
+        if r_nrv.get('enabled') and all_trades:
+            max_consec = int(r_nrv.get('value', 2))
+            recent_results = [t.get('vysledek', '').lower() for t in all_trades[-max_consec:]]
+            if vysl != 'loss' or recent_results.count('loss') < max_consec:
+                b = r_nrv.get('xp', 15)
+                award_xp('rule_no_revenge', note='bez revenge', amount=b)
+                earned_now += b
+
+        # Pravidlo: win_streak_3 / win_streak_5 — zkontroluj sérii
+        if vysl == 'win' and all_trades:
+            recent_vysl = [t.get('vysledek', '').lower() for t in all_trades[-9:]] + ['win']
+            # Spočítej aktuální win streak
+            streak = 0
+            for res in reversed(recent_vysl):
+                if res == 'win': streak += 1
+                else: break
+            for streak_key, streak_min in [('win_streak_5', 5), ('win_streak_3', 3)]:
+                r_str = rules.get(streak_key, {})
+                if r_str.get('enabled') and streak == int(r_str.get('value', streak_min)):
+                    b = r_str.get('xp', 40)
+                    award_xp(f'rule_{streak_key}', note=f"série {streak}×", amount=b)
+                    earned_now += b; msgs.append(f"+{b} série {streak}× 🔥")
+
+        # Pravidlo: daily_limit — zkontroluj kolik obchodů bylo dnes
+        r_dl = rules.get('daily_limit', {})
+        if r_dl.get('enabled') and date_val and all_trades:
+            count_today = sum(1 for t in all_trades
+                              if t.get('cas_otevreni', '')[:10] == date_val)
+            if count_today <= int(r_dl.get('value', 3)):
+                b = r_dl.get('xp', 25)
+                award_xp('rule_daily_limit', note=f"denní limit OK ({count_today})", amount=b)
+                earned_now += b; msgs.append(f"+{b} denní limit ✓")
+
+    # Zobraz toast
+    if earned_now > 0 and parent_win:
+        summary = f"⭐ +{earned_now} XP"
+        if msgs:
+            summary += "  ·  " + msgs[0]
+        _show_xp_toast(parent_win, summary)
+
+
+def open_xp_overview():
+    """Otevře přehledové okno XP — rank, progress bar, historie, odznaky."""
+    data  = load_xp_data()
+    total = data.get('total_xp', 0)
+    ri    = get_rank_info(total)
+    hist  = list(reversed(data.get('history', [])))
+    earned_ids = set(data.get('achievements', []))
+
+    win = tk.Toplevel(root)
+    win.title("⭐  XP Žebříček")
+    win.geometry("680x600")
+    win.configure(bg='#0f172a')
+    win.resizable(True, True)
+    win.lift(); win.focus_set()
+
+    # ── Hlavička — rank banner ─────────────────────────────────────────────
+    hdr = tk.Frame(win, bg='#1c1400', pady=18, padx=24)
+    hdr.pack(fill='x')
+
+    left = tk.Frame(hdr, bg='#1c1400')
+    left.pack(side='left')
+    tk.Label(left, text=ri['emoji'], font=('Segoe UI', 36), bg='#1c1400', fg='#fbbf24').pack(anchor='w')
+    tk.Label(left, text=ri['name'],  font=('Segoe UI', 16, 'bold'), bg='#1c1400', fg='#fef3c7').pack(anchor='w')
+
+    right = tk.Frame(hdr, bg='#1c1400')
+    right.pack(side='left', padx=32, fill='x', expand=True)
+
+    tk.Label(right, text=f"{total:,} XP celkem", font=('Segoe UI', 20, 'bold'),
+             bg='#1c1400', fg='#fbbf24').pack(anchor='w')
+    if not ri['is_max']:
+        tk.Label(right, text=f"Do dalšího ranku: {ri['xp_to_next']:,} XP",
+                 font=('Segoe UI', 9), bg='#1c1400', fg='#a16207').pack(anchor='w', pady=(2, 6))
+        # Progress bar (canvas)
+        bar_w = 340
+        bar_c = tk.Canvas(right, width=bar_w, height=14, bg='#292524', highlightthickness=0, bd=0)
+        bar_c.pack(anchor='w')
+        fill_w = int(bar_w * ri['progress'])
+        if fill_w > 0:
+            bar_c.create_rectangle(0, 0, fill_w, 14, fill='#f59e0b', outline='')
+        bar_c.create_text(bar_w//2, 7, text=f"{ri['progress']*100:.0f}%",
+                          font=('Segoe UI', 7, 'bold'), fill='#1c1400')
+    else:
+        tk.Label(right, text="Maximální rank dosažen! 🔥",
+                 font=('Segoe UI', 10, 'bold'), bg='#1c1400', fg='#4ade80').pack(anchor='w')
+
+    # ── Tabs: Odznaky | Historie ────────────────────────────────────────────
+    nb = ttk.Notebook(win); nb.pack(fill='both', expand=True, padx=8, pady=8)
+
+    # Tab: Odznaky
+    t_ach = ttk.Frame(nb); nb.add(t_ach, text='  🏅 Odznaky  ')
+    ach_canvas = tk.Canvas(t_ach, bg='#0f172a', highlightthickness=0)
+    ach_sb = ttk.Scrollbar(t_ach, command=ach_canvas.yview)
+    ach_canvas.configure(yscrollcommand=ach_sb.set)
+    ach_sb.pack(side='right', fill='y')
+    ach_canvas.pack(fill='both', expand=True)
+    ach_inner = tk.Frame(ach_canvas, bg='#0f172a')
+    ach_canvas.create_window((0, 0), window=ach_inner, anchor='nw')
+    ach_inner.bind('<Configure>', lambda e: ach_canvas.configure(scrollregion=ach_canvas.bbox('all')))
+
+    ach_by_id = {a[0]: a for a in _XP_ACHIEVEMENTS}
+    row_i = 0
+    for aid, aemoji, aname, adesc in _XP_ACHIEVEMENTS:
+        got   = aid in earned_ids
+        bg    = '#1a2e1a' if got else '#1e293b'
+        fg    = '#4ade80' if got else '#475569'
+        ef    = '#86efac' if got else '#334155'
+        row_f = tk.Frame(ach_inner, bg=bg, pady=6, padx=12)
+        row_f.pack(fill='x', padx=10, pady=3)
+        tk.Label(row_f, text=aemoji if got else '🔒',
+                 font=('Segoe UI', 18), bg=bg, fg=ef).pack(side='left', padx=(0, 10))
+        txt_f = tk.Frame(row_f, bg=bg); txt_f.pack(side='left')
+        tk.Label(txt_f, text=aname, font=('Segoe UI', 10, 'bold'), bg=bg, fg=fg).pack(anchor='w')
+        tk.Label(txt_f, text=adesc, font=('Segoe UI', 8),           bg=bg, fg='#64748b').pack(anchor='w')
+        if got:
+            tk.Label(row_f, text="✔ SPLNĚNO", font=('Segoe UI', 8, 'bold'),
+                     bg=bg, fg='#4ade80').pack(side='right', padx=8)
+
+    # Tab: Historie XP
+    t_hist = ttk.Frame(nb); nb.add(t_hist, text='  📜 Historie  ')
+    hist_canvas = tk.Canvas(t_hist, bg='#0f172a', highlightthickness=0)
+    hist_sb = ttk.Scrollbar(t_hist, command=hist_canvas.yview)
+    hist_canvas.configure(yscrollcommand=hist_sb.set)
+    hist_sb.pack(side='right', fill='y')
+    hist_canvas.pack(fill='both', expand=True)
+    hist_inner = tk.Frame(hist_canvas, bg='#0f172a')
+    hist_canvas.create_window((0, 0), window=hist_inner, anchor='nw')
+    hist_inner.bind('<Configure>', lambda e: hist_canvas.configure(scrollregion=hist_canvas.bbox('all')))
+
+    _SOURCE_LABELS = {
+        'xp_backtest_trade': 'Backtest obchod',
+        'xp_real_trade':     'Reálný obchod',
+        'xp_edit_trade':     'Úprava obchodu',
+        'xp_journal_entry':  'Zápis do deníku',
+        'xp_win_bonus':      'WIN bonus',
+        'xp_be_bonus':       'BE bonus',
+        'xp_loss_with_sl':   'Disciplína (loss+SL)',
+        'xp_with_photo':     'Screenshot',
+        'xp_with_note':      'Poznámka',
+        'xp_checklist_full': 'Checklist 100%',
+        'rule_always_sl':    '✓ Pravidlo: SL nastaven',
+        'rule_rrr_min':      '✓ Pravidlo: min. RRR',
+        'rule_no_revenge':   '✓ Pravidlo: bez revenge',
+        'rule_with_tags':    '✓ Pravidlo: tagy',
+        'rule_daily_limit':  '✓ Pravidlo: denní limit',
+        'rule_weekly_limit': '✓ Pravidlo: týdenní limit',
+        'rule_win_streak_3': '🔥 Série 3 výher',
+        'rule_win_streak_5': '🔥 Série 5 výher',
+    }
+    for i, h in enumerate(hist[:200]):
+        row_bg = '#1e293b' if i % 2 == 0 else '#0f172a'
+        row_f  = tk.Frame(hist_inner, bg=row_bg, pady=4, padx=10)
+        row_f.pack(fill='x')
+        src_lbl = _SOURCE_LABELS.get(h.get('source', ''), h.get('source', ''))
+        tk.Label(row_f, text=h.get('date', '')[:16],
+                 font=('Segoe UI', 8), bg=row_bg, fg='#64748b', width=14, anchor='w').pack(side='left')
+        tk.Label(row_f, text=src_lbl,
+                 font=('Segoe UI', 9), bg=row_bg, fg='#94a3b8', anchor='w').pack(side='left', padx=8)
+        if h.get('note'):
+            tk.Label(row_f, text=h['note'],
+                     font=('Segoe UI', 8), bg=row_bg, fg='#475569', anchor='w').pack(side='left')
+        tk.Label(row_f, text=f"+{h.get('xp', 0)} XP",
+                 font=('Segoe UI', 9, 'bold'), bg=row_bg, fg='#fbbf24').pack(side='right', padx=4)
+        if h.get('project'):
+            tk.Label(row_f, text=h['project'],
+                     font=('Segoe UI', 7), bg=row_bg, fg='#334155').pack(side='right', padx=4)
 
 
 def _fmt_vel(vel):
@@ -5244,6 +5836,137 @@ def open_settings_window(initial_tab=0):
               bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'),
               padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
+    # ── Tab: XP Systém ────────────────────────────────────────────────────────
+    t_xp = ttk.Frame(nb); nb.add(t_xp, text='  ⭐ XP Systém  ')
+    xp_outer = tk.Frame(t_xp, bg=DT_BG)
+    xp_outer.pack(fill='both', expand=True)
+
+    xp_canvas = tk.Canvas(xp_outer, bg=DT_BG, highlightthickness=0)
+    xp_sb_v   = ttk.Scrollbar(xp_outer, command=xp_canvas.yview)
+    xp_canvas.configure(yscrollcommand=xp_sb_v.set)
+    xp_sb_v.pack(side='right', fill='y')
+    xp_canvas.pack(fill='both', expand=True)
+    xp_inner = tk.Frame(xp_canvas, bg=DT_BG, padx=20, pady=14)
+    xp_canvas.create_window((0, 0), window=xp_inner, anchor='nw')
+    xp_inner.bind('<Configure>', lambda e: xp_canvas.configure(scrollregion=xp_canvas.bbox('all')))
+
+    _xp_cfg = get_xp_config()
+
+    tk.Label(xp_inner, text="⭐  XP Bodovací systém", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 13, 'bold')).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 4))
+    tk.Label(xp_inner, text="Nastav kolik XP získáš za jednotlivé akce a pravidla.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9)).grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 14))
+
+    # ── Základní XP ──────────────────────────────────────────────────────────
+    tk.Label(xp_inner, text="ZÁKLADNÍ XP ZA AKCI", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 8, 'bold')).grid(row=2, column=0, columnspan=3, sticky='w', pady=(0, 4))
+
+    _basic_fields = [
+        ("xp_backtest_trade",  "Backtest obchod (+XP za přidání)"),
+        ("xp_real_trade",      "Reálný obchod (+XP za přidání)"),
+        ("xp_edit_trade",      "Úprava existujícího obchodu"),
+        ("xp_journal_entry",   "Zápis do deníku (nový záznam)"),
+        ("xp_win_bonus",       "WIN výsledek — bonus"),
+        ("xp_be_bonus",        "BE výsledek — bonus"),
+        ("xp_loss_with_sl",    "LOSS + SL nastaven — disciplína"),
+        ("xp_with_photo",      "Obchod se screenshotem"),
+        ("xp_with_note",       "Obchod s poznámkou"),
+        ("xp_checklist_full",  "Checklist splněn na 100%"),
+    ]
+    _xp_vars = {}
+    for ri2, (key, label) in enumerate(_basic_fields, start=3):
+        tk.Label(xp_inner, text=label, bg=DT_BG, fg=DT_TEXT,
+                 font=('Segoe UI', 9)).grid(row=ri2, column=0, sticky='w', padx=(12, 6), pady=2)
+        _v = tk.StringVar(value=str(_xp_cfg.get(key, 0)))
+        _xp_vars[key] = _v
+        tk.Entry(xp_inner, textvariable=_v, width=6, font=('Segoe UI', 9),
+                 bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT,
+                 relief='flat').grid(row=ri2, column=1, sticky='w', padx=4, pady=2)
+        tk.Label(xp_inner, text="XP", bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 8)).grid(row=ri2, column=2, sticky='w')
+
+    # ── Pravidla ─────────────────────────────────────────────────────────────
+    rule_start_row = 3 + len(_basic_fields) + 1
+    tk.Frame(xp_inner, bg=DT_BORDER, height=1).grid(
+        row=rule_start_row-1, column=0, columnspan=3, sticky='ew', pady=(10, 6))
+    tk.Label(xp_inner, text="PRAVIDLA — bonus XP za dodržení", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 8, 'bold')).grid(row=rule_start_row, column=0, columnspan=3, sticky='w', pady=(0, 6))
+
+    _rules_cfg = _xp_cfg.get('rules', {})
+    _rule_enabled_vars = {}
+    _rule_xp_vars      = {}
+    _rule_val_vars     = {}
+
+    _rule_meta = {
+        "daily_limit":  ("Denní limit obchodů",    "Max. obchodů/den:", True),
+        "weekly_limit": ("Týdenní limit obchodů",  "Max. obchodů/týden:", True),
+        "no_revenge":   ("Bez revenge tradingu",   "Max. ztrát za sebou:", True),
+        "rrr_min":      ("Minimální RRR",           "Min. RRR:", True),
+        "always_sl":    ("Vždy Stop Loss",          None, False),
+        "win_streak_3": ("Série 3 výher v řadě",   None, False),
+        "win_streak_5": ("Série 5 výher v řadě",   None, False),
+        "with_tags":    ("Vyplněné tagy",           None, False),
+    }
+
+    for ri2, (rule_id, (rname, rval_label, has_val)) in enumerate(_rule_meta.items(), start=rule_start_row+1):
+        rcfg = _rules_cfg.get(rule_id, {})
+        # Enabled checkbox
+        _ev = tk.BooleanVar(value=rcfg.get('enabled', True))
+        _rule_enabled_vars[rule_id] = _ev
+        tk.Checkbutton(xp_inner, variable=_ev, bg=DT_BG,
+                       activebackground=DT_BG, selectcolor=DT_SURFACE).grid(row=ri2, column=0, sticky='w', padx=(12, 0))
+        tk.Label(xp_inner, text=rname, bg=DT_BG, fg=DT_TEXT,
+                 font=('Segoe UI', 9)).grid(row=ri2, column=0, sticky='w', padx=(36, 6))
+        # XP za pravidlo
+        _xv = tk.StringVar(value=str(rcfg.get('xp', 10)))
+        _rule_xp_vars[rule_id] = _xv
+        tk.Entry(xp_inner, textvariable=_xv, width=6, font=('Segoe UI', 9),
+                 bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT,
+                 relief='flat').grid(row=ri2, column=1, sticky='w', padx=4)
+        tk.Label(xp_inner, text="XP", bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 8)).grid(row=ri2, column=2, sticky='w')
+        # Hodnota pravidla (volitelná)
+        if has_val and rval_label:
+            tk.Label(xp_inner, text=rval_label, bg=DT_BG, fg=DT_SUBTEXT,
+                     font=('Segoe UI', 8)).grid(row=ri2, column=3, sticky='w', padx=(12, 4))
+            _vv = tk.StringVar(value=str(rcfg.get('value', '')))
+            _rule_val_vars[rule_id] = _vv
+            tk.Entry(xp_inner, textvariable=_vv, width=7, font=('Segoe UI', 9),
+                     bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT,
+                     relief='flat').grid(row=ri2, column=4, sticky='w')
+
+    # ── Tlačítko Uložit ───────────────────────────────────────────────────────
+    save_row = rule_start_row + 2 + len(_rule_meta)
+    tk.Frame(xp_inner, bg=DT_BORDER, height=1).grid(
+        row=save_row-1, column=0, columnspan=5, sticky='ew', pady=(10, 6))
+
+    def _save_xp_config():
+        cfg2 = get_xp_config()
+        for key, var in _xp_vars.items():
+            try: cfg2[key] = int(var.get())
+            except ValueError: pass
+        for rule_id in _rule_meta:
+            cfg2['rules'][rule_id]['enabled'] = _rule_enabled_vars[rule_id].get()
+            try: cfg2['rules'][rule_id]['xp']  = int(_rule_xp_vars[rule_id].get())
+            except ValueError: pass
+            if rule_id in _rule_val_vars:
+                raw_val = _rule_val_vars[rule_id].get().replace(',', '.')
+                try:
+                    cfg2['rules'][rule_id]['value'] = float(raw_val) if '.' in raw_val else int(raw_val)
+                except ValueError:
+                    pass
+        save_xp_config(cfg2)
+        messagebox.showinfo("Uloženo", "Nastavení XP systému uloženo.", parent=sw)
+
+    btn_row_f = tk.Frame(xp_inner, bg=DT_BG)
+    btn_row_f.grid(row=save_row, column=0, columnspan=5, sticky='w', pady=6)
+    tk.Button(btn_row_f, text="💾  Uložit XP nastavení", command=_save_xp_config,
+              bg='#ca8a04', fg='#1c1400', font=('Segoe UI', 10, 'bold'),
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(side='left')
+    tk.Button(btn_row_f, text="⭐  Zobrazit XP přehled", command=open_xp_overview,
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9),
+              padx=14, pady=8, relief='flat', cursor='hand2').pack(side='left', padx=10)
+
     nb.select(initial_tab)
 
 
@@ -5265,7 +5988,7 @@ def show_main_screen(p_name):
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
-    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame
+    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
 
     current_project_name = p_name
@@ -5334,6 +6057,16 @@ def show_main_screen(p_name):
     tk.Button(hb, text="🏦  ÚČTY", command=open_accounts_manager,
               bg=DT_BTN, fg=DT_TEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    # XP badge — zobrazí aktuální rank a XP
+    _xp_data_init = load_xp_data()
+    _xp_total_init = _xp_data_init.get('total_xp', 0)
+    _xp_ri_init    = get_rank_info(_xp_total_init)
+    xp_badge_btn = tk.Button(hb,
+              text=f"{_xp_ri_init['emoji']} {_xp_total_init} XP",
+              command=open_xp_overview,
+              bg='#451a03', fg='#fbbf24',
+              font=('Segoe UI', 9, 'bold'), padx=10, pady=6, relief='flat', cursor='hand2')
+    xp_badge_btn.pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📖  DENÍK", command=show_journal_screen,
               bg=DT_BTN, fg=DT_TEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
