@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.35"
+VERSION = "1.5.36"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.36 | Periody — filtr účtu: dropdown "Účet" v hlavičce záložky filtruje všechna data (KPI karty, oba grafy, obě tabulky); výchozí "Všechny účty"; název účtu se zobrazuje v nadpisech sekcí a grafů
 1.5.35 | XP Bodovací systém — rank žebříček (Nováček → Elite); XP za backtest/reálný obchod, WIN bonus, disciplína (LOSS+SL), foto, poznámka, checklist 100%, zápis do deníku; 8 konfigurovatelných pravidel (denní/týdenní limit, bez revenge, min. RRR, série výher…); 16 odznaků/achievements; XP badge v toolbaru; přehledové okno s progress barem a historií; záložka ⭐ XP Systém v Nastavení
 1.5.34 | Oprava výpočtu Aktuální kapitál a P&L% — strip() na názvu účtu zabraňuje nespárování s obchody; výpočet Aktuální = Počáteční + Σ(zisky/ztráty připojených obchodů), P&L% = Σ P&L / Počáteční × 100
 1.5.33 | Oprava výpočtu Aktuální kapitál a P&L% — robustní parser čísel zvládne všechny formáty: 252285, 252285,42, 252 285,42, 252.285,42, 252,285.42; Aktuální vždy zobrazuje alespoň počáteční kapitál
@@ -852,8 +853,9 @@ current_project_name = ""
 stats_canvases = [] # Pro equity curve
 pie_canvases = []   # Pro kruhový graf
 heatmap_canvases = [] # Pro heatmapu
-periods_canvases = []    # Pro charty v záložce PERIODY
-periods_frames   = {}    # Odkazy na widgety v záložce PERIODY
+periods_canvases    = []    # Pro charty v záložce PERIODY
+periods_frames      = {}    # Odkazy na widgety v záložce PERIODY
+periods_account_var = None  # StringVar — filtr účtu v záložce PERIODY
 
 # Globální proměnné UI
 trades_tree = None 
@@ -4661,7 +4663,7 @@ def open_accounts_manager():
 
 def setup_periods_tab(parent):
     """Vytvoří záložku PERIODY s týdenním a měsíčním přehledem."""
-    global periods_frames
+    global periods_frames, periods_account_var
     periods_frames = {}
 
     canv = tk.Canvas(parent, bg=DT_BG, highlightthickness=0)
@@ -4675,7 +4677,7 @@ def setup_periods_tab(parent):
     canv.bind_all("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)), "units"))
 
     # ── Hlavička ─────────────────────────────────────────────────────────────
-    hdr = tk.Frame(sf, bg='#0f172a', pady=12)
+    hdr = tk.Frame(sf, bg='#0f172a', pady=10)
     hdr.pack(fill='x')
     tk.Label(hdr, text="📅  PŘEHLED VÝKONNOSTI — TÝDEN & MĚSÍC",
              font=('Segoe UI', 13, 'bold'), bg='#0f172a', fg='white').pack(side='left', padx=18)
@@ -4683,6 +4685,39 @@ def setup_periods_tab(parent):
               bg='#0ea5e9', fg='white', font=('Segoe UI', 9, 'bold'),
               relief='flat', pady=4, padx=14, cursor='hand2',
               activebackground='#0284c7').pack(side='right', padx=14)
+
+    # ── Filtr účtu ────────────────────────────────────────────────────────────
+    filter_bar = tk.Frame(sf, bg='#1e293b', pady=7, padx=14)
+    filter_bar.pack(fill='x')
+
+    tk.Label(filter_bar, text="Účet:", font=('Segoe UI', 9, 'bold'),
+             bg='#1e293b', fg='#94a3b8').pack(side='left')
+
+    periods_account_var = tk.StringVar(value='— Všechny účty —')
+
+    def _get_acc_choices():
+        choices = ['— Všechny účty —']
+        try:
+            accs = load_accounts()
+            choices += [a.get('nazev', '').strip() for a in accs if a.get('nazev', '').strip()]
+        except Exception:
+            pass
+        return choices
+
+    _acc_combo = ttk.Combobox(filter_bar, textvariable=periods_account_var,
+                              state='readonly', font=('Segoe UI', 9), width=28)
+    _acc_combo['values'] = _get_acc_choices()
+    _acc_combo.pack(side='left', padx=(6, 16))
+
+    def _on_acc_change(event=None):
+        # Obnoví seznam účtů (mohl přibýt nový) a spustí přepočet
+        _acc_combo['values'] = _get_acc_choices()
+        update_periods_analysis()
+
+    _acc_combo.bind('<<ComboboxSelected>>', _on_acc_change)
+
+    tk.Label(filter_bar, text="— filtruje data v grafech i tabulkách níže",
+             font=('Segoe UI', 8), bg='#1e293b', fg='#475569').pack(side='left')
 
     # ── KPI row (tento týden | tento měsíc) ──────────────────────────────────
     kpi_row = tk.Frame(sf, bg=DT_BG)
@@ -4724,8 +4759,21 @@ def update_periods_analysis():
         except: pass
     periods_canvases.clear()
 
-    trades = load_data()
-    now    = datetime.now()
+    all_trades = load_data()
+    now        = datetime.now()
+
+    # ── Filtr účtu ────────────────────────────────────────────────────────────
+    _sel_acc = ''
+    try:
+        if periods_account_var:
+            _sel_acc = periods_account_var.get().strip()
+    except Exception:
+        pass
+    _filter_active = _sel_acc and not _sel_acc.startswith('—')
+    if _filter_active:
+        trades = [t for t in all_trades if t.get('ucet', '').strip() == _sel_acc]
+    else:
+        trades = all_trades
 
     # ── Parsování obchodů ────────────────────────────────────────────────────
     parsed = []
@@ -4865,8 +4913,9 @@ def update_periods_analysis():
     wk_s = week_data.get(cur_week,  {'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
     mo_s = month_data.get(cur_month,{'count':0,'wins':0,'losses':0,'be':0,'r':0.0,'gross_p':0.0,'gross_l':0.0})
 
-    build_kpi(periods_frames['kpi_week'],  "📆  TENTO TÝDEN",  week_lbl_full(cur_week), wk_s)
-    build_kpi(periods_frames['kpi_month'], "🗓️  TENTO MĚSÍC", month_lbl(cur_month),    mo_s)
+    _acc_suffix = f"  ·  {_sel_acc}" if _filter_active else "  ·  všechny účty"
+    build_kpi(periods_frames['kpi_week'],  "📆  TENTO TÝDEN",  week_lbl_full(cur_week) + _acc_suffix, wk_s)
+    build_kpi(periods_frames['kpi_month'], "🗓️  TENTO MĚSÍC", month_lbl(cur_month)    + _acc_suffix, mo_s)
 
     # ── Bar chart helper ──────────────────────────────────────────────────────
     def build_chart(fkey, title, keys, data_dict, lbl_fn, cur_key):
@@ -4915,9 +4964,10 @@ def update_periods_analysis():
         fc.get_tk_widget().pack(fill='x', padx=0, pady=0)
         periods_canvases.append(fc)
 
-    build_chart('chart_week',  'Výkonnost po TÝDNECH  (modrá = aktuální)',
+    _chart_acc_tag = f"  [{_sel_acc}]" if _filter_active else ""
+    build_chart('chart_week',  f'Výkonnost po TÝDNECH{_chart_acc_tag}  (modrá = aktuální)',
                 weeks_keys,  week_data,  week_lbl,  cur_week)
-    build_chart('chart_month', 'Výkonnost po MĚSÍCÍCH  (modrá = aktuální)',
+    build_chart('chart_month', f'Výkonnost po MĚSÍCÍCH{_chart_acc_tag}  (modrá = aktuální)',
                 months_keys, month_data, month_lbl, cur_month)
 
     # ── Tabulka helper ────────────────────────────────────────────────────────
@@ -5988,7 +6038,7 @@ def show_main_screen(p_name):
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
-    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn
+    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
 
     current_project_name = p_name
