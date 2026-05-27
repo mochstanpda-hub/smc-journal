@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.37"
+VERSION = "1.5.38"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.38 | BACKTEST mód — odstraněny pole Účet a Zisk/Ztráta z formuláře; skryto tlačítko ÚČTY z toolbaru; REAL mód beze změny
 1.5.37 | XP — 24 nových odznaků (trades_250/1000, wins_25/50/100, streak_7, big_rrr, comeback, all_results, symbols_5/10, photos/notes/tags, checklist_50, first_be, bt_1h/5h/10h/20h, journal_100, xp_10000); Backtesting stopky — tlačítko ⏱ START v toolbaru, po každé hodině zahraje melodický zvuk, vyskočí popup s XP a odznaky, pravý klik = menu (pauza/reset/celkový čas)
 1.5.36 | Periody — filtr účtu: dropdown "Účet" v hlavičce záložky filtruje všechna data (KPI karty, oba grafy, obě tabulky); výchozí "Všechny účty"; název účtu se zobrazuje v nadpisech sekcí a grafů
 1.5.35 | XP Bodovací systém — rank žebříček (Nováček → Elite); XP za backtest/reálný obchod, WIN bonus, disciplína (LOSS+SL), foto, poznámka, checklist 100%, zápis do deníku; 8 konfigurovatelných pravidel (denní/týdenní limit, bez revenge, min. RRR, série výher…); 16 odznaků/achievements; XP badge v toolbaru; přehledové okno s progress barem a historií; záložka ⭐ XP Systém v Nastavení
@@ -6420,9 +6421,10 @@ def show_main_screen(p_name):
     tk.Button(hb, text="🔄  UPDATE", command=lambda: check_for_updates(silent=False),
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
-    tk.Button(hb, text="🏦  ÚČTY", command=open_accounts_manager,
-              bg=DT_BTN, fg=DT_TEXT,
-              font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    if current_mode != "BACKTEST":
+        tk.Button(hb, text="🏦  ÚČTY", command=open_accounts_manager,
+                  bg=DT_BTN, fg=DT_TEXT,
+                  font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     # ── Backtesting stopky ────────────────────────────────────────────────────
     _bt_init_sec = _bt_sw_total_seconds()
     _bt_h = _bt_init_sec // 3600; _bt_m = (_bt_init_sec % 3600) // 60
@@ -6508,19 +6510,22 @@ def show_main_screen(p_name):
     tk.Label(f, text="Čas otevření:").grid(row=r, column=0, sticky='w'); cas_otevreni_entry = tk.Entry(f, width=35); cas_otevreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Čas uzavření:").grid(row=r, column=0, sticky='w'); cas_zavreni_entry = tk.Entry(f, width=35); cas_zavreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Délka / Den:").grid(row=r, column=0, sticky='w'); fd = tk.Frame(f); fd.grid(row=r, column=1, sticky='w'); delka_obchodu_entry = tk.Entry(fd, width=15, state='readonly'); delka_obchodu_entry.pack(side='left'); den_tydne_entry = tk.Entry(fd, width=15, state='readonly', font=('Segoe UI', 9)); den_tydne_entry.pack(side='left', padx=5); r+=1
-    # ── Výběr účtu ────────────────────────────────────────────────────────────
-    ucet_row = tk.Frame(f); ucet_row.grid(row=r, column=0, columnspan=2, sticky='we', pady=(6,2)); r+=1
-    ucet_lbl = tk.Frame(ucet_row, bg='#1e293b', padx=8, pady=4); ucet_lbl.pack(fill='x')
-    tk.Label(ucet_lbl, text="🏦  ��čet:", font=('Segoe UI', 9, 'bold'),
-             bg='#1e293b', fg='#93c5fd').pack(side='left')
-    accounts_combo = ttk.Combobox(ucet_lbl, values=get_account_dropdown_values(),
-                                  state='readonly', width=42, font=('Segoe UI', 9))
-    acvals = get_account_dropdown_values()
-    accounts_combo.set(acvals[0] if acvals else '')
-    accounts_combo.pack(side='left', padx=8)
-    tk.Button(ucet_lbl, text="⚙ Spravovat", bg='#1e3a5f', fg='#93c5fd',
-              font=('Segoe UI', 8), relief='flat', padx=6, cursor='hand2',
-              command=open_accounts_manager).pack(side='left')
+    # ── Výběr účtu — jen v REAL módu ─────────────────────────────────────────
+    if current_mode != "BACKTEST":
+        ucet_row = tk.Frame(f); ucet_row.grid(row=r, column=0, columnspan=2, sticky='we', pady=(6,2)); r+=1
+        ucet_lbl = tk.Frame(ucet_row, bg='#1e293b', padx=8, pady=4); ucet_lbl.pack(fill='x')
+        tk.Label(ucet_lbl, text="🏦  Účet:", font=('Segoe UI', 9, 'bold'),
+                 bg='#1e293b', fg='#93c5fd').pack(side='left')
+        accounts_combo = ttk.Combobox(ucet_lbl, values=get_account_dropdown_values(),
+                                      state='readonly', width=42, font=('Segoe UI', 9))
+        acvals = get_account_dropdown_values()
+        accounts_combo.set(acvals[0] if acvals else '')
+        accounts_combo.pack(side='left', padx=8)
+        tk.Button(ucet_lbl, text="⚙ Spravovat", bg='#1e3a5f', fg='#93c5fd',
+                  font=('Segoe UI', 8), relief='flat', padx=6, cursor='hand2',
+                  command=open_accounts_manager).pack(side='left')
+    else:
+        accounts_combo = None  # BACKTEST — účet se neeviduje
 
     tk.Label(f, text="Symbol:").grid(row=r, column=0, sticky='w'); symbol_combo = ttk.Combobox(f, values=PAIRS, width=33); symbol_combo.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Směr:").grid(row=r, column=0, sticky='w'); smer_var = tk.StringVar(value="Buy"); sf = tk.Frame(f); sf.grid(row=r, column=1, sticky='w'); tk.Radiobutton(sf, text="BUY", variable=smer_var, value="Buy", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).pack(side='left'); tk.Radiobutton(sf, text="SELL", variable=smer_var, value="Sell", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).pack(side='left'); r+=1
@@ -6549,73 +6554,75 @@ def show_main_screen(p_name):
     tk.Label(f, text="Důvod vstupu:").grid(row=r, column=0, sticky='w'); duvod_entry = tk.Entry(f, width=35); duvod_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Poznámka:").grid(row=r, column=0, sticky='w'); poznamka_entry = tk.Entry(f, width=35); poznamka_entry.grid(row=r, column=1, pady=3); r+=1
 
-    # ── Zisk / Ztráta — ruční zápis částky ────────────────────────────────────
-    _cur = get_app_currency()
-    tk.Label(f, text=f"Zisk/Ztráta ({_cur}):").grid(row=r, column=0, sticky='w')
-    _pnl_frame = tk.Frame(f)
-    _pnl_frame.grid(row=r, column=1, sticky='w', pady=4)
-    zisk_mena_entry = tk.Entry(_pnl_frame, width=16, font=('Arial', 10))
-    zisk_mena_entry.pack(side='left')
-    tk.Label(_pnl_frame, text=f" {_cur}", fg=DT_SUBTEXT, font=('Arial', 9)).pack(side='left')
+    # ── Zisk / Ztráta — jen v REAL módu ──────────────────────────────────────
+    if current_mode != "BACKTEST":
+        _cur = get_app_currency()
+        tk.Label(f, text=f"Zisk/Ztráta ({_cur}):").grid(row=r, column=0, sticky='w')
+        _pnl_frame = tk.Frame(f)
+        _pnl_frame.grid(row=r, column=1, sticky='w', pady=4)
+        zisk_mena_entry = tk.Entry(_pnl_frame, width=16, font=('Arial', 10))
+        zisk_mena_entry.pack(side='left')
+        tk.Label(_pnl_frame, text=f" {_cur}", fg=DT_SUBTEXT, font=('Arial', 9)).pack(side='left')
 
-    def _open_currency_calc():
-        """Mini kalkulačka měn — přepočet částky na domácí měnu."""
-        cc = tk.Toplevel(root)
-        cc.title("💱 Kalkulačka měn")
-        cc.configure(bg=DT_BG)
-        cc.geometry("320x230")
-        cc.resizable(False, False)
-        cc.grab_set()
-        # Nadpis
-        tk.Label(cc, text="💱  Kalkulačka měn", bg=DT_BG, fg=DT_TEXT,
-                 font=('Segoe UI', 11, 'bold')).pack(pady=(14, 10))
-        frm = tk.Frame(cc, bg=DT_BG, padx=20)
-        frm.pack(fill='x')
-        def _lbl(text): return tk.Label(frm, text=text, bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9), anchor='w', width=16)
-        def _ent(default=''): e = tk.Entry(frm, bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT, font=('Segoe UI', 10), relief='flat', bd=4); e.insert(0, str(default)); return e
+        def _open_currency_calc():
+            """Mini kalkulačka měn — přepočet částky na domácí měnu."""
+            cc = tk.Toplevel(root)
+            cc.title("💱 Kalkulačka měn")
+            cc.configure(bg=DT_BG)
+            cc.geometry("320x230")
+            cc.resizable(False, False)
+            cc.grab_set()
+            tk.Label(cc, text="💱  Kalkulačka měn", bg=DT_BG, fg=DT_TEXT,
+                     font=('Segoe UI', 11, 'bold')).pack(pady=(14, 10))
+            frm = tk.Frame(cc, bg=DT_BG, padx=20)
+            frm.pack(fill='x')
+            def _lbl(text): return tk.Label(frm, text=text, bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9), anchor='w', width=16)
+            def _ent(default=''): e = tk.Entry(frm, bg=DT_SURFACE, fg=DT_TEXT, insertbackground=DT_TEXT, font=('Segoe UI', 10), relief='flat', bd=4); e.insert(0, str(default)); return e
 
-        r2 = tk.Frame(frm, bg=DT_BG); r2.pack(fill='x', pady=3)
-        _lbl("Částka:").pack(in_=r2, side='left')
-        _from_e = _ent(zisk_mena_entry.get() or '0'); _from_e.pack(in_=r2, side='left', fill='x', expand=True)
+            r2 = tk.Frame(frm, bg=DT_BG); r2.pack(fill='x', pady=3)
+            _lbl("Částka:").pack(in_=r2, side='left')
+            _from_e = _ent(zisk_mena_entry.get() or '0'); _from_e.pack(in_=r2, side='left', fill='x', expand=True)
 
-        r3 = tk.Frame(frm, bg=DT_BG); r3.pack(fill='x', pady=3)
-        _lbl("Kurz (1 → CZK):").pack(in_=r3, side='left')
-        _rate_e = _ent('23.5'); _rate_e.pack(in_=r3, side='left', fill='x', expand=True)
+            r3 = tk.Frame(frm, bg=DT_BG); r3.pack(fill='x', pady=3)
+            _lbl("Kurz (1 → CZK):").pack(in_=r3, side='left')
+            _rate_e = _ent('23.5'); _rate_e.pack(in_=r3, side='left', fill='x', expand=True)
 
-        res_var = tk.StringVar(value='—')
-        res_lbl = tk.Label(cc, textvariable=res_var, bg=DT_SURFACE, fg=DT_ACCENT,
-                           font=('Segoe UI', 13, 'bold'), pady=8)
-        res_lbl.pack(fill='x', padx=20, pady=(8, 4))
+            res_var = tk.StringVar(value='—')
+            res_lbl = tk.Label(cc, textvariable=res_var, bg=DT_SURFACE, fg=DT_ACCENT,
+                               font=('Segoe UI', 13, 'bold'), pady=8)
+            res_lbl.pack(fill='x', padx=20, pady=(8, 4))
 
-        def _calc():
-            try:
-                amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
-                rate = float(_rate_e.get().replace(',', '.'))
-                result = amt * rate
-                res_var.set(f"{result:+,.2f} {_cur}")
-            except ValueError:
-                res_var.set("Neplatné číslo")
+            def _calc():
+                try:
+                    amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
+                    rate = float(_rate_e.get().replace(',', '.'))
+                    result = amt * rate
+                    res_var.set(f"{result:+,.2f} {_cur}")
+                except ValueError:
+                    res_var.set("Neplatné číslo")
 
-        def _use():
-            try:
-                amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
-                rate = float(_rate_e.get().replace(',', '.'))
-                result = amt * rate
-                zisk_mena_entry.delete(0, tk.END)
-                zisk_mena_entry.insert(0, f"{result:.2f}")
-            except ValueError: pass
-            cc.destroy()
+            def _use():
+                try:
+                    amt  = float(_from_e.get().replace(',', '.').replace(' ', ''))
+                    rate = float(_rate_e.get().replace(',', '.'))
+                    result = amt * rate
+                    zisk_mena_entry.delete(0, tk.END)
+                    zisk_mena_entry.insert(0, f"{result:.2f}")
+                except ValueError: pass
+                cc.destroy()
 
-        bf = tk.Frame(cc, bg=DT_BG); bf.pack(pady=6)
-        tk.Button(bf, text="Vypočítat", command=_calc, bg=DT_BTN, fg=DT_TEXT,
-                  font=('Segoe UI', 9), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
-        tk.Button(bf, text="✓ Použít výsledek", command=_use, bg=DT_ACCENT, fg='#fff',
-                  font=('Segoe UI', 9, 'bold'), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
+            bf = tk.Frame(cc, bg=DT_BG); bf.pack(pady=6)
+            tk.Button(bf, text="Vypočítat", command=_calc, bg=DT_BTN, fg=DT_TEXT,
+                      font=('Segoe UI', 9), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
+            tk.Button(bf, text="✓ Použít výsledek", command=_use, bg=DT_ACCENT, fg='#fff',
+                      font=('Segoe UI', 9, 'bold'), padx=10, pady=5, relief='flat').pack(side='left', padx=4)
 
-    tk.Button(_pnl_frame, text="💱", command=_open_currency_calc,
-              bg=DT_SURFACE, fg=DT_ACCENT, font=('Segoe UI', 10),
-              relief='flat', padx=6, pady=1, cursor='hand2').pack(side='left', padx=(6, 0))
-    r += 1
+        tk.Button(_pnl_frame, text="💱", command=_open_currency_calc,
+                  bg=DT_SURFACE, fg=DT_ACCENT, font=('Segoe UI', 10),
+                  relief='flat', padx=6, pady=1, cursor='hand2').pack(side='left', padx=(6, 0))
+        r += 1
+    else:
+        zisk_mena_entry = None  # BACKTEST — zisk se neeviduje
 
     tk.Label(f, text="VÝSLEDEK:").grid(row=r, column=0, sticky='w'); vysledek_combo = ttk.Combobox(f, values=["Win", "Loss", "BE"], width=33); vysledek_combo.grid(row=r, column=1, pady=10); r+=1
     obrazky_list = tk.StringVar(); tk.Button(f, text="+ SCREENSHOTY", command=pridat_obrazky, bg='#3498db', fg='white', width=30).grid(row=r, column=1, sticky='w'); r+=1
