@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.44"
+VERSION = "1.5.45"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.45 | Firebase Sync — tlačítko Sync moje XP nyní ukazuje výsledek a chybový messagebox (dříve selhávalo tiše); HTTP 403 vede na návod k opravě Rules
 1.5.44 | Firebase — přechod z requests na urllib (standardní knihovna, funguje v .exe bez instalace); odstraněna závislost na externím balíčku
 1.5.43 | Firebase — auto-instalace requests: appka použije sys.executable (správný Python) a nabídne automatickou instalaci přes pip přímo z UI
 1.5.42 | Firebase test připojení — opraveno: messagebox místo tichého selhání; detekce chybějící knihovny requests s návodem pip install; auto-detekce EU vs US URL (zkusí europe-west1 pokud primární URL selže); jasné chybové hlášky pro 401/403
@@ -4018,8 +4019,50 @@ def open_leaderboard():
 
     def _manual_sync():
         status_lbl.config(text="Odesílám vlastní XP…")
-        firebase_sync_xp()
-        win.after(1500, refresh)
+        win.update_idletasks()
+        # Sync synchronně aby jsme viděli výsledek
+        try:
+            cfg = load_firebase_config()
+            url      = cfg.get('url', '').rstrip('/')
+            secret   = cfg.get('secret', '').strip()
+            username = cfg.get('username', '').strip()
+            if not url or not username:
+                status_lbl.config(text="⚠  Nastav Firebase URL a jméno v Nastavení → 🔥 Firebase.")
+                return
+            xp_data = load_xp_data()
+            trades  = load_data() if DATA_FILE else []
+            wins    = sum(1 for t in trades if t.get('vysledek', '').lower() == 'win')
+            total   = len(trades)
+            winrate = round(wins / total * 100, 1) if total > 0 else 0.0
+            ri      = get_rank_info(xp_data.get('total_xp', 0))
+            payload = {
+                "xp":           xp_data.get('total_xp', 0),
+                "rank":         ri['name'],
+                "rank_emoji":   ri['emoji'],
+                "level":        ri['level'],
+                "achievements": len(xp_data.get('achievements', [])),
+                "total_trades": total,
+                "winrate":      winrate,
+                "bt_hours":     round(xp_data.get('bt_total_minutes', 0) / 60, 1),
+                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            }
+            stat = _fb_put(f"{url}/users/{username}.json", payload, secret=secret, timeout=8)
+            if stat == 200:
+                status_lbl.config(text=f"✅ XP odesláno!  ({username}: {payload['xp']} XP, {ri['name']})")
+                win.after(800, refresh)
+            else:
+                status_lbl.config(text=f"❌ Firebase vrátil HTTP {stat} — zkontroluj Rules (musí být .write: true)")
+                messagebox.showerror("Sync selhal",
+                    f"Firebase vrátil HTTP {stat}.\n\n"
+                    "Jdi do Firebase konzole → Realtime Database → Rules\n"
+                    "a nastav:\n\n"
+                    '{\n  "rules": {\n    ".read": true,\n    ".write": true\n  }\n}\n\n'
+                    "Klikni Publish a zkus znovu.", parent=win)
+        except Exception as _e:
+            status_lbl.config(text=f"❌ Chyba: {_e}")
+            messagebox.showerror("Chyba při odesílání",
+                f"Nepodařilo se odeslat XP na Firebase:\n\n{_e}\n\n"
+                "Zkontroluj URL a internetové připojení.", parent=win)
 
     tk.Button(bf, text="🔄  Obnovit", command=refresh,
               bg='#1d4ed8', fg='white', font=('Segoe UI', 9, 'bold'),
