@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.38"
+VERSION = "1.5.39"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.39 | Trade ID — každý obchod dostane unikátní #ID (automaticky přiřazeno při uložení, zpětně doplněno i starým); Řazení sloupců — klik na záhlaví řadí vzestupně, druhý klik sestupně, šipka ↑↓ indikuje aktivní řazení (číselné sloupce jako číslo, kvalita A+>A>B, checklist jako %); Galerie — každá karta zobrazuje #ID a tlačítko → přejít na obchod (přepne ZÁPIS tab, resetuje filtr, vybere řádek)
 1.5.38 | BACKTEST mód — odstraněny pole Účet a Zisk/Ztráta z formuláře; skryto tlačítko ÚČTY z toolbaru; REAL mód beze změny
 1.5.37 | XP — 24 nových odznaků (trades_250/1000, wins_25/50/100, streak_7, big_rrr, comeback, all_results, symbols_5/10, photos/notes/tags, checklist_50, first_be, bt_1h/5h/10h/20h, journal_100, xp_10000); Backtesting stopky — tlačítko ⏱ START v toolbaru, po každé hodině zahraje melodický zvuk, vyskočí popup s XP a odznaky, pravý klik = menu (pauza/reset/celkový čas)
 1.5.36 | Periody — filtr účtu: dropdown "Účet" v hlavičce záložky filtruje všechna data (KPI karty, oba grafy, obě tabulky); výchozí "Všechny účty"; název účtu se zobrazuje v nadpisech sekcí a grafů
@@ -855,6 +856,10 @@ current_project_name = ""
 stats_canvases = [] # Pro equity curve
 pie_canvases = []   # Pro kruhový graf
 heatmap_canvases = [] # Pro heatmapu
+_sort_col    = None   # aktuálně řazený sloupec v trades_tree
+_sort_rev    = False  # True = sestupně
+main_notebook = None  # hlavní ttk.Notebook (pro přepnutí tab z galerie)
+
 periods_canvases    = []    # Pro charty v záložce PERIODY
 periods_frames      = {}    # Odkazy na widgety v záložce PERIODY
 periods_account_var = None  # StringVar — filtr účtu v záložce PERIODY
@@ -942,6 +947,7 @@ for d in [DIR_BACKTEST, DIR_REAL, DIR_JOURNAL, DIR_BACKUPS]:
         os.makedirs(d)
 
 COL_TRANSLATION = {
+    "trade_id":       "#ID",
     "cas_otevreni": "Čas otevření", "cas_zavreni": "Čas zavření", "symbol": "Symbol",
     "smer": "Směr", "vstupni_hodnota": "Vstup", "stoploss": "Stop Loss",
     "takeprofit": "Take Profit", "rrr": "RRR", "pips": "Pips", "session": "Seance",
@@ -2606,7 +2612,7 @@ def update_gallery():
         if count_var: count_var.set("Složka obrázků neexistuje.")
         return
 
-    for t in trades:
+    for orig_idx, t in enumerate(trades):
         if f_sym and f_sym != 'VŠE' and t.get('symbol', '') != f_sym: continue
         res_raw = t.get('vysledek', '').strip()
         if f_res and f_res != 'VŠE' and res_raw.lower() != f_res.lower(): continue
@@ -2622,6 +2628,8 @@ def update_gallery():
                     'symbol': t.get('symbol', ''), 'datum': t.get('cas_otevreni', '')[:10],
                     'session': t.get('session', ''), 'smer': t.get('smer', ''),
                     'rrr': t.get('rrr', ''), 'tags': t.get('tags', ''),
+                    'trade_id': t.get('trade_id', ''),
+                    'orig_idx': orig_idx,
                 })
 
     sort_key = {'Datum ↓': lambda x: x['datum'], 'Datum ↑': lambda x: x['datum'],
@@ -2652,15 +2660,21 @@ def update_gallery():
             lbl.image = ph; lbl.pack(padx=2, pady=(4, 2))
             lbl.bind('<Button-1>', lambda e, i=idx: ImageZoomViewer(root, gallery_items, i))
 
-            info = tk.Frame(frame, bg=bg_c); info.pack(fill='x', padx=4, pady=(0, 2))
+            # ── ID + sym + výsledek ───────────────────────────────────────────
+            info = tk.Frame(frame, bg=bg_c); info.pack(fill='x', padx=4, pady=(0, 1))
+            tid = item.get('trade_id', '')
+            if tid:
+                tk.Label(info, text=f"#{tid}", bg=bg_c, fg='#888',
+                         font=('Segoe UI', 7, 'bold')).pack(side='left')
             sym_txt = item['symbol'] or '—'
             if item['smer']: sym_txt += f" {item['smer']}"
             tk.Label(info, text=sym_txt, bg=bg_c, fg=fg_c,
-                     font=('Segoe UI', 8, 'bold')).pack(side='left')
+                     font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(4, 0))
             tk.Label(info, text=item['result'].upper() or '—', bg=bg_c, fg=fg_c,
                      font=('Segoe UI', 8, 'bold')).pack(side='right')
 
-            meta = tk.Frame(frame, bg=bg_c); meta.pack(fill='x', padx=4, pady=(0, 4))
+            # ── Datum + RRR + session ─────────────────────────────────────────
+            meta = tk.Frame(frame, bg=bg_c); meta.pack(fill='x', padx=4, pady=(0, 2))
             tk.Label(meta, text=item['datum'], bg=bg_c, fg='#666',
                      font=('Segoe UI', 7)).pack(side='left')
             if item['rrr']:
@@ -2669,6 +2683,28 @@ def update_gallery():
             if item['session']:
                 tk.Label(meta, text=item['session'], bg=bg_c, fg='#888',
                          font=('Segoe UI', 7)).pack(side='right', padx=(0, 4))
+
+            # ── Proklik → obchod ─────────────────────────────────────────────
+            def _go_to_trade(orig=item['orig_idx']):
+                try:
+                    reset_filter()
+                    if main_notebook:
+                        main_notebook.select(0)  # přepni na ZÁPIS tab
+                    def _select():
+                        try:
+                            trades_tree.selection_set(str(orig))
+                            trades_tree.focus(str(orig))
+                            trades_tree.see(str(orig))
+                            show_trade_details(None)
+                        except Exception: pass
+                    root.after(80, _select)
+                except Exception: pass
+
+            nav_row = tk.Frame(frame, bg=bg_c); nav_row.pack(fill='x', padx=4, pady=(0, 4))
+            nav_btn = tk.Label(nav_row, text="→ přejít na obchod", bg=bg_c, fg='#4a90d9',
+                               font=('Segoe UI', 7, 'underline'), cursor='hand2')
+            nav_btn.pack(side='left')
+            nav_btn.bind('<Button-1>', lambda e, fn=_go_to_trade: fn())
 
             col += 1
             if col >= cols: col = 0; row += 1
@@ -2683,6 +2719,18 @@ def _save_trades_file(trades, reference_trade=None):
     """
     if not trades and not reference_trade:
         return
+
+    # ── Přiřaď trade_id obchodům, které ho nemají ────────────────────────────
+    _max_id = 0
+    for t in trades:
+        _tid = t.get('trade_id', '')
+        if str(_tid).isdigit():
+            _max_id = max(_max_id, int(_tid))
+    for t in trades:
+        if not t.get('trade_id'):
+            _max_id += 1
+            t['trade_id'] = str(_max_id)
+
     # Sestav pořadí sloupců: reference_trade má nejaktuálnější klíče
     ref_keys = list(reference_trade.keys()) if reference_trade else []
     # Přidej klíče ze starých obchodů pokud nejsou v ref
@@ -2850,7 +2898,40 @@ def smazat_obchod():
             _save_trades_file(tr)
             update_listbox(); update_statistics(); reset_form()
 
+def _tree_sort(col):
+    """Kliknutí na záhlaví sloupce — přepne řazení a znovu sestaví seznam."""
+    global _sort_col, _sort_rev
+    if _sort_col == col:
+        _sort_rev = not _sort_rev
+    else:
+        _sort_col = col
+        _sort_rev = False
+    update_listbox()
+
+
+def _sort_val(raw, col):
+    """Klíč pro řazení — numerické sloupce jako číslo, ostatní jako string."""
+    s = str(raw).strip()
+    # Kvalita: A+ > A > B > C
+    if col == 'kvalita':
+        _q = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+        return _q.get(s.upper(), 0)
+    # checklist_ratio "3/4" → 0.75
+    if col == 'checklist_ratio' and '/' in s:
+        try:
+            a, b = s.split('/')
+            return float(a) / float(b) if float(b) else 0.0
+        except: return 0.0
+    # Procenta "+2.5%" → 2.5
+    s_num = s.replace('%', '').replace('+', '').replace(',', '.').replace(' ', '')
+    try:
+        return float(s_num)
+    except (ValueError, TypeError):
+        return s.lower()
+
+
 def update_listbox():
+    global _sort_col, _sort_rev
     if trades_tree is None: return
     for item in trades_tree.get_children(): trades_tree.delete(item)
     # Barevné řádky – tagy
@@ -2884,10 +2965,11 @@ def update_listbox():
     f_rrr_min = filter_rrr_min_var.get().strip() if filter_rrr_min_var else ""
     f_rrr_max = filter_rrr_max_var.get().strip() if filter_rrr_max_var else ""
 
+    # ── Sbírání a filtrování ──────────────────────────────────────────────────
+    filtered = []   # (orig_idx, t, _t_display, tag_str)
     for i, t in enumerate(trades):
         res = t.get('vysledek', '').lower()
         trade_date = t.get('cas_otevreni', '')[:10]
-        # Filtrování
         if f_symbol != "VŠE" and t.get('symbol', '') != f_symbol: continue
         if f_result != "VŠE" and res != f_result.lower(): continue
         if f_session != "VŠE" and t.get('session', '') != f_session: continue
@@ -2903,7 +2985,6 @@ def update_listbox():
                 if float(str(t.get('rrr', '0')).replace(',', '.')) > float(f_rrr_max): continue
             except: pass
 
-        # Vypočítej P&L% pokud je sloupec aktivní
         _t_display = dict(t)
         if 'pnl_pct' in current_cols:
             _ucet = t.get('ucet', '').strip()
@@ -2913,9 +2994,37 @@ def update_listbox():
                 try: _t_display['pnl_pct'] = f"{float(_zm) / _cap * 100:+.2f}%"
                 except: _t_display['pnl_pct'] = ''
             else: _t_display['pnl_pct'] = ''
-        vals = [_t_display.get(c, "") for c in current_cols]
+
         tag = 'win' if res == 'win' else 'loss' if res == 'loss' else 'be' if res == 'be' else 'other'
-        trades_tree.insert("", "end", iid=i, values=vals, tags=(tag,))
+        filtered.append((i, t, _t_display, tag))
+
+    # ── Řazení ───────────────────────────────────────────────────────────────
+    if _sort_col and _sort_col in current_cols:
+        try:
+            filtered.sort(
+                key=lambda x: _sort_val(x[2].get(_sort_col, x[1].get(_sort_col, '')), _sort_col),
+                reverse=_sort_rev
+            )
+        except TypeError:
+            # Smíšené typy — fallback na string
+            filtered.sort(
+                key=lambda x: str(x[2].get(_sort_col, x[1].get(_sort_col, ''))).lower(),
+                reverse=_sort_rev
+            )
+
+    # ── Záhlaví — ukaž šipku u aktivního sloupce ─────────────────────────────
+    for col in current_cols:
+        base = COL_TRANSLATION.get(col, col)
+        if col == _sort_col:
+            arrow = " ↓" if _sort_rev else " ↑"
+            trades_tree.heading(col, text=base + arrow)
+        else:
+            trades_tree.heading(col, text=base)
+
+    # ── Vkládání ─────────────────────────────────────────────────────────────
+    for orig_idx, t, _t_display, tag in filtered:
+        vals = [_t_display.get(c, "") for c in current_cols]
+        trades_tree.insert("", "end", iid=orig_idx, values=vals, tags=(tag,))
 
 def on_close():
     try:
@@ -6355,7 +6464,8 @@ def show_main_screen(p_name):
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
-    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var, bt_sw_btn
+    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var, bt_sw_btn, main_notebook, _sort_col, _sort_rev
+    _sort_col = None; _sort_rev = False   # reset řazení při přepnutí projektu
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
 
     current_project_name = p_name
@@ -6460,6 +6570,7 @@ def show_main_screen(p_name):
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
 
     nb = ttk.Notebook(root); nb.pack(fill='both', expand=True, padx=5, pady=5)
+    main_notebook = nb
     _make_tabs_draggable(nb)
     
     # TAB 1
@@ -6827,7 +6938,10 @@ def show_main_screen(p_name):
     vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=trades_tree.yview); hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=trades_tree.xview)
     trades_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set); trades_tree.grid(column=0, row=0, sticky='nsew'); vsb.grid(column=1, row=0, sticky='ns'); hsb.grid(column=0, row=1, sticky='ew')
     tree_frame.grid_columnconfigure(0, weight=1); tree_frame.grid_rowconfigure(0, weight=1)
-    for col in current_cols: trades_tree.heading(col, text=COL_TRANSLATION.get(col, col), anchor='center'); trades_tree.column(col, width=100, minwidth=50, anchor='center', stretch=False)
+    for col in current_cols:
+        trades_tree.heading(col, text=COL_TRANSLATION.get(col, col), anchor='center',
+                            command=lambda c=col: _tree_sort(c))
+        trades_tree.column(col, width=100, minwidth=50, anchor='center', stretch=False)
     trades_tree.bind('<<TreeviewSelect>>', show_trade_details)
     
     btn_box = tk.Frame(top_pane); btn_box.pack(anchor='e', pady=2)
