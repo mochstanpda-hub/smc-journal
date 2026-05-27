@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.39"
+VERSION = "1.5.40"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.40 | P&L % — opravený výpočet: primárně zisk_mena / kapitál účtu (REAL mód), fallback z cenových úrovní vstup/SL/TP × směr × výsledek (BACKTEST i REAL bez zisk_mena)
 1.5.39 | Trade ID — každý obchod dostane unikátní #ID (automaticky přiřazeno při uložení, zpětně doplněno i starým); Řazení sloupců — klik na záhlaví řadí vzestupně, druhý klik sestupně, šipka ↑↓ indikuje aktivní řazení (číselné sloupce jako číslo, kvalita A+>A>B, checklist jako %); Galerie — každá karta zobrazuje #ID a tlačítko → přejít na obchod (přepne ZÁPIS tab, resetuje filtr, vybere řádek)
 1.5.38 | BACKTEST mód — odstraněny pole Účet a Zisk/Ztráta z formuláře; skryto tlačítko ÚČTY z toolbaru; REAL mód beze změny
 1.5.37 | XP — 24 nových odznaků (trades_250/1000, wins_25/50/100, streak_7, big_rrr, comeback, all_results, symbols_5/10, photos/notes/tags, checklist_50, first_be, bt_1h/5h/10h/20h, journal_100, xp_10000); Backtesting stopky — tlačítko ⏱ START v toolbaru, po každé hodině zahraje melodický zvuk, vyskočí popup s XP a odznaky, pravý klik = menu (pauza/reset/celkový čas)
@@ -2990,10 +2991,35 @@ def update_listbox():
             _ucet = t.get('ucet', '').strip()
             _zm   = t.get('zisk_mena', '').strip().replace(',', '.').replace(' ', '')
             _cap  = _acct_cap_lookup.get(_ucet, 0)
+            _pnl_pct_val = ''
+            # 1) REAL mód s účtem: zisk_mena / počáteční kapitál
             if _zm and _cap > 0:
-                try: _t_display['pnl_pct'] = f"{float(_zm) / _cap * 100:+.2f}%"
-                except: _t_display['pnl_pct'] = ''
-            else: _t_display['pnl_pct'] = ''
+                try: _pnl_pct_val = f"{float(_zm) / _cap * 100:+.2f}%"
+                except: pass
+            # 2) Fallback — výpočet z cenových úrovní (BACKTEST nebo chybějící zisk_mena)
+            if not _pnl_pct_val:
+                try:
+                    def _pf(v): return float(str(v).replace(',', '.').replace(' ', ''))
+                    _entry = _pf(t.get('vstupni_hodnota', ''))
+                    _sl    = _pf(t.get('stoploss', ''))
+                    _tp    = _pf(t.get('takeprofit', ''))
+                    _vysl  = t.get('vysledek', '').lower().strip()
+                    _smer  = t.get('smer', '').lower().strip()
+                    if _entry > 0 and _vysl in ('win', 'loss', 'be'):
+                        if _vysl == 'be':
+                            _pnl_pct_val = '0.00%'
+                        elif _smer in ('buy', 'long'):
+                            if _vysl == 'win':
+                                _pnl_pct_val = f"{(_tp - _entry) / _entry * 100:+.2f}%"
+                            else:
+                                _pnl_pct_val = f"{(_sl - _entry) / _entry * 100:+.2f}%"
+                        elif _smer in ('sell', 'short'):
+                            if _vysl == 'win':
+                                _pnl_pct_val = f"{(_entry - _tp) / _entry * 100:+.2f}%"
+                            else:
+                                _pnl_pct_val = f"{(_entry - _sl) / _entry * 100:+.2f}%"
+                except: pass
+            _t_display['pnl_pct'] = _pnl_pct_val
 
         tag = 'win' if res == 'win' else 'loss' if res == 'loss' else 'be' if res == 'be' else 'other'
         filtered.append((i, t, _t_display, tag))
