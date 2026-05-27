@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.42"
+VERSION = "1.5.43"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.43 | Firebase — auto-instalace requests: appka použije sys.executable (správný Python) a nabídne automatickou instalaci přes pip přímo z UI
 1.5.42 | Firebase test připojení — opraveno: messagebox místo tichého selhání; detekce chybějící knihovny requests s návodem pip install; auto-detekce EU vs US URL (zkusí europe-west1 pokud primární URL selže); jasné chybové hlášky pro 401/403
 1.5.41 | Firebase žebříček — online srovnání XP s kamarády; tlačítko 🏆 Žebříček v toolbaru; tab 🔥 Firebase v Nastavení (URL, secret, jméno, test připojení, ruční sync); auto-sync XP po každém uložení obchodu v background threadu
 1.5.40 | P&L % — opravený výpočet: primárně zisk_mena / kapitál účtu (REAL mód), fallback z cenových úrovní vstup/SL/TP × směr × výsledek (BACKTEST i REAL bez zisk_mena)
@@ -6596,14 +6597,28 @@ def open_settings_window(initial_tab=0):
         try:
             import requests as _req_check  # noqa
         except ImportError:
-            messagebox.showerror(
+            # Zkus automaticky nainstalovat přes správný Python interpreter
+            import subprocess
+            py_path = sys.executable
+            ans = messagebox.askyesno(
                 "Chybí knihovna",
-                "Knihovna 'requests' není nainstalována.\n\n"
-                "Otevři příkazový řádek (CMD) a zadej:\n\n"
-                "    pip install requests\n\n"
-                "Pak restartuj appku.",
+                f"Knihovna 'requests' není nainstalována.\n\n"
+                f"Python: {py_path}\n\n"
+                f"Chceš ji nainstalovat automaticky?",
                 parent=sw
             )
+            if ans:
+                _fb_status.config(text="Instaluji requests…", fg='#fbbf24')
+                sw.update_idletasks()
+                try:
+                    subprocess.check_call(
+                        [py_path, '-m', 'pip', 'install', 'requests'],
+                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+                    )
+                    messagebox.showinfo("Hotovo", "requests úspěšně nainstalován!\nKlikni na Test připojení znovu.", parent=sw)
+                    _fb_status.config(text="✅ requests nainstalován — klikni Test připojení znovu.", fg='#4ade80')
+                except Exception as _inst_err:
+                    messagebox.showerror("Chyba instalace", f"Nepodařilo se nainstalovat:\n{_inst_err}", parent=sw)
             return
 
         _fb_status.config(text="Testuju připojení…", fg='#fbbf24')
