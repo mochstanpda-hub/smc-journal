@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.43"
+VERSION = "1.5.44"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.44 | Firebase — přechod z requests na urllib (standardní knihovna, funguje v .exe bez instalace); odstraněna závislost na externím balíčku
 1.5.43 | Firebase — auto-instalace requests: appka použije sys.executable (správný Python) a nabídne automatickou instalaci přes pip přímo z UI
 1.5.42 | Firebase test připojení — opraveno: messagebox místo tichého selhání; detekce chybějící knihovny requests s návodem pip install; auto-detekce EU vs US URL (zkusí europe-west1 pokud primární URL selže); jasné chybové hlášky pro 401/403
 1.5.41 | Firebase žebříček — online srovnání XP s kamarády; tlačítko 🏆 Žebříček v toolbaru; tab 🔥 Firebase v Nastavení (URL, secret, jméno, test připojení, ruční sync); auto-sync XP po každém uložení obchodu v background threadu
@@ -3842,12 +3843,32 @@ def save_firebase_config(cfg):
         pass
 
 
+def _fb_get(url, secret='', timeout=8):
+    """HTTP GET na Firebase (urllib — bez externích závislostí)."""
+    import urllib.request, urllib.parse
+    if secret:
+        url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode({'auth': secret})
+    with urllib.request.urlopen(url, timeout=timeout) as _r:
+        return _r.status, _r.read().decode('utf-8')
+
+
+def _fb_put(url, data, secret='', timeout=8):
+    """HTTP PUT na Firebase (urllib — bez externích závislostí)."""
+    import urllib.request, urllib.parse
+    if secret:
+        url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode({'auth': secret})
+    body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    req  = urllib.request.Request(url, data=body, method='PUT')
+    req.add_header('Content-Type', 'application/json; charset=utf-8')
+    with urllib.request.urlopen(req, timeout=timeout) as _r:
+        return _r.status
+
+
 def firebase_sync_xp():
     """Odešle aktuální XP snapshot na Firebase v background threadu."""
     import threading
     def _sync():
         try:
-            import requests as _req
             cfg = load_firebase_config()
             url      = cfg.get('url', '').rstrip('/')
             secret   = cfg.get('secret', '').strip()
@@ -3871,13 +3892,7 @@ def firebase_sync_xp():
                 "bt_hours":     round(xp_data.get('bt_total_minutes', 0) / 60, 1),
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
-            params = {'auth': secret} if secret else {}
-            _req.put(
-                f"{url}/users/{username}.json",
-                json=payload,
-                params=params,
-                timeout=6,
-            )
+            _fb_put(f"{url}/users/{username}.json", payload, secret=secret)
         except Exception as _e:
             print(f"[Firebase] sync chyba: {_e}")
     threading.Thread(target=_sync, daemon=True).start()
@@ -3954,7 +3969,6 @@ def open_leaderboard():
 
         def _fetch():
             try:
-                import requests as _req
                 cfg    = load_firebase_config()
                 url    = cfg.get('url', '').rstrip('/')
                 secret = cfg.get('secret', '').strip()
@@ -3963,9 +3977,8 @@ def open_leaderboard():
                     win.after(0, lambda: status_lbl.config(
                         text="⚠  Firebase URL není nastavena. Jdi do Nastavení → 🔥 Firebase."))
                     return
-                params = {'auth': secret} if secret else {}
-                resp = _req.get(f"{url}/users.json", params=params, timeout=7)
-                data = resp.json()
+                _status, _body = _fb_get(f"{url}/users.json", secret=secret, timeout=7)
+                data = json.loads(_body) if _body and _body != 'null' else None
                 if not isinstance(data, dict) or not data:
                     win.after(0, lambda: status_lbl.config(
                         text="Žebříček je zatím prázdný. XP se odešle automaticky při příštím uložení obchodu."))
@@ -6593,98 +6606,62 @@ def open_settings_window(initial_tab=0):
         _fb_status.config(text="✅  Uloženo! XP se odešle při příštím uložení obchodu.", fg='#4ade80')
 
     def _test_fb():
-        # Nejdřív zkontroluj jestli requests je nainstalovaný
-        try:
-            import requests as _req_check  # noqa
-        except ImportError:
-            # Zkus automaticky nainstalovat přes správný Python interpreter
-            import subprocess
-            py_path = sys.executable
-            ans = messagebox.askyesno(
-                "Chybí knihovna",
-                f"Knihovna 'requests' není nainstalována.\n\n"
-                f"Python: {py_path}\n\n"
-                f"Chceš ji nainstalovat automaticky?",
-                parent=sw
-            )
-            if ans:
-                _fb_status.config(text="Instaluji requests…", fg='#fbbf24')
-                sw.update_idletasks()
-                try:
-                    subprocess.check_call(
-                        [py_path, '-m', 'pip', 'install', 'requests'],
-                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-                    )
-                    messagebox.showinfo("Hotovo", "requests úspěšně nainstalován!\nKlikni na Test připojení znovu.", parent=sw)
-                    _fb_status.config(text="✅ requests nainstalován — klikni Test připojení znovu.", fg='#4ade80')
-                except Exception as _inst_err:
-                    messagebox.showerror("Chyba instalace", f"Nepodařilo se nainstalovat:\n{_inst_err}", parent=sw)
-            return
-
+        # urllib je součást Pythonu — žádná instalace není potřeba
         _fb_status.config(text="Testuju připojení…", fg='#fbbf24')
         sw.update_idletasks()
         import threading
         def _t():
             try:
-                import requests as _req
+                import urllib.error
                 url    = _fb_url_var.get().strip().rstrip('/')
                 secret = _fb_sec_var.get().strip()
                 if not url:
                     sw.after(0, lambda: _fb_status.config(text="⚠  Zadej URL databáze.", fg='#f87171'))
                     return
-                params = {'auth': secret} if secret else {}
 
-                # Zkus primární URL
+                # Zkus primární URL, při chybě zkus EU variantu
+                _used_url = url
                 try:
-                    r = _req.get(f"{url}/users.json", params=params, timeout=8)
-                    status = r.status_code
-                    body   = r.text[:200]
+                    status, body = _fb_get(f"{url}/users.json", secret=secret, timeout=8)
                 except Exception as conn_err:
-                    # Pokud selhalo, zkus EU variantu URL
-                    proj_id = url.split('//')[1].split('.')[0]  # např. obd1-26456-default-rtdb
+                    proj_id = url.split('//')[1].split('.')[0]
                     alt_url = f"https://{proj_id}.europe-west1.firebasedatabase.app"
                     try:
-                        r2 = _req.get(f"{alt_url}/users.json", params=params, timeout=8)
-                        status = r2.status_code
-                        body   = r2.text[:200]
-                        url    = alt_url  # fungující URL
-                        sw.after(0, lambda u=alt_url: _fb_url_var.set(u))  # doplň správnou URL
+                        status, body = _fb_get(f"{alt_url}/users.json", secret=secret, timeout=8)
+                        _used_url = alt_url
+                        sw.after(0, lambda u=alt_url: _fb_url_var.set(u))
                     except Exception as conn_err2:
-                        sw.after(0, lambda e=conn_err: _fb_status.config(
-                            text=f"❌  Nelze se připojit: {e}", fg='#f87171'))
-                        sw.after(0, lambda: messagebox.showerror("Chyba připojení",
-                            f"Nepodařilo se připojit k Firebase.\n\nChyba: {conn_err}\n\n"
-                            "Zkontroluj:\n1) URL databáze (Realtime Database → Data → horní lišta)\n"
-                            "2) Internetové připojení", parent=sw))
+                        sw.after(0, lambda e=str(conn_err): (
+                            _fb_status.config(text=f"❌  Nelze se připojit: {e}", fg='#f87171'),
+                            messagebox.showerror("Chyba připojení",
+                                f"Nepodařilo se připojit k Firebase.\n\nChyba: {e}\n\n"
+                                "Zkontroluj URL v Firebase konzoli:\nRealtime Database → Data → horní lišta",
+                                parent=sw)
+                        ))
                         return
 
                 if status == 200:
-                    import json as _json
-                    try:   data_fb = _json.loads(body if len(r.text) < 200 else r.text)
+                    try:   data_fb = json.loads(body)
                     except: data_fb = None
                     count = len(data_fb) if isinstance(data_fb, dict) else 0
-                    sw.after(0, lambda u=url, c=count: (
+                    sw.after(0, lambda u=_used_url, c=count: (
                         _fb_status.config(text=f"✅  Připojeno!  V databázi je {c} hráčů.", fg='#4ade80'),
-                        messagebox.showinfo("Připojeno!", f"Firebase funguje!\n\nURL: {u}\nHráčů v databázi: {c}", parent=sw)
+                        messagebox.showinfo("Připojeno!", f"Firebase funguje! ✅\n\nURL: {u}\nHráčů v databázi: {c}", parent=sw)
                     ))
-                elif status == 401:
-                    sw.after(0, lambda: _fb_status.config(text="❌  401 Unauthorized — špatný nebo chybějící secret.", fg='#f87171'))
-                    sw.after(0, lambda: messagebox.showerror("Chyba autorizace",
-                        "Firebase vrátil 401 Unauthorized.\n\n"
-                        "Zkontroluj Database secret (musí být přesně zkopírovaný).\n"
-                        "Nebo nastav v Firebase Rules: .read a .write na true (test mode).", parent=sw))
-                elif status == 403:
-                    sw.after(0, lambda: _fb_status.config(text="❌  403 Forbidden — zkontroluj Firebase Rules.", fg='#f87171'))
-                    sw.after(0, lambda: messagebox.showerror("Přístup zamítnut",
-                        "Firebase vrátil 403 Forbidden.\n\n"
-                        "Jdi do Firebase konzole → Realtime Database → Rules\n"
-                        "a nastav:\n\n"
-                        '{\n  "rules": {\n    ".read": true,\n    ".write": true\n  }\n}', parent=sw))
+                elif status in (401, 403):
+                    sw.after(0, lambda s=status: (
+                        _fb_status.config(text=f"❌  HTTP {s} — zkontroluj Firebase Rules.", fg='#f87171'),
+                        messagebox.showerror("Přístup odmítnut",
+                            f"Firebase vrátil HTTP {s}.\n\n"
+                            "Jdi do Firebase konzole → Realtime Database → Rules\n"
+                            "a nastav na (dočasně pro test):\n\n"
+                            '{\n  "rules": {\n    ".read": true,\n    ".write": true\n  }\n}\n\n'
+                            "Pak klikni Publish a zkus znovu.", parent=sw)
+                    ))
                 else:
-                    sw.after(0, lambda s=status, b=body: _fb_status.config(
-                        text=f"❌  HTTP {s}: {b}", fg='#f87171'))
+                    sw.after(0, lambda s=status: _fb_status.config(text=f"❌  HTTP {s}", fg='#f87171'))
             except Exception as _e:
-                sw.after(0, lambda e=_e: _fb_status.config(text=f"❌  {e}", fg='#f87171'))
+                sw.after(0, lambda e=str(_e): _fb_status.config(text=f"❌  {e}", fg='#f87171'))
         threading.Thread(target=_t, daemon=True).start()
 
     def _sync_now():
