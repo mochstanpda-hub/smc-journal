@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.40"
+VERSION = "1.5.41"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.41 | Firebase žebříček — online srovnání XP s kamarády; tlačítko 🏆 Žebříček v toolbaru; tab 🔥 Firebase v Nastavení (URL, secret, jméno, test připojení, ruční sync); auto-sync XP po každém uložení obchodu v background threadu
 1.5.40 | P&L % — opravený výpočet: primárně zisk_mena / kapitál účtu (REAL mód), fallback z cenových úrovní vstup/SL/TP × směr × výsledek (BACKTEST i REAL bez zisk_mena)
 1.5.39 | Trade ID — každý obchod dostane unikátní #ID (automaticky přiřazeno při uložení, zpětně doplněno i starým); Řazení sloupců — klik na záhlaví řadí vzestupně, druhý klik sestupně, šipka ↑↓ indikuje aktivní řazení (číselné sloupce jako číslo, kvalita A+>A>B, checklist jako %); Galerie — každá karta zobrazuje #ID a tlačítko → přejít na obchod (přepne ZÁPIS tab, resetuje filtr, vybere řádek)
 1.5.38 | BACKTEST mód — odstraněny pole Účet a Zisk/Ztráta z formuláře; skryto tlačítko ÚČTY z toolbaru; REAL mód beze změny
@@ -771,8 +772,9 @@ FILTERS_FILE = '' # Soubor pro uložené filtry
 ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
 
 # XP Systém — bodovací žebříček (globální, napříč projekty)
-XP_FILE        = os.path.join(_APP_DIR, 'xp_data.json')
-XP_CONFIG_FILE = os.path.join(_APP_DIR, 'xp_config.json')
+XP_FILE             = os.path.join(_APP_DIR, 'xp_data.json')
+XP_CONFIG_FILE      = os.path.join(_APP_DIR, 'xp_config.json')
+FIREBASE_CONFIG_FILE = os.path.join(_APP_DIR, 'firebase_config.json')
 
 # Soubor s vlastními cestami projektů (globální, mimo projekt)
 PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
@@ -3809,6 +3811,209 @@ def save_xp_data(data):
             json.dump(data, _f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+    # Auto-sync na Firebase po každém uložení XP
+    try:
+        firebase_sync_xp()
+    except Exception:
+        pass
+
+
+# ── Firebase — online žebříček ────────────────────────────────────────────────
+
+def load_firebase_config():
+    """Načte Firebase konfiguraci (globální, mimo projekt)."""
+    try:
+        if os.path.exists(FIREBASE_CONFIG_FILE):
+            with open(FIREBASE_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+                return json.load(_f)
+    except Exception:
+        pass
+    return {"url": "https://obd1-26456-default-rtdb.firebaseio.com", "secret": "", "username": "patrik"}
+
+
+def save_firebase_config(cfg):
+    """Uloží Firebase konfiguraci."""
+    try:
+        with open(FIREBASE_CONFIG_FILE, 'w', encoding='utf-8') as _f:
+            json.dump(cfg, _f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def firebase_sync_xp():
+    """Odešle aktuální XP snapshot na Firebase v background threadu."""
+    import threading
+    def _sync():
+        try:
+            import requests as _req
+            cfg = load_firebase_config()
+            url      = cfg.get('url', '').rstrip('/')
+            secret   = cfg.get('secret', '').strip()
+            username = cfg.get('username', '').strip()
+            if not url or not username:
+                return
+            xp_data = load_xp_data()
+            trades  = load_data() if DATA_FILE else []
+            wins    = sum(1 for t in trades if t.get('vysledek', '').lower() == 'win')
+            total   = len(trades)
+            winrate = round(wins / total * 100, 1) if total > 0 else 0.0
+            ri = get_rank_info(xp_data.get('total_xp', 0))
+            payload = {
+                "xp":           xp_data.get('total_xp', 0),
+                "rank":         ri['name'],
+                "rank_emoji":   ri['emoji'],
+                "level":        ri['level'],
+                "achievements": len(xp_data.get('achievements', [])),
+                "total_trades": total,
+                "winrate":      winrate,
+                "bt_hours":     round(xp_data.get('bt_total_minutes', 0) / 60, 1),
+                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            }
+            params = {'auth': secret} if secret else {}
+            _req.put(
+                f"{url}/users/{username}.json",
+                json=payload,
+                params=params,
+                timeout=6,
+            )
+        except Exception as _e:
+            print(f"[Firebase] sync chyba: {_e}")
+    threading.Thread(target=_sync, daemon=True).start()
+
+
+def open_leaderboard():
+    """Otevře okno s online žebříčkem (čte data z Firebase)."""
+    import threading
+
+    win = tk.Toplevel(root)
+    win.title("🏆 Online Žebříček")
+    win.geometry("760x460")
+    win.configure(bg=DT_PANEL)
+    win.resizable(True, True)
+
+    # Hlavička
+    hdr = tk.Frame(win, bg='#0f172a', pady=12)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="🏆  Online Žebříček", font=('Segoe UI', 15, 'bold'),
+             bg='#0f172a', fg='#fbbf24').pack(side='left', padx=20)
+
+    # Status řádek
+    status_lbl = tk.Label(win, text="Načítám data z Firebase…",
+                          font=('Segoe UI', 9), bg=DT_PANEL, fg=DT_SUBTEXT)
+    status_lbl.pack(anchor='w', padx=16, pady=(8, 0))
+
+    # Treeview
+    _cols = ('pos', 'username', 'xp', 'rank', 'achievements', 'trades', 'winrate', 'bt_hours', 'updated')
+    _hdrs = ('#', 'Hráč', 'XP', 'Rank', '🏅 Odznaky', 'Obchodů', 'Winrate', '⏱ BT hodin', 'Aktualizace')
+    _ws   = (35,  130,   80,  130,   70,            70,        75,       80,           130)
+
+    tf = tk.Frame(win, bg=DT_PANEL)
+    tf.pack(fill='both', expand=True, padx=10, pady=6)
+
+    _sty = ttk.Style()
+    _sty.configure('LB.Treeview', background='#1e293b', foreground='#e2e8f0',
+                   fieldbackground='#1e293b', rowheight=28, font=('Segoe UI', 10))
+    _sty.configure('LB.Treeview.Heading', background='#0f172a', foreground='#94a3b8',
+                   font=('Segoe UI', 9, 'bold'))
+    _sty.map('LB.Treeview', background=[('selected', '#2563eb')], foreground=[('selected', '#fff')])
+
+    tree = ttk.Treeview(tf, columns=_cols, show='headings', style='LB.Treeview', selectmode='browse')
+    vsb  = ttk.Scrollbar(tf, orient='vertical', command=tree.yview)
+    tree.configure(yscrollcommand=vsb.set)
+    for col, hdr_text, w in zip(_cols, _hdrs, _ws):
+        tree.heading(col, text=hdr_text, anchor='center')
+        tree.column(col, width=w, minwidth=30, anchor='center', stretch=(col == 'rank'))
+    tree.pack(side='left', fill='both', expand=True)
+    vsb.pack(side='right', fill='y')
+
+    tree.tag_configure('me',    background='#1e3a5f', foreground='#93c5fd')
+    tree.tag_configure('gold',  background='#451a03', foreground='#fbbf24')
+    tree.tag_configure('even',  background='#1e293b', foreground='#e2e8f0')
+    tree.tag_configure('odd',   background='#0f172a', foreground='#e2e8f0')
+
+    # Tlačítka
+    bf = tk.Frame(win, bg=DT_PANEL)
+    bf.pack(fill='x', padx=10, pady=(0, 10))
+
+    cfg_lbl = tk.Label(bf, text="", font=('Segoe UI', 8), bg=DT_PANEL, fg=DT_SUBTEXT)
+    cfg_lbl.pack(side='right', padx=8)
+
+    def _load_cfg_label():
+        cfg = load_firebase_config()
+        u = cfg.get('username', '?')
+        url_short = cfg.get('url', '').replace('https://', '').split('.')[0]
+        cfg_lbl.config(text=f"db: {url_short}  ·  hráč: {u}")
+
+    def refresh():
+        status_lbl.config(text="Načítám data z Firebase…")
+        for item in tree.get_children():
+            tree.delete(item)
+        _load_cfg_label()
+
+        def _fetch():
+            try:
+                import requests as _req
+                cfg    = load_firebase_config()
+                url    = cfg.get('url', '').rstrip('/')
+                secret = cfg.get('secret', '').strip()
+                my_name = cfg.get('username', '').strip()
+                if not url:
+                    win.after(0, lambda: status_lbl.config(
+                        text="⚠  Firebase URL není nastavena. Jdi do Nastavení → 🔥 Firebase."))
+                    return
+                params = {'auth': secret} if secret else {}
+                resp = _req.get(f"{url}/users.json", params=params, timeout=7)
+                data = resp.json()
+                if not isinstance(data, dict) or not data:
+                    win.after(0, lambda: status_lbl.config(
+                        text="Žebříček je zatím prázdný. XP se odešle automaticky při příštím uložení obchodu."))
+                    return
+                users = sorted(
+                    [(n, v) for n, v in data.items() if isinstance(v, dict)],
+                    key=lambda x: x[1].get('xp', 0), reverse=True
+                )
+                def _update():
+                    for item in tree.get_children():
+                        tree.delete(item)
+                    for pos, (name, info) in enumerate(users, 1):
+                        if name == my_name:
+                            tag = 'me'
+                        elif pos == 1:
+                            tag = 'gold'
+                        else:
+                            tag = 'even' if pos % 2 == 0 else 'odd'
+                        medal = {1: '🥇', 2: '🥈', 3: '🥉'}.get(pos, str(pos))
+                        tree.insert('', 'end', values=(
+                            medal,
+                            name,
+                            f"{info.get('xp', 0):,}",
+                            f"{info.get('rank_emoji', '')} {info.get('rank', '?')}",
+                            info.get('achievements', 0),
+                            info.get('total_trades', 0),
+                            f"{info.get('winrate', 0):.1f}%",
+                            f"{info.get('bt_hours', 0):.1f}h",
+                            info.get('last_updated', '?'),
+                        ), tags=(tag,))
+                    status_lbl.config(text=f"✅ {len(users)} hráčů  ·  poslední aktualizace: {datetime.now().strftime('%H:%M:%S')}")
+                win.after(0, _update)
+            except Exception as _err:
+                win.after(0, lambda: status_lbl.config(text=f"❌ Chyba připojení: {_err}"))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _manual_sync():
+        status_lbl.config(text="Odesílám vlastní XP…")
+        firebase_sync_xp()
+        win.after(1500, refresh)
+
+    tk.Button(bf, text="🔄  Obnovit", command=refresh,
+              bg='#1d4ed8', fg='white', font=('Segoe UI', 9, 'bold'),
+              relief='flat', padx=12, pady=5, cursor='hand2').pack(side='left', padx=(0, 6))
+    tk.Button(bf, text="📤  Sync moje XP", command=_manual_sync,
+              bg='#15803d', fg='white', font=('Segoe UI', 9),
+              relief='flat', padx=12, pady=5, cursor='hand2').pack(side='left', padx=(0, 6))
+
+    refresh()
 
 
 def get_xp_config():
@@ -6337,6 +6542,96 @@ def open_settings_window(initial_tab=0):
               bg='#27ae60', fg='white', font=('Segoe UI', 9, 'bold'),
               padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
+    # ── Tab: Firebase ─────────────────────────────────────────────────────────
+    t_fb = ttk.Frame(nb); nb.add(t_fb, text='  🔥 Firebase  ')
+    _fb_frame = tk.Frame(t_fb, bg=DT_BG, padx=28, pady=24)
+    _fb_frame.pack(fill='both', expand=True)
+
+    tk.Label(_fb_frame, text="🔥  Online žebříček — Firebase", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 13, 'bold')).pack(anchor='w', pady=(0, 4))
+    tk.Label(_fb_frame, text="Nastavení sdíleného žebříčku XP s kamarády. Data se ukládají na Firebase Realtime Database.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9), wraplength=580, justify='left').pack(anchor='w', pady=(0, 18))
+
+    _fb_cfg = load_firebase_config()
+
+    def _fb_row(parent, label, default, show=''):
+        row = tk.Frame(parent, bg=DT_BG); row.pack(fill='x', pady=4)
+        tk.Label(row, text=label, bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9),
+                 width=18, anchor='w').pack(side='left')
+        var = tk.StringVar(value=default)
+        e = tk.Entry(row, textvariable=var, font=('Segoe UI', 10), width=52,
+                     bg='#1e293b', fg='#e2e8f0', insertbackground='white',
+                     relief='solid', bd=1, show=show)
+        e.pack(side='left', fill='x', expand=True)
+        return var
+
+    _fb_url_var  = _fb_row(_fb_frame, "URL databáze:",   _fb_cfg.get('url',      'https://obd1-26456-default-rtdb.firebaseio.com'))
+    _fb_sec_var  = _fb_row(_fb_frame, "Database secret:", _fb_cfg.get('secret',   ''), show='●')
+    _fb_name_var = _fb_row(_fb_frame, "Tvoje jméno:",     _fb_cfg.get('username', 'patrik'))
+
+    tk.Label(_fb_frame,
+             text="💡  URL najdeš v Firebase konzoli: Realtime Database → Data (horní lišta).\n"
+                  "    Secret: Project Settings → Service Accounts → Database secrets → Show.",
+             bg=DT_BG, fg='#64748b', font=('Segoe UI', 8),
+             justify='left').pack(anchor='w', pady=(10, 16))
+
+    _fb_status = tk.Label(_fb_frame, text="", bg=DT_BG, fg='#4ade80', font=('Segoe UI', 9, 'bold'))
+    _fb_status.pack(anchor='w', pady=(0, 8))
+
+    def _save_fb():
+        cfg = {
+            'url':      _fb_url_var.get().strip().rstrip('/'),
+            'secret':   _fb_sec_var.get().strip(),
+            'username': _fb_name_var.get().strip(),
+        }
+        if not cfg['url'] or not cfg['username']:
+            _fb_status.config(text="⚠  URL a Jméno jsou povinné.", fg='#f87171')
+            return
+        save_firebase_config(cfg)
+        _fb_status.config(text="✅  Uloženo! XP se odešle při příštím uložení obchodu.", fg='#4ade80')
+
+    def _test_fb():
+        _fb_status.config(text="Testuju připojení…", fg='#fbbf24')
+        import threading
+        def _t():
+            try:
+                import requests as _req
+                url    = _fb_url_var.get().strip().rstrip('/')
+                secret = _fb_sec_var.get().strip()
+                if not url:
+                    _fb_frame.after(0, lambda: _fb_status.config(text="⚠  Zadej URL.", fg='#f87171'))
+                    return
+                params = {'auth': secret} if secret else {}
+                r = _req.get(f"{url}/users.json", params=params, timeout=6)
+                if r.status_code == 200:
+                    data = r.json()
+                    count = len(data) if isinstance(data, dict) else 0
+                    _fb_frame.after(0, lambda: _fb_status.config(
+                        text=f"✅  Připojeno!  V databázi je {count} hráčů.", fg='#4ade80'))
+                else:
+                    _fb_frame.after(0, lambda: _fb_status.config(
+                        text=f"❌  HTTP {r.status_code} — zkontroluj URL a secret.", fg='#f87171'))
+            except Exception as _e:
+                _fb_frame.after(0, lambda: _fb_status.config(text=f"❌  {_e}", fg='#f87171'))
+        threading.Thread(target=_t, daemon=True).start()
+
+    def _sync_now():
+        _save_fb()
+        firebase_sync_xp()
+        _fb_status.config(text="📤  XP odesláno na Firebase!", fg='#4ade80')
+
+    _fb_btn_row = tk.Frame(_fb_frame, bg=DT_BG)
+    _fb_btn_row.pack(anchor='w')
+    tk.Button(_fb_btn_row, text="💾  Uložit", command=_save_fb,
+              bg='#15803d', fg='white', font=('Segoe UI', 9, 'bold'),
+              padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+    tk.Button(_fb_btn_row, text="🔌  Test připojení", command=_test_fb,
+              bg='#1d4ed8', fg='white', font=('Segoe UI', 9),
+              padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+    tk.Button(_fb_btn_row, text="📤  Odeslat moje XP teď", command=_sync_now,
+              bg='#b45309', fg='white', font=('Segoe UI', 9),
+              padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
+
     # ── Tab: XP Systém ────────────────────────────────────────────────────────
     t_xp = ttk.Frame(nb); nb.add(t_xp, text='  ⭐ XP Systém  ')
     xp_outer = tk.Frame(t_xp, bg=DT_BG)
@@ -6588,6 +6883,9 @@ def show_main_screen(p_name):
               bg='#451a03', fg='#fbbf24',
               font=('Segoe UI', 9, 'bold'), padx=10, pady=6, relief='flat', cursor='hand2')
     xp_badge_btn.pack(side='right', padx=4, pady=10)
+    tk.Button(hb, text="🏆  Žebříček", command=open_leaderboard,
+              bg='#1e3a5f', fg='#60a5fa',
+              font=('Segoe UI', 9, 'bold'), padx=10, pady=6, relief='flat', cursor='hand2').pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="📖  DENÍK", command=show_journal_screen,
               bg=DT_BTN, fg=DT_TEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
