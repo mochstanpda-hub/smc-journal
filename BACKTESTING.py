@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.45"
+VERSION = "1.5.46"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.46 | Firebase — oprava KeyError 'level': get_rank_info() nemá klíč level, správně je rank_idx+1
 1.5.45 | Firebase Sync — tlačítko Sync moje XP nyní ukazuje výsledek a chybový messagebox (dříve selhávalo tiše); HTTP 403 vede na návod k opravě Rules
 1.5.44 | Firebase — přechod z requests na urllib (standardní knihovna, funguje v .exe bez instalace); odstraněna závislost na externím balíčku
 1.5.43 | Firebase — auto-instalace requests: appka použije sys.executable (správný Python) a nabídne automatickou instalaci přes pip přímo z UI
@@ -3886,7 +3887,7 @@ def firebase_sync_xp():
                 "xp":           xp_data.get('total_xp', 0),
                 "rank":         ri['name'],
                 "rank_emoji":   ri['emoji'],
-                "level":        ri['level'],
+                "level":        ri['rank_idx'] + 1,
                 "achievements": len(xp_data.get('achievements', [])),
                 "total_trades": total,
                 "winrate":      winrate,
@@ -4039,7 +4040,7 @@ def open_leaderboard():
                 "xp":           xp_data.get('total_xp', 0),
                 "rank":         ri['name'],
                 "rank_emoji":   ri['emoji'],
-                "level":        ri['level'],
+                "level":        ri['rank_idx'] + 1,
                 "achievements": len(xp_data.get('achievements', [])),
                 "total_trades": total,
                 "winrate":      winrate,
