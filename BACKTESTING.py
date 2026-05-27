@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.36"
+VERSION = "1.5.37"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.37 | XP — 24 nových odznaků (trades_250/1000, wins_25/50/100, streak_7, big_rrr, comeback, all_results, symbols_5/10, photos/notes/tags, checklist_50, first_be, bt_1h/5h/10h/20h, journal_100, xp_10000); Backtesting stopky — tlačítko ⏱ START v toolbaru, po každé hodině zahraje melodický zvuk, vyskočí popup s XP a odznaky, pravý klik = menu (pauza/reset/celkový čas)
 1.5.36 | Periody — filtr účtu: dropdown "Účet" v hlavičce záložky filtruje všechna data (KPI karty, oba grafy, obě tabulky); výchozí "Všechny účty"; název účtu se zobrazuje v nadpisech sekcí a grafů
 1.5.35 | XP Bodovací systém — rank žebříček (Nováček → Elite); XP za backtest/reálný obchod, WIN bonus, disciplína (LOSS+SL), foto, poznámka, checklist 100%, zápis do deníku; 8 konfigurovatelných pravidel (denní/týdenní limit, bez revenge, min. RRR, série výher…); 16 odznaků/achievements; XP badge v toolbaru; přehledové okno s progress barem a historií; záložka ⭐ XP Systém v Nastavení
 1.5.34 | Oprava výpočtu Aktuální kapitál a P&L% — strip() na názvu účtu zabraňuje nespárování s obchody; výpočet Aktuální = Počáteční + Σ(zisky/ztráty připojených obchodů), P&L% = Σ P&L / Počáteční × 100
@@ -900,6 +901,14 @@ stats_graph_frame = None
 heatmap_graph_frame = None
 kpi_frame = None
 xp_badge_btn = None   # tlačítko v toolbaru zobrazující aktuální XP
+
+# Backtesting stopky
+bt_sw_running   = False   # je stopwatch aktivní?
+bt_sw_start     = None    # datetime startu aktuálního sezení
+bt_sw_elapsed   = 0       # sekundy z předchozích zastavení
+bt_sw_btn       = None    # tk.Button v toolbaru
+bt_sw_after_id  = None    # handle pro root.after()
+bt_sw_xp_marks  = set()   # hodiny za které bylo uděleno XP v tomto sezení
 tables_frame = None
 
 # UI prvky formuláře
@@ -3524,22 +3533,51 @@ _XP_RANKS = [
 ]
 
 _XP_ACHIEVEMENTS = [
-    ("first_trade",   "🐣", "První krok",         "Přidal/a jsi první obchod."),
-    ("trades_10",     "📈", "Začátečník",          "10 obchodů celkem."),
-    ("trades_50",     "📊", "Půl stovky",          "50 obchodů celkem."),
-    ("trades_100",    "💯", "Stovka",              "100 obchodů celkem."),
-    ("trades_500",    "🚀", "Výzva přijata",       "500 obchodů celkem."),
-    ("first_win",     "✅", "První výhra",         "První WIN obchod."),
-    ("wins_10",       "🏅", "10 výher",            "10 WIN obchodů celkem."),
-    ("streak_3",      "🔥", "Série 3",             "3 výhry v řadě."),
-    ("streak_5",      "⚡", "Série 5",             "5 výher v řadě."),
-    ("streak_10",     "👑", "Neporazitelný",       "10 výher v řadě."),
-    ("journal_7",     "📔", "Týden zápisků",       "7 různých dní zápisu v deníku."),
-    ("journal_30",    "📚", "Měsíc zápisků",       "30 různých dní zápisu v deníku."),
-    ("checklist_10",  "✔️", "Perfekcionista",      "10× kompletní checklist (100%)."),
-    ("xp_500",        "⭐", "500 XP",              "Nasbíral/a jsi 500 XP."),
-    ("xp_2000",       "🌟", "2000 XP",             "Nasbíral/a jsi 2000 XP."),
-    ("xp_5000",       "💫", "5000 XP",             "Nasbíral/a jsi 5000 XP."),
+    # ── Obchody — počet ──────────────────────────────────────────────────────
+    ("first_trade",   "🐣", "První krok",           "Přidal/a jsi první obchod."),
+    ("trades_10",     "📈", "Začátečník",            "10 obchodů celkem."),
+    ("trades_50",     "📊", "Půl stovky",            "50 obchodů celkem."),
+    ("trades_100",    "💯", "Stovka",                "100 obchodů celkem."),
+    ("trades_250",    "🏔️","Čtvrt tisíce",           "250 obchodů celkem."),
+    ("trades_500",    "🚀", "Výzva přijata",          "500 obchodů celkem."),
+    ("trades_1000",   "🌌", "Tisícovka",              "1000 obchodů celkem."),
+    # ── Výhry ────────────────────────────────────────────────────────────────
+    ("first_win",     "✅", "První výhra",            "První WIN obchod."),
+    ("wins_10",       "🏅", "10 výher",               "10 WIN obchodů celkem."),
+    ("wins_25",       "🥈", "25 výher",               "25 WIN obchodů celkem."),
+    ("wins_50",       "🥇", "Padesát výher",          "50 WIN obchodů celkem."),
+    ("wins_100",      "💎", "Sto výher",              "100 WIN obchodů celkem."),
+    # ── Win série ────────────────────────────────────────────────────────────
+    ("streak_3",      "🔥", "Série 3",                "3 výhry v řadě."),
+    ("streak_5",      "⚡", "Série 5",                "5 výher v řadě."),
+    ("streak_7",      "🌪️","Tornádo",                "7 výher v řadě."),
+    ("streak_10",     "👑", "Neporazitelný",           "10 výher v řadě."),
+    # ── Disciplína & kvalita ─────────────────────────────────────────────────
+    ("big_rrr",       "🎯", "Ostrostřelec",           "Jeden obchod s RRR ≥ 5."),
+    ("all_results",   "🎭", "Kompletní set",           "Máš WIN, LOSS i BE výsledek."),
+    ("photos_10",     "📷", "Fotograf",               "10 obchodů se screenshotem."),
+    ("notes_20",      "✍️", "Kronikář",               "20 obchodů s poznámkou."),
+    ("tags_20",       "🏷️","Organizátor",             "20 obchodů s vyplněnými tagy."),
+    ("symbols_5",     "🌍", "Globalista",             "Obchodoval/a jsi 5 různých symbolů."),
+    ("symbols_10",    "🌐", "Světový obchodník",       "Obchodoval/a jsi 10 různých symbolů."),
+    ("checklist_10",  "✔️", "Perfekcionista",          "10× kompletní checklist (100%)."),
+    ("checklist_50",  "📋", "Metodický",              "50× kompletní checklist."),
+    ("first_be",      "⚖️", "Nula není ztráta",       "První BE obchod."),
+    ("loss_comeback", "💪", "Comeback",               "WIN obchod ihned po 3 ztrátách v řadě."),
+    # ── Deník ────────────────────────────────────────────────────────────────
+    ("journal_7",     "📔", "Týden zápisků",          "7 různých dní zápisu v deníku."),
+    ("journal_30",    "📚", "Měsíc zápisků",          "30 různých dní zápisu v deníku."),
+    ("journal_100",   "📖", "Spisovatel",             "100 různých dní zápisu v deníku."),
+    # ── Backtesting stopky ────────────────────────────────────────────────────
+    ("bt_1h",         "⏱️", "První seance",           "1 hodina backtestování v jednom sezení."),
+    ("bt_5h",         "⏰", "Poctivec",               "5 hodin backtestování celkem."),
+    ("bt_10h",        "🕰️","Drilování",              "10 hodin backtestování celkem."),
+    ("bt_20h",        "🧠", "Mozková příprava",        "20 hodin backtestování celkem."),
+    # ── XP milníky ───────────────────────────────────────────────────────────
+    ("xp_500",        "⭐", "500 XP",                 "Nasbíral/a jsi 500 XP."),
+    ("xp_2000",       "🌟", "2000 XP",                "Nasbíral/a jsi 2000 XP."),
+    ("xp_5000",       "💫", "5000 XP",                "Nasbíral/a jsi 5000 XP."),
+    ("xp_10000",      "🌠", "10 000 XP",              "Nasbíral/a jsi 10 000 XP."),
 ]
 
 _XP_DEFAULT_CONFIG = {
@@ -3555,6 +3593,7 @@ _XP_DEFAULT_CONFIG = {
     "xp_with_photo":        5,   # obchod má screenshot/foto
     "xp_with_note":         5,   # obchod má vyplněnou poznámku
     "xp_checklist_full":   12,   # checklist splněn na 100%
+    "xp_bt_hour":          40,   # XP za každou dokončenou hodinu backtestování
     # ── Pravidla (bonus za dodržení) ─────────────────────────────────────────
     "rules": {
         "daily_limit": {
@@ -3700,41 +3739,121 @@ def _refresh_xp_badge():
         pass
 
 
-def _check_xp_achievements(data):
-    """Zkontroluje a udělí odznaky podle aktuálního stavu. Vrátí seznam nových odznaků."""
-    earned    = set(data.get('achievements', []))
-    history   = data.get('history', [])
-    total_xp  = data.get('total_xp', 0)
-    new_badges = []
+def _check_xp_achievements(data, trades=None):
+    """
+    Zkontroluje a udělí odznaky. Vrátí seznam ID nových odznaků.
+    trades — volitelný seznam obchodů pro trade-based achievementy;
+             pokud None, pokusí se načíst ze souboru.
+    """
+    earned      = set(data.get('achievements', []))
+    history     = data.get('history', [])
+    total_xp    = data.get('total_xp', 0)
+    bt_minutes  = data.get('bt_total_minutes', 0)
+    new_badges  = []
 
-    # Počítadla z history
-    trade_adds  = [h for h in history if h.get('source') in ('xp_backtest_trade', 'xp_real_trade')]
-    wins        = [h for h in history if h.get('source') == 'xp_win_bonus']
-    journal_days = set(h['date'][:10] for h in history if h.get('source') == 'xp_journal_entry')
-    checklist_fulls = [h for h in history if h.get('source') == 'xp_checklist_full']
+    # ── Počítadla z XP historie ──────────────────────────────────────────────
+    trade_adds      = [h for h in history if h.get('source') in ('xp_backtest_trade', 'xp_real_trade')]
+    wins_hist       = [h for h in history if h.get('source') == 'xp_win_bonus']
+    be_hist         = [h for h in history if h.get('source') == 'xp_be_bonus']
+    journal_days    = set(h['date'][:10] for h in history if h.get('source') == 'xp_journal_entry')
+    chk_fulls       = [h for h in history if h.get('source') == 'xp_checklist_full']
+    photos_hist     = [h for h in history if h.get('source') == 'xp_with_photo']
+    notes_hist      = [h for h in history if h.get('source') == 'xp_with_note']
+    tags_hist       = [h for h in history if h.get('source') == 'rule_with_tags']
 
-    # Max výherní série — zjistíme z notes (source streak)
-    streak_3_reached = any(h.get('source') == 'rule_win_streak_3' for h in history)
-    streak_5_reached = any(h.get('source') == 'rule_win_streak_5' for h in history)
-    streak_10_any   = any(h.get('source') == 'achievement_streak_10' for h in history)
+    streak_3  = any(h.get('source') == 'rule_win_streak_3' for h in history)
+    streak_5  = any(h.get('source') == 'rule_win_streak_5' for h in history)
+    bt_1h_done = any(h.get('source') == 'bt_hour' for h in history)
 
+    # ── Trade-based achievementy — sáhni na soubor jen pokud nemáme data ─────
+    if trades is None and DATA_FILE:
+        try:
+            trades = load_data()
+        except Exception:
+            trades = []
+    trades = trades or []
+
+    results_set     = set(t.get('vysledek', '').lower() for t in trades if t.get('vysledek'))
+    all_results_ok  = {'win', 'loss', 'be'}.issubset(results_set)
+    symbols_set     = set(t.get('symbol', '').strip() for t in trades if t.get('symbol', '').strip())
+    big_rrr_ok      = any(
+        _safe_float(t.get('rrr', 0)) >= 5.0 for t in trades
+    )
+    # Comeback: WIN ihned po 3+ po sobě jdoucích ztrátách
+    comeback_ok = False
+    consec_loss = 0
+    for t in trades:
+        res = t.get('vysledek', '').lower()
+        if res == 'loss':
+            consec_loss += 1
+        elif res == 'win':
+            if consec_loss >= 3:
+                comeback_ok = True; break
+            consec_loss = 0
+        else:
+            consec_loss = 0
+
+    # Série 7 / 10 výher — projdi výsledky
+    streak_7_ok = streak_10_ok = False
+    cur_streak   = 0
+    max_streak   = 0
+    for t in trades:
+        if t.get('vysledek', '').lower() == 'win':
+            cur_streak += 1; max_streak = max(max_streak, cur_streak)
+        elif t.get('vysledek', '').lower() in ('loss', 'be'):
+            cur_streak = 0
+    if max_streak >= 7:  streak_7_ok  = True
+    if max_streak >= 10: streak_10_ok = True
+
+    # ── Sestavení checků ─────────────────────────────────────────────────────
     checks = [
-        ("first_trade",  len(trade_adds) >= 1),
-        ("trades_10",    len(trade_adds) >= 10),
-        ("trades_50",    len(trade_adds) >= 50),
-        ("trades_100",   len(trade_adds) >= 100),
-        ("trades_500",   len(trade_adds) >= 500),
-        ("first_win",    len(wins) >= 1),
-        ("wins_10",      len(wins) >= 10),
-        ("streak_3",     streak_3_reached),
-        ("streak_5",     streak_5_reached),
-        ("journal_7",    len(journal_days) >= 7),
-        ("journal_30",   len(journal_days) >= 30),
-        ("checklist_10", len(checklist_fulls) >= 10),
-        ("xp_500",       total_xp >= 500),
-        ("xp_2000",      total_xp >= 2000),
-        ("xp_5000",      total_xp >= 5000),
+        # Počty obchodů
+        ("first_trade",   len(trade_adds) >= 1),
+        ("trades_10",     len(trade_adds) >= 10),
+        ("trades_50",     len(trade_adds) >= 50),
+        ("trades_100",    len(trade_adds) >= 100),
+        ("trades_250",    len(trade_adds) >= 250),
+        ("trades_500",    len(trade_adds) >= 500),
+        ("trades_1000",   len(trade_adds) >= 1000),
+        # Výhry
+        ("first_win",     len(wins_hist) >= 1),
+        ("wins_10",       len(wins_hist) >= 10),
+        ("wins_25",       len(wins_hist) >= 25),
+        ("wins_50",       len(wins_hist) >= 50),
+        ("wins_100",      len(wins_hist) >= 100),
+        # Série
+        ("streak_3",      streak_3),
+        ("streak_5",      streak_5),
+        ("streak_7",      streak_7_ok),
+        ("streak_10",     streak_10_ok),
+        # Disciplína & kvalita
+        ("big_rrr",       big_rrr_ok),
+        ("all_results",   all_results_ok),
+        ("photos_10",     len(photos_hist) >= 10),
+        ("notes_20",      len(notes_hist) >= 20),
+        ("tags_20",       len(tags_hist)  >= 20),
+        ("symbols_5",     len(symbols_set) >= 5),
+        ("symbols_10",    len(symbols_set) >= 10),
+        ("checklist_10",  len(chk_fulls) >= 10),
+        ("checklist_50",  len(chk_fulls) >= 50),
+        ("first_be",      len(be_hist) >= 1),
+        ("loss_comeback", comeback_ok),
+        # Deník
+        ("journal_7",     len(journal_days) >= 7),
+        ("journal_30",    len(journal_days) >= 30),
+        ("journal_100",   len(journal_days) >= 100),
+        # Backtesting čas
+        ("bt_1h",         bt_1h_done),
+        ("bt_5h",         bt_minutes >= 300),
+        ("bt_10h",        bt_minutes >= 600),
+        ("bt_20h",        bt_minutes >= 1200),
+        # XP milníky
+        ("xp_500",        total_xp >= 500),
+        ("xp_2000",       total_xp >= 2000),
+        ("xp_5000",       total_xp >= 5000),
+        ("xp_10000",      total_xp >= 10000),
     ]
+
     for aid, condition in checks:
         if condition and aid not in earned:
             earned.add(aid)
@@ -3742,6 +3861,14 @@ def _check_xp_achievements(data):
 
     data['achievements'] = list(earned)
     return new_badges
+
+
+def _safe_float(val, default=0.0):
+    """Bezpečný převod na float."""
+    try:
+        return float(str(val).replace(',', '.'))
+    except (ValueError, TypeError):
+        return default
 
 
 def _award_xp_internal(source, amount, note, project):
@@ -4078,6 +4205,194 @@ def open_xp_overview():
         if h.get('project'):
             tk.Label(row_f, text=h['project'],
                      font=('Segoe UI', 7), bg=row_bg, fg='#334155').pack(side='right', padx=4)
+
+
+# ==============================================================================
+# BACKTESTING STOPKY
+# ==============================================================================
+
+def _bt_sw_total_seconds():
+    """Vrátí celkový počet sekund (elapsed + aktuální sezení)."""
+    total = bt_sw_elapsed
+    if bt_sw_running and bt_sw_start:
+        total += int((datetime.now() - bt_sw_start).total_seconds())
+    return total
+
+
+def _bt_sw_play_sound():
+    """Přehraje melodický zvuk v pozadí (neblokuje UI)."""
+    import threading
+    def _beep():
+        try:
+            import winsound
+            # Vzestupná triáda C-E-G + fanfára
+            for freq, dur in [(523, 120), (659, 120), (784, 180),
+                              (784, 80),  (880, 80),  (988, 350)]:
+                winsound.Beep(freq, dur)
+        except Exception:
+            pass
+    threading.Thread(target=_beep, daemon=True).start()
+
+
+def _bt_sw_show_milestone(hour_n, xp_awarded, new_badges):
+    """Zobrazí nesmazatelný popup při dosažení hodiny."""
+    try:
+        popup = tk.Toplevel(root)
+        popup.title("⏱  Backtesting milestone!")
+        popup.geometry("400x220")
+        popup.configure(bg='#1c0a3e')
+        popup.attributes('-topmost', True)
+        popup.resizable(False, False)
+        popup.lift()
+
+        tk.Label(popup, text="⏱", font=('Segoe UI', 44), bg='#1c0a3e', fg='#c084fc').pack(pady=(12, 0))
+        tk.Label(popup,
+                 text=f"Dokončil/a jsi hodinu č. {hour_n}!" if hour_n == 1
+                      else f"Dokončil/a jsi {hour_n} hodiny backtestování!",
+                 font=('Segoe UI', 13, 'bold'), bg='#1c0a3e', fg='#e9d5ff').pack()
+        tk.Label(popup, text=f"+{xp_awarded} XP přidáno  ·  Čas na krátkou přestávku! 🧠",
+                 font=('Segoe UI', 9), bg='#1c0a3e', fg='#a78bfa').pack(pady=4)
+
+        if new_badges:
+            badge_names = []
+            badge_dict  = {a[0]: a for a in _XP_ACHIEVEMENTS}
+            for bid in new_badges:
+                if bid in badge_dict:
+                    badge_names.append(f"{badge_dict[bid][1]} {badge_dict[bid][2]}")
+            if badge_names:
+                tk.Label(popup, text="Nový odznak: " + "  ·  ".join(badge_names),
+                         font=('Segoe UI', 9, 'bold'), bg='#1c0a3e', fg='#4ade80').pack(pady=2)
+
+        # Celkový čas dnes
+        data = load_xp_data()
+        total_min = data.get('bt_total_minutes', 0)
+        tk.Label(popup, text=f"Celkový čas backtestování: {total_min // 60}h {total_min % 60}m",
+                 font=('Segoe UI', 8), bg='#1c0a3e', fg='#6d28d9').pack()
+
+        tk.Button(popup, text="  Pokračovat  ", command=popup.destroy,
+                  bg='#7c3aed', fg='white', font=('Segoe UI', 10, 'bold'),
+                  padx=20, pady=7, relief='flat', cursor='hand2').pack(pady=12)
+
+        # Auto-zavření po 30 sekundách
+        popup.after(30000, lambda: popup.destroy() if popup.winfo_exists() else None)
+    except Exception:
+        pass
+
+
+def _bt_sw_tick():
+    """Tickuje každou sekundu — aktualizuje label a kontroluje hodiny."""
+    global bt_sw_after_id, bt_sw_xp_marks
+
+    if not bt_sw_running:
+        return
+
+    total_sec = _bt_sw_total_seconds()
+    h  = total_sec // 3600
+    m  = (total_sec % 3600) // 60
+    s  = total_sec % 60
+
+    # Aktualizuj tlačítko
+    if bt_sw_btn:
+        try:
+            if bt_sw_btn.winfo_exists():
+                bt_sw_btn.config(text=f"⏱  {h:02d}:{m:02d}:{s:02d}",
+                                 fg='#c084fc' if h > 0 else '#fbbf24')
+        except Exception:
+            pass
+
+    # Zkontroluj hodinu — každá nová dokončená hodina = XP + zvuk + popup
+    completed_hours = total_sec // 3600
+    for hour_n in range(1, completed_hours + 1):
+        if hour_n not in bt_sw_xp_marks:
+            bt_sw_xp_marks.add(hour_n)
+            try:
+                cfg = get_xp_config()
+                xp_amt = cfg.get('xp_bt_hour', 40)
+
+                # Zapiš čas do XP dat
+                xp_data = load_xp_data()
+                xp_data['bt_total_minutes'] = xp_data.get('bt_total_minutes', 0) + 60
+                save_xp_data(xp_data)
+
+                # Udělí XP (a znovu načte data, tak je bt_total_minutes aktuální)
+                _total, new_badges = award_xp('bt_hour',
+                                              note=f"Sezení {hour_n}h",
+                                              amount=xp_amt)
+                _bt_sw_play_sound()
+                root.after(200, lambda h=hour_n, x=xp_amt, b=new_badges:
+                           _bt_sw_show_milestone(h, x, b))
+            except Exception:
+                pass
+
+    bt_sw_after_id = root.after(1000, _bt_sw_tick)
+
+
+def _bt_sw_toggle():
+    """Start / Stop stopek."""
+    global bt_sw_running, bt_sw_start, bt_sw_elapsed, bt_sw_after_id, bt_sw_xp_marks
+
+    if bt_sw_running:
+        # ── STOP ─────────────────────────────────────────────────────────────
+        bt_sw_elapsed += int((datetime.now() - bt_sw_start).total_seconds())
+        bt_sw_running  = False
+        bt_sw_start    = None
+        if bt_sw_after_id:
+            try: root.after_cancel(bt_sw_after_id)
+            except Exception: pass
+            bt_sw_after_id = None
+
+        total_sec = bt_sw_elapsed
+        h = total_sec // 3600; m = (total_sec % 3600) // 60
+        if bt_sw_btn:
+            try:
+                bt_sw_btn.config(
+                    text=f"⏱  {h:02d}:{m:02d}  ▶",
+                    fg='#94a3b8', bg='#1e293b')
+            except Exception: pass
+    else:
+        # ── START ─────────────────────────────────────────────────────────────
+        bt_sw_running = True
+        bt_sw_start   = datetime.now()
+        bt_sw_xp_marks = set(range(1, bt_sw_elapsed // 3600 + 1))  # skip hours already counted
+        if bt_sw_btn:
+            try:
+                bt_sw_btn.config(bg='#3b0764', fg='#fbbf24')
+            except Exception: pass
+        _bt_sw_tick()
+
+
+def _bt_sw_reset():
+    """Resetuje stopky na nulu (ptá se na potvrzení)."""
+    global bt_sw_running, bt_sw_start, bt_sw_elapsed, bt_sw_after_id, bt_sw_xp_marks
+    if bt_sw_running or bt_sw_elapsed > 0:
+        from tkinter import messagebox as _mb
+        if not _mb.askyesno("Reset stopek", "Opravdu resetovat stopky na 00:00:00?"):
+            return
+    if bt_sw_running:
+        bt_sw_running = False
+        if bt_sw_after_id:
+            try: root.after_cancel(bt_sw_after_id)
+            except Exception: pass
+            bt_sw_after_id = None
+    bt_sw_elapsed = 0; bt_sw_start = None; bt_sw_xp_marks = set()
+    if bt_sw_btn:
+        try:
+            bt_sw_btn.config(text="⏱  START", fg='#fbbf24', bg='#451a03')
+        except Exception: pass
+
+
+def _bt_sw_right_click(event):
+    """Pravý klik na stopky → kontextové menu."""
+    m = tk.Menu(root, tearoff=0, bg='#1e293b', fg='#e2e8f0',
+                activebackground='#334155', activeforeground='white')
+    m.add_command(label="▶  Start / ⏸ Pauza", command=_bt_sw_toggle)
+    m.add_command(label="↺  Reset stopek",     command=_bt_sw_reset)
+    m.add_separator()
+    data = load_xp_data()
+    bm   = data.get('bt_total_minutes', 0)
+    m.add_command(label=f"Celkem backtestováno: {bm//60}h {bm%60}m", state='disabled')
+    try: m.tk_popup(event.x_root, event.y_root)
+    finally: m.grab_release()
 
 
 def _fmt_vel(vel):
@@ -5922,6 +6237,7 @@ def open_settings_window(initial_tab=0):
         ("xp_with_photo",      "Obchod se screenshotem"),
         ("xp_with_note",       "Obchod s poznámkou"),
         ("xp_checklist_full",  "Checklist splněn na 100%"),
+        ("xp_bt_hour",         "⏱ Každá hodina backtestování"),
     ]
     _xp_vars = {}
     for ri2, (key, label) in enumerate(_basic_fields, start=3):
@@ -6038,7 +6354,7 @@ def show_main_screen(p_name):
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
-    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var
+    global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var, bt_sw_btn
     global filter_symbol_var, filter_result_var, filter_session_var, filter_date_from_var, filter_date_to_var, filter_tag_var, filter_rrr_min_var, filter_rrr_max_var
 
     current_project_name = p_name
@@ -6107,6 +6423,23 @@ def show_main_screen(p_name):
     tk.Button(hb, text="🏦  ÚČTY", command=open_accounts_manager,
               bg=DT_BTN, fg=DT_TEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    # ── Backtesting stopky ────────────────────────────────────────────────────
+    _bt_init_sec = _bt_sw_total_seconds()
+    _bt_h = _bt_init_sec // 3600; _bt_m = (_bt_init_sec % 3600) // 60
+    _bt_label = f"⏱  {_bt_h:02d}:{_bt_m:02d}  ▶" if _bt_init_sec > 0 else "⏱  START"
+    bt_sw_btn = tk.Button(hb,
+              text=_bt_label,
+              command=_bt_sw_toggle,
+              bg='#3b0764' if bt_sw_running else '#451a03',
+              fg='#c084fc' if bt_sw_running else '#fbbf24',
+              font=('Segoe UI', 9, 'bold'), padx=10, pady=6,
+              relief='flat', cursor='hand2')
+    bt_sw_btn.pack(side='right', padx=4, pady=10)
+    bt_sw_btn.bind('<Button-3>', _bt_sw_right_click)
+    # Pokud stopky běžely a uživatel znovu otevřel show_main_screen, obnov tick
+    if bt_sw_running and bt_sw_after_id is None:
+        _bt_sw_tick()
+
     # XP badge — zobrazí aktuální rank a XP
     _xp_data_init = load_xp_data()
     _xp_total_init = _xp_data_init.get('total_xp', 0)
