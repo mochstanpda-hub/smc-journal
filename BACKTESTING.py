@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.46"
+VERSION = "1.5.47"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.47 | OCR analýza screenshotu — opravena logika přiřazení Entry/SL/TP: 3 pásma bez červené (Buy) dostávala prohozené SL↔TP; 2 pásma bez červené předpokládala Sell; rozšířen scan strip (5/6 %); post-processing auto-prohodí SL↔TP pokud jsou hodnoty nekonzistentní
 1.5.46 | Firebase — oprava KeyError 'level': get_rank_info() nemá klíč level, správně je rank_idx+1
 1.5.45 | Firebase Sync — tlačítko Sync moje XP nyní ukazuje výsledek a chybový messagebox (dříve selhávalo tiše); HTTP 403 vede na návod k opravě Rules
 1.5.44 | Firebase — přechod z requests na urllib (standardní knihovna, funguje v .exe bez instalace); odstraněna závislost na externím balíčku
@@ -3228,10 +3229,10 @@ def analyze_screenshot(image_path):
     debug_lines.append(f"[DEBUG] img={w}x{h}  dark_bg={_is_dark_bg}")
 
     # ── 2. Scan úzkého pruhu vpravo — jen price scale oblast ─────────────────
-    # Záměrně úzký (4 % pro světlé bg) aby se vyhnul barevným zónám v grafu
-    # (fibonacci úrovně, rectangly, kill zóny táhnou se přes celý graf)
-    label_pct   = 0.025 if _is_dark_bg else 0.045
-    label_w     = max(50, int(w * label_pct))
+    # Záměrně úzký aby se vyhnul barevným zónám v grafu
+    # Dark BG: 5 % (cca 96px na 1920px); Light BG: 6 %
+    label_pct   = 0.05 if _is_dark_bg else 0.06
+    label_w     = max(70, int(w * label_pct))
     label_strip = img[:, max(0, w - label_w):]
     debug_lines.append(f"  label_w={label_w}")
 
@@ -3379,30 +3380,43 @@ def analyze_screenshot(image_path):
     elif len(all_non_sl) >= 2:
         if red_bands:
             sl_y   = red_bands[0]['y_mid']
-            # Entry = non-SL band nejblíže k SL (na ose Y)
+            # Entry = non-SL band nejblíže k SL (na ose Y — Entry leží mezi SL a TP)
             by_dist = sorted(all_non_sl, key=lambda d: abs(d['y_mid'] - sl_y))
             entry   = by_dist[0]
             tp      = by_dist[1]
         else:
-            # Bez červené: prostřední = entry (tři bary) nebo první = entry (dva)
+            # Bez červené: hledáme Entry + TP podle Y polohy
             if len(all_non_sl) >= 3:
+                # Prostřední pásmo (Y) = Entry — platí pro Buy i Sell
                 mid   = len(all_non_sl) // 2
                 entry = all_non_sl[mid]
-                others_sorted = sorted([d for i, d in enumerate(all_non_sl) if i != mid],
-                                        key=lambda d: d['price'])
-                # SL = větší cena (Sell) nebo menší (Buy) — porovná s Entry
-                if others_sorted[-1]['price'] > entry['price']:
-                    result['stoploss']    = f"{others_sorted[-1]['price']:.6g}"
-                    tp = others_sorted[0]
-                else:
-                    result['stoploss']    = f"{others_sorted[0]['price']:.6g}"
-                    tp = others_sorted[-1]
+                remaining = [d for i, d in enumerate(all_non_sl) if i != mid]
+                # SL je blíže Entry cenou (menší R/R vzdálenost), TP dál
+                # → takto funguje pro Buy i Sell
+                remaining.sort(key=lambda d: abs(d['price'] - entry['price']))
+                sl_band = remaining[0]   # blíže Entry = SL
+                tp      = remaining[-1]  # dál od Entry = TP
+                result['stoploss'] = f"{sl_band['price']:.6g}"
+                debug_lines.append(f"  3-band-no-red: SL(closest)={sl_band['price']}  TP(farthest)={tp['price']}")
             else:
-                # 2 bary bez červené: vyšší na obrazovce = bud entry (sell) nebo tp (buy)
-                # Prozatím přiřaď vyšší cenu = entry (nejčastější případ Sell)
-                prices_sorted = sorted(all_non_sl, key=lambda d: d['price'], reverse=True)
-                entry = prices_sorted[0]
-                tp    = prices_sorted[1]
+                # 2 pásma bez červené: Entry = prostřední ze dvou → nem možné určit přesně
+                # Použij Y polohu: vyšší na obrazovce (menší Y) = výše = u Buy = TP, u Sell = SL
+                # Nechme to na post-processingu — přiřaď tentativně podle Y
+                by_y = sorted(all_non_sl, key=lambda d: d['y_mid'])  # seřaď: top→bottom
+                # Pro Buy: TP nahoře, Entry dole (SL chybí)
+                # Pro Sell: SL nahoře, Entry dole (chybí TP)
+                # Bezpečnější: vyšší cena = TP (častěji správné pro oba směry)
+                by_price = sorted(all_non_sl, key=lambda d: d['price'], reverse=True)
+                # Pokud Y a cena souhlasí (top = higher price), jsme v normálu
+                if by_y[0]['price'] > by_y[1]['price']:
+                    # Horní pásmo má vyšší cenu → Buy (TP nahoře) nebo Sell (SL nahoře)
+                    # Přiřaď horní jako TP tentativně — post-proc opraví pokud je to SL
+                    entry = by_y[1]   # spodní = Entry
+                    tp    = by_y[0]   # horní = TP (nebo SL — opraví post-proc)
+                else:
+                    entry = by_y[0]
+                    tp    = by_y[1]
+                debug_lines.append(f"  2-band-no-red: tentative Entry={entry['price']}  TP={tp['price']}")
 
         result['vstupni_hodnota'] = f"{entry['price']:.6g}"
         result['takeprofit']      = f"{tp['price']:.6g}"
@@ -3603,14 +3617,30 @@ def analyze_screenshot(image_path):
                     result.pop(_k, None)
             except (ValueError, TypeError): pass
 
-    # ── 7. Směr z poměru cen ─────────────────────────────────────────────────
+    # ── 7. Směr z poměru cen + auto-oprava prohozených hodnot ───────────────
     try:
         entry = float(result.get('vstupni_hodnota', 0))
         sl    = float(result.get('stoploss', 0))
         tp    = float(result.get('takeprofit', 0))
         if entry and sl and tp:
-            if tp > entry > sl:   result['smer'] = 'Buy'
-            elif sl > entry > tp: result['smer'] = 'Sell'
+            if tp > entry > sl:
+                result['smer'] = 'Buy'
+            elif sl > entry > tp:
+                result['smer'] = 'Sell'
+            else:
+                # Hodnoty nedávají smysl — zkus prohozené SL↔TP
+                if sl > tp > entry or entry > tp > sl:
+                    # Prohoď TP a SL
+                    result['stoploss'], result['takeprofit'] = result.get('takeprofit',''), result.get('stoploss','')
+                    sl, tp = tp, sl
+                    debug_lines.append(f"  postproc: prohodil SL↔TP → SL={sl} TP={tp}")
+                    if tp > entry > sl:   result['smer'] = 'Buy'
+                    elif sl > entry > tp: result['smer'] = 'Sell'
+        elif entry and tp and not sl:
+            # Máme jen Entry + TP (chybí SL) — Entry by mělo být MEZI SL a TP
+            # Alespoň nastav smer tentativně podle polohy TP vůči Entry
+            if tp > entry: result['smer'] = 'Buy'
+            else:          result['smer'] = 'Sell'
     except (ValueError, TypeError): pass
 
     debug_lines.append(f"FINAL_RESULT: {result}")
