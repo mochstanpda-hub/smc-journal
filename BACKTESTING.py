@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.49"
+VERSION = "1.5.50"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.50 | OCR čas zavření — fallback skenuje spodních 20 % obrazu i celý obrázek i když byl otevírací čas nalezen; parse_all_dt přidán formát ISO + unicode apostrofy + formát 2
 1.5.49 | OCR — kritická oprava _parse_price: dec[:2] → dec[:5]; forex ceny (1.18225) se správně parsují na 5 desetinných míst místo zkrácení na 2 (1.18)
 1.5.48 | OCR — detekce žlutého labelu (aktuální tržní cena EURUSD 1.17926) jako samostatná třída 'yellow'; žlutý band se přeskakuje a nevstupuje do přiřazení Entry/SL/TP; opraveny 3-band a 2-band případy pro Buy i Sell
 1.5.47 | OCR analýza screenshotu — opravena logika přiřazení Entry/SL/TP: 3 pásma bez červené (Buy) dostávala prohozené SL↔TP; 2 pásma bez červené předpokládala Sell; rozšířen scan strip (5/6 %); post-processing auto-prohodí SL↔TP pokud jsou hodnoty nekonzistentní
@@ -3530,17 +3531,22 @@ def analyze_screenshot(image_path):
                  'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
 
     def parse_all_dt(txt):
+        # Normalizuj — odstraň unicode apostrofy, uvozovky, nahraď _ mezerou
+        txt = txt.replace('’', '').replace('‘', '').replace('“', '').replace('”', '')
         txt = txt.encode('ascii', 'ignore').decode('ascii')
         txt = re.sub(r"['\"`]", '', txt)
+        txt = txt.replace('_', ' ')
         found = []
+        # Formát 1: "Wed 04 Feb 26 10:00" nebo "04 Feb 2026 10:00"
         for m in re.finditer(
-                r'(?:\w{3,9}\s+)?(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s*(\d{2,4})[,\s]+(\d{1,2}:\d{2})', txt):
+                r'(?:\w{3,9}\s+)?(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s*[,\s\']*(\d{2,4})[,\s]+(\d{1,2}:\d{2})', txt):
             day, mon, yr, tim = m.groups()
             mo = month_map.get(mon.lower())
             if mo:
                 yr4 = yr if len(yr) == 4 else '20' + yr
                 dt  = f"{yr4}-{mo}-{day.zfill(2)} {tim}"
                 if dt not in found: found.append(dt)
+        # Formát 2: "Feb 04, 2026, 10:00" nebo "Feb 04 2026 10:00"
         if not found:
             for m2 in re.finditer(
                     r'([A-Za-z]{3})[A-Za-z]*\s+(\d{1,2})[,\s]+(\d{4})[,\s]+(\d{1,2}:\d{2})', txt):
@@ -3549,6 +3555,11 @@ def analyze_screenshot(image_path):
                 if mo:
                     dt = f"{yr}-{mo}-{day.zfill(2)} {tim}"
                     if dt not in found: found.append(dt)
+        # Formát 3: "2026-02-04 10:00" (ISO)
+        for m3 in re.finditer(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}:\d{2})', txt):
+            yr, mo, day, tim = m3.groups()
+            dt = f"{yr}-{mo}-{day} {tim}"
+            if dt not in found: found.append(dt)
         return found
 
     debug_lines.append(f"  prices_before_postproc={result}")
@@ -3593,20 +3604,46 @@ def analyze_screenshot(image_path):
     if len(seen_dt) >= 1: open_time  = seen_dt[0]
     if len(seen_dt) >= 2: close_time = seen_dt[-1]
 
-    if not open_time:
-        gray_full = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        big_full  = cv2.resize(gray_full, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        all_times = []
-        for thr_val in [160, 100, 80]:
-            _, thr_img = cv2.threshold(big_full, thr_val, 255, cv2.THRESH_BINARY)
-            full_txt   = pytesseract.image_to_string(thr_img, config='--psm 6 --oem 3')
+    # Fallback — skenuj spodní část obrazovky textem (hledáme oba časy)
+    if not open_time or not close_time:
+        # Skenuj celý spodek obrázku (posledních 20 % výšky) — tam jsou replay časy
+        bottom_y  = int(h * 0.80)
+        bottom    = img[bottom_y:, :]
+        gray_bot  = cv2.cvtColor(bottom, cv2.COLOR_BGR2GRAY)
+        big_bot   = cv2.resize(gray_bot, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        all_times = list(seen_dt)  # začni s tím co už máme z blue boxů
+
+        for thr_val, do_inv in [(160, True), (100, False), (80, False), (200, True)]:
+            _, thr_img = cv2.threshold(big_bot, thr_val, 255, cv2.THRESH_BINARY)
+            if do_inv: thr_img = cv2.bitwise_not(thr_img)
+            full_txt = pytesseract.image_to_string(thr_img, config='--psm 6 --oem 3')
+            debug_lines.append(f"  fallback_bottom thr={thr_val} inv={do_inv}: '{full_txt[:120].strip()}'")
             for line in full_txt.splitlines():
                 for dt in parse_all_dt(line):
-                    if dt not in all_times: all_times.append(dt)
-        try: all_times.sort(key=lambda s: __import__('datetime').datetime.strptime(s, "%Y-%m-%d %H:%M"))
-        except: pass
-        if all_times:        open_time  = all_times[0]
-        if len(all_times)>=2: close_time = all_times[-1]
+                    if dt not in all_times:
+                        all_times.append(dt)
+
+        # Pokud spodek nestačil, zkus celý obrázek
+        if len(all_times) < 2:
+            gray_full = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            big_full  = cv2.resize(gray_full, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            for thr_val in [160, 100, 80]:
+                _, thr_img = cv2.threshold(big_full, thr_val, 255, cv2.THRESH_BINARY)
+                full_txt   = pytesseract.image_to_string(thr_img, config='--psm 6 --oem 3')
+                for line in full_txt.splitlines():
+                    for dt in parse_all_dt(line):
+                        if dt not in all_times:
+                            all_times.append(dt)
+
+        try:
+            all_times.sort(key=lambda s: datetime.strptime(s, "%Y-%m-%d %H:%M"))
+        except Exception:
+            pass
+
+        if not open_time and all_times:
+            open_time = all_times[0]
+        if not close_time and len(all_times) >= 2:
+            close_time = all_times[-1]
 
     debug_lines.append(f"\nFINAL_TIMES: open={open_time}  close={close_time}")
 
