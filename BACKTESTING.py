@@ -3703,6 +3703,318 @@ def analyze_screenshot(image_path):
 
     return result
 
+
+def analyze_screenshot_tomas(image_path):
+    """
+    Analyzuje TradingView screenshot ve stylu Tomáše:
+      • PINK / salmon label  → aktuální tržní cena (přeskočit, jako žlutá u Patrika)
+      • CYAN / teal label    → obchodní hladina (Entry / TP)
+      • YELLOW label         → obchodní hladina (Entry / TP) — u Tomáše NENÍ skip!
+      • RED label            → SL (stejně jako u Patrika)
+    Zbytek logiky (OCR, band assignment, post-processing) identický s Patrikovým profilem.
+    """
+    import cv2, pytesseract, re
+    import numpy as np
+
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError("Nelze načíst obrázek.")
+
+    h, w = img.shape[:2]
+    result = {}
+    debug_lines = []
+
+    # ── 1. Detekce světlého/tmavého pozadí ───────────────────────────────────
+    _bg_sample  = img[70:130, max(0, w - 60):]
+    _is_dark_bg = float(np.mean(_bg_sample)) < 80
+    debug_lines.append(f"[TOMAS DEBUG] img={w}x{h}  dark_bg={_is_dark_bg}")
+
+    # ── 2. Scan pruhu vpravo — detekce barevných pásů ────────────────────────
+    label_pct   = 0.05 if _is_dark_bg else 0.06
+    label_w     = max(70, int(w * label_pct))
+    label_strip = img[:, max(0, w - label_w):]
+    debug_lines.append(f"  label_w={label_w}")
+
+    raw_bands = []
+    cur_cls   = None
+    cur_start = None
+
+    for y in range(h):
+        row   = label_strip[y].astype(np.float32)
+        b_arr = row[:, 0]; g_arr = row[:, 1]; r_arr = row[:, 2]
+        mx    = np.maximum(np.maximum(b_arr, g_arr), r_arr)
+        mn    = np.minimum(np.minimum(b_arr, g_arr), r_arr)
+        sat_m = (mx - mn) > 35
+        if not np.any(sat_m):
+            cls = None
+        else:
+            b = float(np.mean(b_arr[sat_m]))
+            g = float(np.mean(g_arr[sat_m]))
+            r = float(np.mean(r_arr[sat_m]))
+            sat = max(b, g, r) - min(b, g, r)
+            if sat < 25:
+                cls = None
+            elif r > b * 1.2 and r > g * 1.2:
+                # Červená — SL (stejné jako u Patrika)
+                # POZOR: musí být PŘED pink testem, protože pure red by prošlo pink podmínkou
+                # Čistě červená: r >> g a r >> b (g a b relativně malé)
+                if g < r * 0.75 and b < r * 0.75:
+                    cls = 'red'
+                # Pink/salmon: r dominantní, ale g a b jsou výrazné (pastelová)
+                elif r > 160 and g > 90 and b > 80 and r > g * 1.15 and r > b * 1.15 and (g - b) < 70:
+                    cls = 'pink'   # aktuální tržní cena → přeskočit
+                else:
+                    cls = 'red'    # ostatní červeno-přídech → SL
+            elif b > r * 1.4 and (g > r * 1.2 or b > 150):
+                cls = 'other'   # CYAN / teal → obchodní hladina
+            elif r > 140 and g > 120 and b < 80 and r > b * 2.0 and g > b * 1.5:
+                cls = 'other'   # YELLOW → obchodní hladina (u Tomáše NENÍ skip!)
+            elif (b > r * 1.4 or g > r * 1.4):
+                cls = 'other'   # modrá / zelená obecně
+            else:
+                cls = None
+
+        if cls != cur_cls:
+            if cur_cls and cur_start is not None and (y - cur_start) >= 3:
+                raw_bands.append((cur_start, y, cur_cls))
+            cur_cls   = cls
+            cur_start = y if cls else None
+
+    def _merge(bl, gap=10):
+        if not bl: return []
+        bl = sorted(bl)
+        out = [list(bl[0])]
+        for b in bl[1:]:
+            p = out[-1]
+            if b[2] == p[2] and b[0] - p[1] <= gap:
+                p[1] = b[1]
+            else:
+                out.append(list(b))
+        return [tuple(x) for x in out]
+
+    merged = _merge(raw_bands)
+    bands  = [b for b in merged if (b[1] - b[0]) <= 55]
+    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
+
+    # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
+    ocr_w     = max(90, int(w * (0.06 if _is_dark_bg else 0.11)))
+    ocr_strip = img[:, max(0, w - ocr_w):]
+    debug_lines.append(f"  ocr_w={ocr_w}")
+
+    def _parse_price(text):
+        text = text.strip().replace(' ', '')
+        nums = re.findall(r'\d+', text)
+        if len(nums) >= 2:
+            try:
+                dec = nums[-1][:5]
+                v   = float(''.join(nums[:-1]) + '.' + dec)
+                if v > 0.01: return v
+            except: pass
+        for n in re.findall(r'\d+[.,]\d+', text.replace(',', '.')):
+            try:
+                v = float(n)
+                if v > 0.01: return v
+            except: pass
+        for n in re.findall(r'\d{4,}', text):
+            try:
+                v = float(n)
+                if v > 0.01: return v
+            except: pass
+        return None
+
+    def ocr_price_band(y_s, y_e, tag=''):
+        pad = 8
+        roi = ocr_strip[max(0, y_s - pad):min(h, y_e + pad), :]
+        if roi.size == 0: return None
+        roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        gray    = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
+        if _is_dark_bg:
+            attempts = [(130, True), (100, True), (160, False)]
+        else:
+            attempts = [(160, True), (120, True), (80, True), (160, False)]
+        best_val = None
+        for thr_val, do_inv in attempts:
+            _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
+            if do_inv: thr = cv2.bitwise_not(thr)
+            txt = pytesseract.image_to_string(
+                thr, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'
+            )
+            debug_lines.append(f"    ocr_t[{tag}] thr={thr_val} inv={do_inv}: '{txt.strip()}'")
+            v = _parse_price(txt)
+            if v:
+                best_val = v
+                break
+        try:
+            cv2.imwrite(f'C:\\obd\\debug_tomas_band_{tag}.png', roi_big)
+        except: pass
+        return best_val
+
+    # Sbírej (y_mid, color_class, price) — přeskoč pink (= aktuální cena)
+    detected = []
+    for y_s, y_e, cls in bands:
+        if cls == 'pink':
+            debug_lines.append(f"  band pink[{y_s}-{y_e}] → SKIP (aktuální cena Tomáš)")
+            continue
+        tag   = f"{cls}_{y_s}"
+        price = ocr_price_band(y_s, y_e, tag=tag)
+        y_mid = (y_s + y_e) / 2
+        debug_lines.append(f"  band {cls}[{y_s}-{y_e}] y_mid={y_mid:.0f} → price={price}")
+        if price and price > 0.1:
+            detected.append({'y_mid': y_mid, 'cls': cls, 'price': price})
+
+    # ── 4. Přiřazení SL / Entry / TP ─────────────────────────────────────────
+    red_bands   = [d for d in detected if d['cls'] == 'red']
+    other_bands = [d for d in detected if d['cls'] == 'other']
+
+    if red_bands:
+        best_sl = sorted(red_bands, key=lambda d: d['price'])[0]
+        result['stoploss'] = f"{best_sl['price']:.6g}"
+        debug_lines.append(f"  → SL(red)={best_sl['price']}")
+
+    all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
+
+    if len(all_non_sl) == 1:
+        result['vstupni_hodnota'] = f"{all_non_sl[0]['price']:.6g}"
+        debug_lines.append(f"  → Entry(only)={all_non_sl[0]['price']}")
+    elif len(all_non_sl) >= 2:
+        if red_bands:
+            sl_y    = red_bands[0]['y_mid']
+            by_dist = sorted(all_non_sl, key=lambda d: abs(d['y_mid'] - sl_y))
+            entry   = by_dist[0]
+            tp      = by_dist[1]
+        else:
+            if len(all_non_sl) >= 3:
+                mid   = len(all_non_sl) // 2
+                entry = all_non_sl[mid]
+                remaining = [d for i, d in enumerate(all_non_sl) if i != mid]
+                remaining.sort(key=lambda d: abs(d['price'] - entry['price']))
+                sl_band = remaining[0]
+                tp      = remaining[-1]
+                result['stoploss'] = f"{sl_band['price']:.6g}"
+                debug_lines.append(f"  3-band-no-red: SL(closest)={sl_band['price']}  TP(farthest)={tp['price']}")
+            else:
+                by_y = sorted(all_non_sl, key=lambda d: d['y_mid'])
+                if by_y[0]['price'] > by_y[1]['price']:
+                    entry = by_y[1]
+                    tp    = by_y[0]
+                else:
+                    entry = by_y[0]
+                    tp    = by_y[1]
+                debug_lines.append(f"  2-band-no-red: tentative Entry={entry['price']}  TP={tp['price']}")
+        result['vstupni_hodnota'] = f"{entry['price']:.6g}"
+        result['takeprofit']      = f"{tp['price']:.6g}"
+        debug_lines.append(f"  → Entry={entry['price']}  TP={tp['price']}")
+
+    # ── 5. Symbol z názvu souboru / hlavičky ─────────────────────────────────
+    _KNOWN_SYMS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','GBPJPY','USDCAD',
+                   'AUDUSD','NAS100','US30','US500','BTCUSD','DAX',
+                   'NZDUSD','USDCHF','EURJPY','EURGBP']
+    fname = os.path.basename(image_path).upper()
+    for _s in _KNOWN_SYMS:
+        if _s in fname:
+            result['symbol'] = _s
+            break
+    if not result.get('symbol'):
+        top_strip = img[:60, :]
+        gray_top  = cv2.cvtColor(top_strip, cv2.COLOR_BGR2GRAY)
+        big_top   = cv2.resize(gray_top, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        _, thr_top = cv2.threshold(big_top, 140, 255, cv2.THRESH_BINARY)
+        thr_top    = cv2.bitwise_not(thr_top)
+        top_txt    = pytesseract.image_to_string(thr_top, config='--psm 6 --oem 3').upper()
+        for _s in _KNOWN_SYMS:
+            if _s in top_txt:
+                result['symbol'] = _s
+                debug_lines.append(f"  symbol from header: {_s}")
+                break
+
+    # ── 6. Post-processing: rozsah cen ───────────────────────────────────────
+    _price_ranges = {
+        'XAUUSD': (1400, 5500),   'EURUSD': (0.5,  2.5),
+        'GBPUSD': (1.0,  2.5),   'USDJPY': (80,   200),
+        'GBPJPY': (100,  280),   'USDCAD': (1.0,  2.0),
+        'AUDUSD': (0.5,  1.2),   'NAS100': (8000, 25000),
+        'US30':  (20000, 50000), 'US500':  (2000,  7000),
+        'BTCUSD':(5000, 120000), 'DAX':   (8000,  22000),
+    }
+    _sym = result.get('symbol')
+    if _sym in _price_ranges:
+        _lo, _hi = _price_ranges[_sym]
+        for _k in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
+            try:
+                if result.get(_k) and not (_lo <= float(result[_k]) <= _hi):
+                    debug_lines.append(f"  postproc: removed {_k}={result[_k]} (out of range {_lo}-{_hi} for {_sym})")
+                    result.pop(_k, None)
+            except (ValueError, TypeError): pass
+
+    # ── 7. Směr z poměru cen ─────────────────────────────────────────────────
+    try:
+        entry = float(result.get('vstupni_hodnota', 0))
+        sl    = float(result.get('stoploss', 0))
+        tp    = float(result.get('takeprofit', 0))
+        if entry and sl and tp:
+            if tp > entry > sl:
+                result['smer'] = 'Buy'
+            elif sl > entry > tp:
+                result['smer'] = 'Sell'
+            else:
+                if sl > tp > entry or entry > tp > sl:
+                    result['stoploss'], result['takeprofit'] = result.get('takeprofit',''), result.get('stoploss','')
+                    sl, tp = tp, sl
+                    debug_lines.append(f"  postproc: prohodil SL↔TP → SL={sl} TP={tp}")
+                    if tp > entry > sl:   result['smer'] = 'Buy'
+                    elif sl > entry > tp: result['smer'] = 'Sell'
+        elif entry and tp and not sl:
+            if tp > entry: result['smer'] = 'Buy'
+            else:          result['smer'] = 'Sell'
+    except (ValueError, TypeError): pass
+
+    debug_lines.append(f"FINAL_RESULT_TOMAS: {result}")
+    try:
+        with open(r'C:\obd\time_debug_tomas.txt', 'w', encoding='utf-8') as dbf:
+            dbf.write('\n'.join(debug_lines))
+    except: pass
+
+    return result
+
+
+def _analyze_screenshot_dispatch(image_path):
+    """
+    Automaticky vybere správný profil (Patrik / Tomáš) podle toho, kolik
+    platných cen se podaří rozpoznat.
+    • Zkusí Patrikův profil (analyze_screenshot) — spočítá nalezené ceny.
+    • Pokud najde < 2 platné ceny, zkusí Tomášův profil (analyze_screenshot_tomas).
+    • Vrátí výsledek profilu s více nalezenými cenami (nebo Tomášův jako zálohu).
+    """
+    def _count_prices(r):
+        keys = ('vstupni_hodnota', 'stoploss', 'takeprofit')
+        return sum(1 for k in keys if r.get(k))
+
+    try:
+        result_patrik = analyze_screenshot(image_path)
+        cnt_p = _count_prices(result_patrik)
+    except Exception:
+        result_patrik = {}
+        cnt_p = 0
+
+    if cnt_p >= 2:
+        # Patrikův profil uspěl — použij ho
+        return result_patrik
+
+    # Patrikův profil nenašel dost cen — zkus Tomáše
+    try:
+        result_tomas = analyze_screenshot_tomas(image_path)
+        cnt_t = _count_prices(result_tomas)
+    except Exception:
+        result_tomas = {}
+        cnt_t = 0
+
+    if cnt_t >= cnt_p:
+        return result_tomas
+    return result_patrik
+
+
 # ==============================================================================
 # SPRÁVCE ÚČTŮ — FTMO Challenge / Verifikace / Funded / Osobní
 # ==============================================================================
@@ -5831,7 +6143,7 @@ def show_screenshot_dialog(prefill_callback):
         return
 
     try:
-        result = analyze_screenshot(path)
+        result = _analyze_screenshot_dispatch(path)
     except Exception as e:
         messagebox.showerror("Chyba analýzy", f"Nepodařilo se zpracovat screenshot:\n{e}")
         return
