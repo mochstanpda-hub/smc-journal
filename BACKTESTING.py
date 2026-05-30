@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.56"
+VERSION = "1.5.57"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -158,6 +158,13 @@ def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=No
                   font=('Segoe UI', 9), padx=10, pady=8, relief='flat',
                   cursor='hand2', command=win.destroy).pack(side='left', padx=(10, 0))
     else:
+        def _recheck():
+            win.destroy()
+            root.after(100, lambda: check_for_updates(silent=False, startup=False))
+        tk.Button(bf, text="🔍  Vyhledat aktualizace", bg='#1e3a5f', fg='#60a5fa',
+                  font=('Segoe UI', 10, 'bold'), padx=14, pady=8, relief='flat',
+                  cursor='hand2', activebackground='#1e40af',
+                  command=_recheck).pack(side='left')
         tk.Button(bf, text="Zavřít", bg=DT_BTN, fg=DT_TEXT,
                   font=('Segoe UI', 10), padx=18, pady=8, relief='flat',
                   cursor='hand2', command=win.destroy).pack(side='right')
