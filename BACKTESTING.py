@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.54"
+VERSION = "1.5.55"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3844,27 +3844,30 @@ def analyze_screenshot_tomas(image_path):
             if _prev == 'other' and _next == 'other':
                 _boundary_red_ys.add(_ys)
 
-    # Tomáš používá velké barevné ZÓNY — cena (text) může být kdekoliv v zóně.
-    # Malé pásy (≤ 55px): zpracuj celý pás.
-    # Velké pásy (> 55px): skenuj po krocích STEP px — label je kdekoli v zóně.
-    STEP = 22
+    # Tomáš používá velké barevné ZÓNY.
+    # Cenový label (chip) je vždy na HRANICI zóny (začátek nebo konec).
+    # → Skenuj jen horní a dolní okraj každé velké zóny, ne její vnitřek.
+    # Vnitřek zóny obsahuje TradingView gridlines (pravidelné čáry každých ~22px)
+    # které by OCR četlo jako background čísla místo skutečných label cen.
+    EDGE_PX = 24   # výška okrajového plátku (px)
     bands = []
     for y_s, y_e, cls in merged:
         h_band = y_e - y_s
         if h_band <= 55:
             bands.append((y_s, y_e, cls))
         elif h_band <= 1500:
-            y = y_s
-            while y < y_e - 8:
-                se = min(y + STEP, y_e)
-                if se - y >= 8:
-                    bands.append((y, se, cls))
-                y += STEP
-    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands(count={len(bands)})={bands[:15]}")
+            # Horní hrana — kde je cena na začátku zóny (TP/Entry/SL label)
+            bands.append((y_s, min(y_s + EDGE_PX, y_e), cls))
+            # Dolní hrana — kde je cena na konci zóny
+            if y_e - EDGE_PX > y_s + EDGE_PX:
+                bands.append((max(y_e - EDGE_PX, y_s), y_e, cls))
+    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
 
     # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
-    # Úzký pruh jen pro price scale (ne chart body) — vyhne se anotačnímu textu v grafu
-    ocr_w     = max(70, int(w * 0.032))   # ~123px pro 3840px → jen price scale
+    # Šíře OCR pruhu: musí zachytit celý price label "1.23573" včetně "1." prefixu.
+    # 200px ≈ 5.2 % → pokrývá celý TradingView price scale (pravý okraj).
+    # Anotace v grafu ("Target: 0.01467...") jsou v levém chart body → bezpečné.
+    ocr_w     = max(150, int(w * 0.052))   # ~200px pro 3840px
     ocr_strip = img[:, max(0, w - ocr_w):]
     debug_lines.append(f"  ocr_w={ocr_w}")
 
@@ -3889,16 +3892,30 @@ def analyze_screenshot_tomas(image_path):
             except: pass
         return None
 
-    def ocr_price_band(y_s, y_e, tag=''):
-        pad = 8
+    def ocr_price_band(y_s, y_e, tag='', color_cls='other'):
+        pad = 10
         roi = ocr_strip[max(0, y_s - pad):min(h, y_e + pad), :]
         if roi.size == 0: return None
         roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
         gray    = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
+
+        # Thresholds jsou závislé na barvě pozadí labelu:
+        #   RED label:    bg grayscale ≈ 40-80   → thr=130 inv=True pracuje
+        #   CYAN label:   bg grayscale ≈ 130-160 → potřeba thr=165-180 inv=True
+        #   YELLOW label: bg grayscale ≈ 180-210 → potřeba thr=215-230 inv=True
+        #   (Bílý text má grayscale 255 — threshold musí být MEZI barvou pozadí a 255)
         if _is_dark_bg:
-            attempts = [(130, True), (100, True), (160, False)]
+            if color_cls == 'red':
+                attempts = [(80,  True), (130, True), (100, True), (160, False)]
+            elif color_cls == 'other':
+                # Zkus celé spektrum — nevíme jestli je label cyan nebo yellow
+                attempts = [(165, True), (180, True), (200, True), (215, True),
+                            (230, True), (130, True), (150, True), (100, True), (160, False)]
+            else:
+                attempts = [(130, True), (160, True), (100, True), (160, False)]
         else:
             attempts = [(160, True), (120, True), (80, True), (160, False)]
+
         best_val = None
         for thr_val, do_inv in attempts:
             _, thr = cv2.threshold(gray, thr_val, 255, cv2.THRESH_BINARY)
@@ -3941,7 +3958,7 @@ def analyze_screenshot_tomas(image_path):
             debug_lines.append(f"  band pink[{y_s}-{y_e}] → SKIP (aktuální cena Tomáš)")
             continue
         tag   = f"{cls}_{y_s}"
-        price = ocr_price_band(y_s, y_e, tag=tag)
+        price = ocr_price_band(y_s, y_e, tag=tag, color_cls=cls)
         y_mid = (y_s + y_e) / 2
         debug_lines.append(f"  band {cls}[{y_s}-{y_e}] y_mid={y_mid:.0f} → price={price}")
         if price and _pr_lo <= price <= _pr_hi:
