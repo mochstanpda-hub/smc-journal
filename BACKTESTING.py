@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.48"
+VERSION = "1.5.49"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.49 | OCR — kritická oprava _parse_price: dec[:2] → dec[:5]; forex ceny (1.18225) se správně parsují na 5 desetinných míst místo zkrácení na 2 (1.18)
 1.5.48 | OCR — detekce žlutého labelu (aktuální tržní cena EURUSD 1.17926) jako samostatná třída 'yellow'; žlutý band se přeskakuje a nevstupuje do přiřazení Entry/SL/TP; opraveny 3-band a 2-band případy pro Buy i Sell
 1.5.47 | OCR analýza screenshotu — opravena logika přiřazení Entry/SL/TP: 3 pásma bez červené (Buy) dostávala prohozené SL↔TP; 2 pásma bez červené předpokládala Sell; rozšířen scan strip (5/6 %); post-processing auto-prohodí SL↔TP pokud jsou hodnoty nekonzistentní
 1.5.46 | Firebase — oprava KeyError 'level': get_rank_info() nemá klíč level, správně je rank_idx+1
@@ -3296,20 +3297,27 @@ def analyze_screenshot(image_path):
     debug_lines.append(f"  ocr_w={ocr_w}")
 
     def _parse_price(text):
-        """Parsuje string s cenou: '3,378.64' nebo '3378.64' nebo '337864' → float."""
+        """Parsuje string s cenou — podporuje forex (1.18225), gold (2378.64), indexy (43500.25)."""
         text = text.strip().replace(' ', '')
         nums = re.findall(r'\d+', text)
         if len(nums) >= 2:
             try:
-                dec = nums[-1][:2]            # max 2 decimal digits
+                # Forex má až 5 desetinných míst (1.18225), gold/indexy 2 (2378.64)
+                dec = nums[-1][:5]   # max 5 decimal digits
                 v   = float(''.join(nums[:-1]) + '.' + dec)
-                if v > 0.1: return v
+                if v > 0.01: return v
             except: pass
-        # Fallback: hledej čísla >= 3 cifer s tečkou
-        for n in re.findall(r'\d{3,}\.?\d*', text.replace(',', '.')):
+        # Fallback: hledej číslo s tečkou nebo čárkou
+        for n in re.findall(r'\d+[.,]\d+', text.replace(',', '.')):
             try:
                 v = float(n)
-                if v > 0.1: return v
+                if v > 0.01: return v
+            except: pass
+        # Fallback 2: celé číslo >= 4 cifry (indexy, BTC)
+        for n in re.findall(r'\d{4,}', text):
+            try:
+                v = float(n)
+                if v > 0.01: return v
             except: pass
         return None
 
