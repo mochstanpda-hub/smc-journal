@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.52"
+VERSION = "1.5.54"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -787,6 +787,40 @@ FIREBASE_CONFIG_FILE = os.path.join(_APP_DIR, 'firebase_config.json')
 
 # Soubor s vlastními cestami projektů (globální, mimo projekt)
 PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
+
+# ── DEBUG LOG ────────────────────────────────────────────────────────────────
+# Centrální debug soubor — vždy v adresáři programu (C:\SMC\debug_log.txt)
+# Max velikost: 2 MB → pak se automaticky otočí (přejmenuje na debug_log.bak)
+DEBUG_LOG_FILE    = os.path.join(_APP_DIR, 'debug_log.txt')
+DEBUG_LOG_MAX_MB  = 2
+_DEBUG_ENABLED    = True   # nastavit na False pro vypnutí bez nutnosti restartu
+
+def _dbg_log(section: str, message: str, level: str = 'INFO'):
+    """
+    Připíše jeden záznam do C:\\SMC\\debug_log.txt.
+    section  … krátký tag oblasti (např. 'OCR', 'XP', 'FIREBASE', 'TRADE', 'STARTUP')
+    message  … libovolný text (může být víceřádkový)
+    level    … 'INFO' | 'WARN' | 'ERROR' | 'DEBUG'
+    """
+    if not _DEBUG_ENABLED:
+        return
+    try:
+        # Rotace pokud soubor překročí limit
+        if os.path.exists(DEBUG_LOG_FILE):
+            if os.path.getsize(DEBUG_LOG_FILE) > DEBUG_LOG_MAX_MB * 1024 * 1024:
+                bak = DEBUG_LOG_FILE.replace('.txt', '.bak')
+                try:
+                    if os.path.exists(bak): os.remove(bak)
+                    os.rename(DEBUG_LOG_FILE, bak)
+                except Exception:
+                    pass
+        ts   = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        line = f"[{ts}] [{level:<5}] [{section}] {message}\n"
+        with open(DEBUG_LOG_FILE, 'a', encoding='utf-8') as _lf:
+            _lf.write(line)
+    except Exception:
+        pass   # debug log nikdy nesmí shodit program
+# ─────────────────────────────────────────────────────────────────────────────
 
 def load_project_paths():
     try:
@@ -2797,12 +2831,14 @@ def pridat_obchod():
             if editing_trade_index < len(trades):
                 trades[editing_trade_index] = d
                 _save_trades_file(trades, d)
+                _dbg_log('TRADE', f"EDIT #{editing_trade_index}: {d.get('symbol')} {d.get('smer')} výsledek={d.get('vysledek')} zisk={d.get('zisk_mena')} projekt={os.path.basename(DATA_FILE)}")
                 messagebox.showinfo("OK", "Obchod aktualizován."); editing_trade_index = None; save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
                 try: award_xp_for_trade(d, is_edit=True, parent_win=root)
                 except Exception: pass
         else:
             trades.append(d)
             _save_trades_file(trades, d)
+            _dbg_log('TRADE', f"NOVÝ: {d.get('symbol')} {d.get('smer')} výsledek={d.get('vysledek')} zisk={d.get('zisk_mena')} projekt={os.path.basename(DATA_FILE)}")
             messagebox.showinfo("OK", "Obchod uložen.")
             try: award_xp_for_trade(d, is_edit=False, parent_win=root)
             except Exception: pass
@@ -3696,10 +3732,12 @@ def analyze_screenshot(image_path):
     except (ValueError, TypeError): pass
 
     debug_lines.append(f"FINAL_RESULT: {result}")
+    _detail = '\n'.join(debug_lines)
     try:
         with open(r'C:\obd\time_debug.txt', 'w', encoding='utf-8') as dbf:
-            dbf.write('\n'.join(debug_lines))
+            dbf.write(_detail)
     except: pass
+    _dbg_log('OCR-PATRIK', f"file={os.path.basename(image_path)}\n{_detail}", level='DEBUG')
 
     return result
 
@@ -3795,22 +3833,38 @@ def analyze_screenshot_tomas(image_path):
         return [tuple(x) for x in out]
 
     merged = _merge(raw_bands)
-    # Tomáš používá velké barevné ZÓNY (ne tenké čáry) — cena je na hraně zóny.
-    # • Malé pásy (≤ 55px): zpracuj normálně (price label = celý pás)
-    # • Velké pásy (> 55px): ořež na horní a dolní hranu (25px), tam je text
-    EDGE = 25
+
+    # Zaznamenej které červené basy jsou "hraničními artefakty" (leží MEZI dvěma 'other' zónami)
+    # → vznikají na přechodu cyan→šedá→yellow → nejsou skutečný SL
+    _boundary_red_ys = set()
+    for _i, (_ys, _ye, _cls) in enumerate(merged):
+        if _cls == 'red':
+            _prev = merged[_i - 1][2] if _i > 0 else None
+            _next = merged[_i + 1][2] if _i < len(merged) - 1 else None
+            if _prev == 'other' and _next == 'other':
+                _boundary_red_ys.add(_ys)
+
+    # Tomáš používá velké barevné ZÓNY — cena (text) může být kdekoliv v zóně.
+    # Malé pásy (≤ 55px): zpracuj celý pás.
+    # Velké pásy (> 55px): skenuj po krocích STEP px — label je kdekoli v zóně.
+    STEP = 22
     bands = []
     for y_s, y_e, cls in merged:
         h_band = y_e - y_s
         if h_band <= 55:
             bands.append((y_s, y_e, cls))
-        elif h_band <= 1000:   # jen rozumně velké zóny (ne celý obraz)
-            bands.append((y_s,          min(y_s + EDGE, y_e), cls))   # horní hrana
-            bands.append((max(y_e - EDGE, y_s), y_e,          cls))   # dolní hrana
-    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
+        elif h_band <= 1500:
+            y = y_s
+            while y < y_e - 8:
+                se = min(y + STEP, y_e)
+                if se - y >= 8:
+                    bands.append((y, se, cls))
+                y += STEP
+    debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands(count={len(bands)})={bands[:15]}")
 
     # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
-    ocr_w     = max(90, int(w * (0.06 if _is_dark_bg else 0.11)))
+    # Úzký pruh jen pro price scale (ne chart body) — vyhne se anotačnímu textu v grafu
+    ocr_w     = max(70, int(w * 0.032))   # ~123px pro 3840px → jen price scale
     ocr_strip = img[:, max(0, w - ocr_w):]
     debug_lines.append(f"  ocr_w={ocr_w}")
 
@@ -3862,8 +3916,26 @@ def analyze_screenshot_tomas(image_path):
         except: pass
         return best_val
 
+    # Rychlý symbol lookup pro price-range filtr (symbol zatím neznáme → zkus z názvu)
+    _early_sym = None
+    _fname_up  = os.path.basename(image_path).upper()
+    for _s in ['XAUUSD','EURUSD','GBPUSD','USDJPY','GBPJPY','USDCAD',
+               'AUDUSD','NAS100','US30','US500','BTCUSD','DAX','NZDUSD','USDCHF','EURJPY','EURGBP']:
+        if _s in _fname_up:
+            _early_sym = _s
+            break
+    _pr_ranges = {
+        'XAUUSD': (1400, 5500), 'EURUSD': (0.5, 2.5), 'GBPUSD': (1.0, 2.5),
+        'USDJPY': (80, 200),   'GBPJPY': (100, 280),  'USDCAD': (1.0, 2.0),
+        'AUDUSD': (0.5, 1.2),  'NAS100': (8000, 25000),'US30':  (20000, 50000),
+        'US500':  (2000, 7000),'BTCUSD': (5000,120000),'DAX':   (8000, 22000),
+    }
+    _pr_lo, _pr_hi = _pr_ranges.get(_early_sym, (0.001, 999999))
+
     # Sbírej (y_mid, color_class, price) — přeskoč pink (= aktuální cena)
-    detected = []
+    # Pro každou (zaokrouhlenou) cenu a třídu uchovej jen jeden zástupce (nejčistší Y-střed)
+    _seen_price_cls = {}   # (round_price, cls) → {'y_mid', 'price'}
+    raw_detected    = []
     for y_s, y_e, cls in bands:
         if cls == 'pink':
             debug_lines.append(f"  band pink[{y_s}-{y_e}] → SKIP (aktuální cena Tomáš)")
@@ -3872,37 +3944,37 @@ def analyze_screenshot_tomas(image_path):
         price = ocr_price_band(y_s, y_e, tag=tag)
         y_mid = (y_s + y_e) / 2
         debug_lines.append(f"  band {cls}[{y_s}-{y_e}] y_mid={y_mid:.0f} → price={price}")
-        if price and price > 0.1:
-            detected.append({'y_mid': y_mid, 'cls': cls, 'price': price})
+        if price and _pr_lo <= price <= _pr_hi:
+            raw_detected.append({'y_mid': y_mid, 'cls': cls, 'price': price})
+
+    # De-duplikuj: stejná cena (±0.0005) + stejná třída → ponech jen první výskyt (nejmenší y_mid)
+    detected = []
+    for d in sorted(raw_detected, key=lambda x: x['y_mid']):
+        rk = (round(d['price'], 3), d['cls'])
+        if rk not in _seen_price_cls:
+            _seen_price_cls[rk] = True
+            detected.append(d)
 
     # ── 4. Přiřazení SL / Entry / TP ─────────────────────────────────────────
     red_bands   = [d for d in detected if d['cls'] == 'red']
     other_bands = [d for d in detected if d['cls'] == 'other']
 
     if red_bands:
-        # De-duplikuj červené basy — na hranici zón vznikají false positives.
-        # Vezmi nejspodnější (největší y_mid) = skutečný SL box.
-        # Ale pokud jsou ≥2 různé cenové hladiny, vezmi nejnižší cenu (= SL u buy / sell).
-        red_prices = sorted({round(d['price'], 5) for d in red_bands})
-        if len(red_prices) == 1:
-            best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]   # nejspodnější
-        else:
-            # Více různých cen → SL je ta s největší vzdáleností od středu price clusteru
-            mid_price = sum(red_prices) / len(red_prices)
-            best_sl = sorted(red_bands, key=lambda d: abs(d['price'] - mid_price))[-1]
-        result['stoploss'] = f"{best_sl['price']:.6g}"
-        debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů, ceny={red_prices})")
+        # Filtr 1: odstraň false-positive červené na úplném vrcholu obrazu (UI lišta)
+        _no_top = [d for d in red_bands if d['y_mid'] > 200]
+        if _no_top:
+            red_bands = _no_top
 
-    # De-duplikuj 'other' basy — hrany zón vytvoří dvojice blízkých cen
-    # Seskup basy se stejnou (zaokrouhlenou) cenou → ponech jen jednoho zástupce
-    _seen_other_prices = set()
-    other_bands_dedup  = []
-    for d in sorted(other_bands, key=lambda d: d['y_mid']):
-        rk = round(d['price'], 4)
-        if rk not in _seen_other_prices:
-            _seen_other_prices.add(rk)
-            other_bands_dedup.append(d)
-    other_bands = other_bands_dedup
+        # Filtr 2: odstraň "hraniční" červené basy (leží přesně MEZI dvěma 'other' zónami)
+        _non_boundary = [d for d in red_bands
+                         if not any(abs(d['y_mid'] - _by) < 30 for _by in _boundary_red_ys)]
+        if _non_boundary:
+            red_bands = _non_boundary
+
+        # Z čistých červených: vezmi nejspodnější (largest y_mid) = skutečný SL label
+        best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]
+        result['stoploss'] = f"{best_sl['price']:.6g}"
+        debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů)")
 
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
 
@@ -4002,10 +4074,12 @@ def analyze_screenshot_tomas(image_path):
     except (ValueError, TypeError): pass
 
     debug_lines.append(f"FINAL_RESULT_TOMAS: {result}")
+    _detail = '\n'.join(debug_lines)
     try:
         with open(r'C:\obd\time_debug_tomas.txt', 'w', encoding='utf-8') as dbf:
-            dbf.write('\n'.join(debug_lines))
+            dbf.write(_detail)
     except: pass
+    _dbg_log('OCR-TOMAS', f"file={os.path.basename(image_path)}\n{_detail}", level='DEBUG')
 
     return result
 
@@ -4241,6 +4315,7 @@ def save_xp_data(data):
             json.dump(data, _f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+    _dbg_log('XP', f"XP uloženo: total_xp={data.get('total_xp',0)}  achievements={len(data.get('achievements',[]))}")
     # Auto-sync na Firebase po každém uložení XP
     try:
         firebase_sync_xp()
@@ -4301,6 +4376,7 @@ def firebase_sync_xp():
             secret   = cfg.get('secret', '').strip()
             username = cfg.get('username', '').strip()
             if not url or not username:
+                _dbg_log('FIREBASE', 'Sync přeskočen — url nebo username není nastaven', level='WARN')
                 return
             xp_data = load_xp_data()
             trades  = load_data() if DATA_FILE else []
@@ -4320,7 +4396,9 @@ def firebase_sync_xp():
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
             _fb_put(f"{url}/users/{username}.json", payload, secret=secret)
+            _dbg_log('FIREBASE', f"Sync OK → user={username} xp={payload['xp']} rank={payload['rank']} trades={total} wr={winrate}%")
         except Exception as _e:
+            _dbg_log('FIREBASE', f"Sync CHYBA: {_e}", level='ERROR')
             print(f"[Firebase] sync chyba: {_e}")
     threading.Thread(target=_sync, daemon=True).start()
 
@@ -8237,6 +8315,7 @@ def open_project(lb, mode):
         show_main_screen(n)
 
 if __name__ == "__main__":
+    _dbg_log('STARTUP', f"═══ SMC Journal PRO v{VERSION} spuštěn ═══  APP_DIR={_APP_DIR}  frozen={getattr(sys,'frozen',False)}")
     try:
         root = tk.Tk(); root.title(load_app_title()); root.geometry("1400x900")
         root.tk.call('encoding', 'system', 'utf-8')
@@ -8249,5 +8328,6 @@ if __name__ == "__main__":
         root.after(4000, lambda: check_for_updates(startup=True))
         root.mainloop()
     except Exception as e:
+        _dbg_log('STARTUP', f"FATÁLNÍ CHYBA: {e}", level='ERROR')
         if 'root' in locals(): messagebox.showerror("Fatální chyba", str(e))
         else: print(f"CRITICAL ERROR: {e}")
