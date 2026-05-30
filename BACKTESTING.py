@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.58"
+VERSION = "1.5.59"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3851,23 +3851,41 @@ def analyze_screenshot_tomas(image_path):
             if _prev == 'other' and _next == 'other':
                 _boundary_red_ys.add(_ys)
 
-    # Tomáš používá velké barevné ZÓNY.
-    # Cenový label (chip) je vždy na HRANICI zóny (začátek nebo konec).
-    # → Skenuj jen horní a dolní okraj každé velké zóny, ne její vnitřek.
-    # Vnitřek zóny obsahuje TradingView gridlines (pravidelné čáry každých ~22px)
-    # které by OCR četlo jako background čísla místo skutečných label cen.
-    EDGE_PX = 24   # výška okrajového plátku (px)
+    # Tomáš používá velké barevné ZÓNY: CYAN (TP) + ŠEDÁ (přechod) + ŽLUTÁ (Entry).
+    # Pravidlo: skenuj jen PRVNÍ a POSLEDNÍ velkou 'other' zónu.
+    # Střední (přechodové) šedé zóny dávají falešné hodnoty → přeskočit.
+    # Malé pásy (≤55px): skenuj normálně (jsou to konkrétní labely).
+    EDGE_PX = 26   # výška okrajového plátku (px)
+
+    # Seřaď velké 'other' zóny podle Y — potřebujeme vědět které jsou krajní
+    _large_other = [(ys, ye, cl) for ys, ye, cl in merged
+                    if cl not in ('red', 'pink') and (ye - ys) > 55]
+
     bands = []
     for y_s, y_e, cls in merged:
         h_band = y_e - y_s
-        if h_band <= 55:
-            bands.append((y_s, y_e, cls))
-        elif h_band <= 1500:
-            # Horní hrana — kde je cena na začátku zóny (TP/Entry/SL label)
-            bands.append((y_s, min(y_s + EDGE_PX, y_e), cls))
-            # Dolní hrana — kde je cena na konci zóny
-            if y_e - EDGE_PX > y_s + EDGE_PX:
-                bands.append((max(y_e - EDGE_PX, y_s), y_e, cls))
+        if cls in ('red',):
+            # Červené: vždy skenuj celý malý pás
+            if h_band <= 55:
+                bands.append((y_s, y_e, cls))
+        elif cls == 'pink':
+            bands.append((y_s, y_e, cls))   # přeskočeno později v sbírání
+        else:
+            # 'other' — buď malé nebo velké
+            if h_band <= 55:
+                bands.append((y_s, y_e, cls))
+            elif h_band <= 1500 and (y_s, y_e, cls) in _large_other:
+                # Velká 'other' zóna: skenuj jen pokud je PRVNÍ nebo POSLEDNÍ
+                is_first = (y_s, y_e, cls) == _large_other[0]
+                is_last  = (y_s, y_e, cls) == _large_other[-1]
+                if is_first or is_last or len(_large_other) <= 2:
+                    # Horní hrana = price label pro tuto zónu
+                    bands.append((y_s, min(y_s + EDGE_PX, y_e), cls))
+                    # Pro poslední zónu zkus i dolní hranu (Entry může být dole)
+                    if is_last and (y_e - EDGE_PX) > (y_s + EDGE_PX):
+                        bands.append((max(y_e - EDGE_PX, y_s), y_e, cls))
+                else:
+                    debug_lines.append(f"  skip middle zone [{y_s}-{y_e}] (přechodová šedá)")
     debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
 
     # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
