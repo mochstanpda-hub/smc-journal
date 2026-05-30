@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.57"
+VERSION = "1.5.58"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3906,20 +3906,35 @@ def analyze_screenshot_tomas(image_path):
         roi_big = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
         gray    = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
 
-        # Thresholds jsou závislé na barvě pozadí labelu:
-        #   RED label:    bg grayscale ≈ 40-80   → thr=130 inv=True pracuje
-        #   CYAN label:   bg grayscale ≈ 130-160 → potřeba thr=165-180 inv=True
-        #   YELLOW label: bg grayscale ≈ 180-210 → potřeba thr=215-230 inv=True
-        #   (Bílý text má grayscale 255 — threshold musí být MEZI barvou pozadí a 255)
+        # ── Metoda 1: HSV white-text maska ───────────────────────────────────
+        # Bílý text (S≈0, V≈255) na jakémkoliv barevném pozadí (S>>0).
+        # Maska zachytí POUZE bílé/šedé pixely → černý text na bílém pozadí.
+        # Funguje pro cyan, žlutou, červenou i jakékoliv jiné barevné pozadí.
+        try:
+            hsv_roi = cv2.cvtColor(roi_big, cv2.COLOR_BGR2HSV)
+            # Bílý text = nízká saturace (S<60) + vysoká hodnota (V>170)
+            white_mask = (hsv_roi[:, :, 1] < 60) & (hsv_roi[:, :, 2] > 170)
+            hsv_img = np.where(white_mask[:, :, np.newaxis], [0, 0, 0], [255, 255, 255]).astype(np.uint8)
+            hsv_gray = cv2.cvtColor(hsv_img, cv2.COLOR_BGR2GRAY)
+            txt_hsv = pytesseract.image_to_string(
+                hsv_gray, config='--psm 7 -c tessedit_char_whitelist=0123456789.,'
+            )
+            debug_lines.append(f"    ocr_t[{tag}] HSV-white: '{txt_hsv.strip()}'")
+            v = _parse_price(txt_hsv)
+            if v:
+                try: cv2.imwrite(f'C:\\obd\\debug_tomas_band_{tag}.png', roi_big)
+                except: pass
+                return v
+        except Exception as _hsv_e:
+            debug_lines.append(f"    ocr_t[{tag}] HSV chyba: {_hsv_e}")
+
+        # ── Metoda 2: Klasické threshold pokusy ───────────────────────────────
         if _is_dark_bg:
             if color_cls == 'red':
                 attempts = [(80,  True), (130, True), (100, True), (160, False)]
-            elif color_cls == 'other':
-                # Zkus celé spektrum — nevíme jestli je label cyan nebo yellow
+            else:  # other (cyan / yellow / obecně)
                 attempts = [(165, True), (180, True), (200, True), (215, True),
                             (230, True), (130, True), (150, True), (100, True), (160, False)]
-            else:
-                attempts = [(130, True), (160, True), (100, True), (160, False)]
         else:
             attempts = [(160, True), (120, True), (80, True), (160, False)]
 
@@ -3999,6 +4014,18 @@ def analyze_screenshot_tomas(image_path):
         best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]
         result['stoploss'] = f"{best_sl['price']:.6g}"
         debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů)")
+
+    # Filtr 'other' cen: zahoď ceny vzdálené >5× od SL — to jsou OCR garbage hodnoty
+    # (např. 1800 pro GBPUSD kde SL=1.236 → 1800/1.236≈1456 → zjevně špatně)
+    if result.get('stoploss'):
+        try:
+            _sl_p = float(result['stoploss'])
+            _before = len(other_bands)
+            other_bands = [d for d in other_bands
+                           if _sl_p / 5.0 <= d['price'] <= _sl_p * 5.0]
+            if len(other_bands) < _before:
+                debug_lines.append(f"  SL-proximity filter: {_before} → {len(other_bands)} 'other' bandů")
+        except Exception: pass
 
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
 
