@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.47"
+VERSION = "1.5.48"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.48 | OCR — detekce žlutého labelu (aktuální tržní cena EURUSD 1.17926) jako samostatná třída 'yellow'; žlutý band se přeskakuje a nevstupuje do přiřazení Entry/SL/TP; opraveny 3-band a 2-band případy pro Buy i Sell
 1.5.47 | OCR analýza screenshotu — opravena logika přiřazení Entry/SL/TP: 3 pásma bez červené (Buy) dostávala prohozené SL↔TP; 2 pásma bez červené předpokládala Sell; rozšířen scan strip (5/6 %); post-processing auto-prohodí SL↔TP pokud jsou hodnoty nekonzistentní
 1.5.46 | Firebase — oprava KeyError 'level': get_rank_info() nemá klíč level, správně je rank_idx+1
 1.5.45 | Firebase Sync — tlačítko Sync moje XP nyní ukazuje výsledek a chybový messagebox (dříve selhávalo tiše); HTTP 403 vede na návod k opravě Rules
@@ -3255,10 +3256,12 @@ def analyze_screenshot(image_path):
             sat = max(b, g, r) - min(b, g, r)
             if sat < 25:
                 cls = None
-            elif r > b * 1.2 and r > g * 1.2:   # RED → jednoznačně SL
-                cls = 'red'
-            elif (b > r * 1.4 or g > r * 1.4):  # Cokoliv nenasycené červenou = Entry nebo TP
-                cls = 'other'
+            elif r > b * 1.2 and r > g * 1.2:
+                cls = 'red'     # RED → SL (TradingView červená)
+            elif r > 140 and g > 120 and b < 80 and r > b * 2.0 and g > b * 1.5:
+                cls = 'yellow'  # YELLOW/GOLD → aktuální tržní cena (přeskočit!)
+            elif (b > r * 1.4 or g > r * 1.4):
+                cls = 'other'   # Modrá / zelená = Entry nebo TP
             else:
                 cls = None
 
@@ -3346,6 +3349,10 @@ def analyze_screenshot(image_path):
     # Sbírej (y_mid, color_class, price) pro každý band
     detected = []   # list of dict {y_mid, cls, price}
     for y_s, y_e, cls in bands:
+        if cls == 'yellow':
+            # Žlutý label = aktuální tržní cena (EURUSD 1.17926) → přeskočit
+            debug_lines.append(f"  band yellow[{y_s}-{y_e}] → SKIP (aktuální cena)")
+            continue
         tag   = f"{cls}_{y_s}"
         price = ocr_price_band(y_s, y_e, tag=tag)
         y_mid = (y_s + y_e) / 2
@@ -3356,9 +3363,9 @@ def analyze_screenshot(image_path):
     # ── 4. Přiřazení SL / Entry / TP podle pozice a barvy ───────────────────
     # Pravidla:
     #   • RED band → vždy SL (TradingView červená = stop loss)
+    #   • YELLOW band → aktuální tržní cena → ignorovat
     #   • Ze 3 bandů: prostřední (mediánové Y) = Entry, krajní = TP
     #   • Ze 2 bandů bez červené: menší Y (výše na obrazovce) = Entry nebo TP
-    #     → rozhodneme pomocí ceny (po post-processingu)
 
     red_bands   = [d for d in detected if d['cls'] == 'red']
     other_bands = [d for d in detected if d['cls'] == 'other']
