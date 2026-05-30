@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.51"
+VERSION = "1.5.52"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3795,7 +3795,18 @@ def analyze_screenshot_tomas(image_path):
         return [tuple(x) for x in out]
 
     merged = _merge(raw_bands)
-    bands  = [b for b in merged if (b[1] - b[0]) <= 55]
+    # Tomáš používá velké barevné ZÓNY (ne tenké čáry) — cena je na hraně zóny.
+    # • Malé pásy (≤ 55px): zpracuj normálně (price label = celý pás)
+    # • Velké pásy (> 55px): ořež na horní a dolní hranu (25px), tam je text
+    EDGE = 25
+    bands = []
+    for y_s, y_e, cls in merged:
+        h_band = y_e - y_s
+        if h_band <= 55:
+            bands.append((y_s, y_e, cls))
+        elif h_band <= 1000:   # jen rozumně velké zóny (ne celý obraz)
+            bands.append((y_s,          min(y_s + EDGE, y_e), cls))   # horní hrana
+            bands.append((max(y_e - EDGE, y_s), y_e,          cls))   # dolní hrana
     debug_lines.append(f"  raw_bands={raw_bands[:10]}  bands={bands}")
 
     # ── 3. OCR ceny z každého pásu ───────────────────────────────────────────
@@ -3869,9 +3880,29 @@ def analyze_screenshot_tomas(image_path):
     other_bands = [d for d in detected if d['cls'] == 'other']
 
     if red_bands:
-        best_sl = sorted(red_bands, key=lambda d: d['price'])[0]
+        # De-duplikuj červené basy — na hranici zón vznikají false positives.
+        # Vezmi nejspodnější (největší y_mid) = skutečný SL box.
+        # Ale pokud jsou ≥2 různé cenové hladiny, vezmi nejnižší cenu (= SL u buy / sell).
+        red_prices = sorted({round(d['price'], 5) for d in red_bands})
+        if len(red_prices) == 1:
+            best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]   # nejspodnější
+        else:
+            # Více různých cen → SL je ta s největší vzdáleností od středu price clusteru
+            mid_price = sum(red_prices) / len(red_prices)
+            best_sl = sorted(red_bands, key=lambda d: abs(d['price'] - mid_price))[-1]
         result['stoploss'] = f"{best_sl['price']:.6g}"
-        debug_lines.append(f"  → SL(red)={best_sl['price']}")
+        debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů, ceny={red_prices})")
+
+    # De-duplikuj 'other' basy — hrany zón vytvoří dvojice blízkých cen
+    # Seskup basy se stejnou (zaokrouhlenou) cenou → ponech jen jednoho zástupce
+    _seen_other_prices = set()
+    other_bands_dedup  = []
+    for d in sorted(other_bands, key=lambda d: d['y_mid']):
+        rk = round(d['price'], 4)
+        if rk not in _seen_other_prices:
+            _seen_other_prices.add(rk)
+            other_bands_dedup.append(d)
+    other_bands = other_bands_dedup
 
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
 
