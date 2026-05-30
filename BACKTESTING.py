@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.59"
+VERSION = "1.5.60"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3767,6 +3767,13 @@ def analyze_screenshot_tomas(image_path):
     if img is None:
         raise ValueError("Nelze načíst obrázek.")
 
+    def _fmt_p(p):
+        """Formátuj cenu s vhodným počtem desetinných míst (bez ztráty trailing zeros)."""
+        if p < 10:      return f"{p:.5f}"   # GBPUSD, EURUSD → 1.25300
+        elif p < 200:   return f"{p:.3f}"   # USDJPY         → 145.500
+        elif p < 10000: return f"{p:.2f}"   # XAUUSD, DAX    → 2378.64
+        else:           return f"{p:.0f}"   # BTC, indices   → 98500
+
     h, w = img.shape[:2]
     result = {}
     debug_lines = []
@@ -4030,7 +4037,7 @@ def analyze_screenshot_tomas(image_path):
 
         # Z čistých červených: vezmi nejspodnější (largest y_mid) = skutečný SL label
         best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]
-        result['stoploss'] = f"{best_sl['price']:.6g}"
+        result['stoploss'] = _fmt_p(best_sl['price'])
         debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů)")
 
     # Filtr 'other' cen: zahoď ceny vzdálené >5× od SL — to jsou OCR garbage hodnoty
@@ -4048,7 +4055,7 @@ def analyze_screenshot_tomas(image_path):
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
 
     if len(all_non_sl) == 1:
-        result['vstupni_hodnota'] = f"{all_non_sl[0]['price']:.6g}"
+        result['vstupni_hodnota'] = _fmt_p(all_non_sl[0]['price'])
         debug_lines.append(f"  → Entry(only)={all_non_sl[0]['price']}")
     elif len(all_non_sl) >= 2:
         if red_bands:
@@ -4064,7 +4071,7 @@ def analyze_screenshot_tomas(image_path):
                 remaining.sort(key=lambda d: abs(d['price'] - entry['price']))
                 sl_band = remaining[0]
                 tp      = remaining[-1]
-                result['stoploss'] = f"{sl_band['price']:.6g}"
+                result['stoploss'] = _fmt_p(sl_band['price'])
                 debug_lines.append(f"  3-band-no-red: SL(closest)={sl_band['price']}  TP(farthest)={tp['price']}")
             else:
                 by_y = sorted(all_non_sl, key=lambda d: d['y_mid'])
@@ -4075,8 +4082,8 @@ def analyze_screenshot_tomas(image_path):
                     entry = by_y[0]
                     tp    = by_y[1]
                 debug_lines.append(f"  2-band-no-red: tentative Entry={entry['price']}  TP={tp['price']}")
-        result['vstupni_hodnota'] = f"{entry['price']:.6g}"
-        result['takeprofit']      = f"{tp['price']:.6g}"
+        result['vstupni_hodnota'] = _fmt_p(entry['price'])
+        result['takeprofit']      = _fmt_p(tp['price'])
         debug_lines.append(f"  → Entry={entry['price']}  TP={tp['price']}")
 
     # ── 5. Symbol z názvu souboru / hlavičky ─────────────────────────────────
