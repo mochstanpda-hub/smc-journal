@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.60"
+VERSION = "1.5.61"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3848,18 +3848,8 @@ def analyze_screenshot_tomas(image_path):
 
     merged = _merge(raw_bands)
 
-    # Zaznamenej které červené basy jsou "hraničními artefakty" (leží MEZI dvěma 'other' zónami)
-    # → vznikají na přechodu cyan→šedá→yellow → nejsou skutečný SL
-    _boundary_red_ys = set()
-    for _i, (_ys, _ye, _cls) in enumerate(merged):
-        if _cls == 'red':
-            _prev = merged[_i - 1][2] if _i > 0 else None
-            _next = merged[_i + 1][2] if _i < len(merged) - 1 else None
-            if _prev == 'other' and _next == 'other':
-                _boundary_red_ys.add(_ys)
-
-    # Tomáš používá velké barevné ZÓNY: CYAN (TP) + ŠEDÁ (přechod) + ŽLUTÁ (Entry).
-    # Pravidlo: skenuj jen PRVNÍ a POSLEDNÍ velkou 'other' zónu.
+    # Tomáš používá velké barevné ZÓNY: CYAN (TP) + ŠEDÁ (přechod) + ŽLUTÁ/ČERVENá (Entry) + ČERVENÁ (SL).
+    # Pravidlo: skenuj jen PRVNÍ a POSLEDNÍ velkou 'other' zónu + OBOU jejich hran.
     # Střední (přechodové) šedé zóny dávají falešné hodnoty → přeskočit.
     # Malé pásy (≤55px): skenuj normálně (jsou to konkrétní labely).
     EDGE_PX = 26   # výška okrajového plátku (px)
@@ -3886,10 +3876,10 @@ def analyze_screenshot_tomas(image_path):
                 is_first = (y_s, y_e, cls) == _large_other[0]
                 is_last  = (y_s, y_e, cls) == _large_other[-1]
                 if is_first or is_last or len(_large_other) <= 2:
-                    # Horní hrana = price label pro tuto zónu
+                    # Horní hrana — vždy
                     bands.append((y_s, min(y_s + EDGE_PX, y_e), cls))
-                    # Pro poslední zónu zkus i dolní hranu (Entry může být dole)
-                    if is_last and (y_e - EDGE_PX) > (y_s + EDGE_PX):
+                    # Dolní hrana — vždy (TradingView zóna může mít label na obou hranách)
+                    if (y_e - EDGE_PX) > (y_s + EDGE_PX):
                         bands.append((max(y_e - EDGE_PX, y_s), y_e, cls))
                 else:
                     debug_lines.append(f"  skip middle zone [{y_s}-{y_e}] (přechodová šedá)")
@@ -4022,23 +4012,31 @@ def analyze_screenshot_tomas(image_path):
     # ── 4. Přiřazení SL / Entry / TP ─────────────────────────────────────────
     red_bands   = [d for d in detected if d['cls'] == 'red']
     other_bands = [d for d in detected if d['cls'] == 'other']
+    best_sl     = None   # bude nastaven níže
 
     if red_bands:
-        # Filtr 1: odstraň false-positive červené na úplném vrcholu obrazu (UI lišta)
+        # Filtr: odstraň false-positive červené na úplném vrcholu obrazu (UI lišta)
         _no_top = [d for d in red_bands if d['y_mid'] > 200]
         if _no_top:
             red_bands = _no_top
 
-        # Filtr 2: odstraň "hraniční" červené basy (leží přesně MEZI dvěma 'other' zónami)
-        _non_boundary = [d for d in red_bands
-                         if not any(abs(d['y_mid'] - _by) < 30 for _by in _boundary_red_ys)]
-        if _non_boundary:
-            red_bands = _non_boundary
+        # Seřaď červené podle Y (nahoru→dolů)
+        _red_sorted = sorted(red_bands, key=lambda d: d['y_mid'])
 
-        # Z čistých červených: vezmi nejspodnější (largest y_mid) = skutečný SL label
-        best_sl = sorted(red_bands, key=lambda d: d['y_mid'])[-1]
+        # Nejspodnější červený band = SL
+        best_sl = _red_sorted[-1]
         result['stoploss'] = _fmt_p(best_sl['price'])
         debug_lines.append(f"  → SL(red)={best_sl['price']}  (z {len(red_bands)} red bandů)")
+
+        # Předposlední červený band = Entry (Tomáš označuje Entry ČERVENĚ, nad SL)
+        # Platí jen pokud je cena blízko SL (v rozsahu 0.01–5 % od SL)
+        if len(_red_sorted) >= 2:
+            _entry_red = _red_sorted[-2]
+            _sl_p_r    = best_sl['price']
+            _diff_pct  = abs(_entry_red['price'] - _sl_p_r) / _sl_p_r
+            if 0.0001 <= _diff_pct <= 0.08:   # 0.01 % – 8 % od SL = platný Entry
+                other_bands.append(_entry_red)
+                debug_lines.append(f"  → Entry candidate from red: y={_entry_red['y_mid']:.0f} price={_entry_red['price']}")
 
     # Filtr 'other' cen: zahoď ceny vzdálené >5× od SL — to jsou OCR garbage hodnoty
     # (např. 1800 pro GBPUSD kde SL=1.236 → 1800/1.236≈1456 → zjevně špatně)
@@ -4058,8 +4056,8 @@ def analyze_screenshot_tomas(image_path):
         result['vstupni_hodnota'] = _fmt_p(all_non_sl[0]['price'])
         debug_lines.append(f"  → Entry(only)={all_non_sl[0]['price']}")
     elif len(all_non_sl) >= 2:
-        if red_bands:
-            sl_y    = red_bands[0]['y_mid']
+        if best_sl is not None:
+            sl_y    = best_sl['y_mid']
             by_dist = sorted(all_non_sl, key=lambda d: abs(d['y_mid'] - sl_y))
             entry   = by_dist[0]
             tp      = by_dist[1]
