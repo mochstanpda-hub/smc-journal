@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.71"
+VERSION = "1.5.72"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1031,6 +1031,25 @@ TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1W", "1M"]
 FIBO_OPTIONS = ["DISCOUNT", "GOLDEN ZONE", "PREMIUM", "ORDER BLOCK", "BREAKER", "FVG ONLY"]
 SESSIONS_LIST = ["Asia", "London", "NY AM", "NY PM", "Close"]
 
+def _get_setup_pts(cfg_setups, fibo_val):
+    """Najdi body pro setup — case-insensitive, ignoruje závorky/extra text.
+    'GOLDEN ZONE' → najde 'Golden Zone (50-61.8)': 4  ✓
+    'DISCOUNT'    → najde 'Discount (>61.8)': 3       ✓
+    """
+    if not fibo_val: return 0
+    fibo_up = fibo_val.strip().upper()
+    # 1. Přesná shoda
+    if fibo_val in cfg_setups: return cfg_setups[fibo_val]
+    # 2. Case-insensitive přesná shoda
+    for key, pts in cfg_setups.items():
+        if key.strip().upper() == fibo_up: return pts
+    # 3. Částečná shoda (ignoruje závorky a rozsahy)
+    for key, pts in cfg_setups.items():
+        if fibo_up in key.upper() or key.upper().split('(')[0].strip() in fibo_up:
+            return pts
+    return 0
+
+
 def load_scoring_config():
     if SCORING_FILE and os.path.exists(SCORING_FILE):
         try:
@@ -1670,7 +1689,7 @@ def prepocitat_historii():
 
             # Přepočítej scoring
             total = 0
-            total += cfg["setups"].get(t.get('fibo', ''), 0)
+            total += _get_setup_pts(cfg["setups"], t.get('fibo', ''))
             total += cfg["sessions"].get(t.get('session', ''), 0)
             total += cfg["days"].get(t.get('den_tydne', ''), 0)
             try:
@@ -2504,7 +2523,7 @@ def calculate_auto_rrr(event=None):
 
 def calculate_auto_score():
     config = load_scoring_config(); total = 0
-    total += config["setups"].get(fibo_combo.get(), 0); total += config["sessions"].get(session_combo.get(), 0); total += config["days"].get(den_tydne_entry.get(), 0)
+    total += _get_setup_pts(config["setups"], fibo_combo.get()); total += config["sessions"].get(session_combo.get(), 0); total += config["days"].get(den_tydne_entry.get(), 0)
     try:
         r = float(rrr_entry.get().replace(',', '.')); rrr_pts = config["rrr"]
         if r >= 5.0: total += rrr_pts.get("1:5+", 0)
