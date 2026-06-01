@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.67"
+VERSION = "1.5.68"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -6401,6 +6401,25 @@ def show_screenshot_dialog(prefill_callback):
         ('timeframe_vstup','Timeframe:',        '#1e293b'),
     ]
     vars_ = {}
+
+    # ── Směr — radio BUY / SELL (speciální řádek, předvyplněn z OCR) ──────────
+    _smer_row = tk.Frame(win, bg=DT_PANEL)
+    _smer_row.pack(fill='x', padx=24, pady=2)
+    tk.Label(_smer_row, text='Směr:', width=15, anchor='w',
+             font=('Segoe UI',9,'bold'), bg=DT_PANEL, fg='#7c3aed').pack(side='left')
+    _smer_var = tk.StringVar(value=result.get('smer', ''))
+    _smer_btn_f = tk.Frame(_smer_row, bg=DT_PANEL)
+    _smer_btn_f.pack(side='left')
+    tk.Radiobutton(_smer_btn_f, text='BUY', variable=_smer_var, value='Buy',
+                   bg=DT_PANEL, fg='#1d4ed8', font=('Segoe UI',10,'bold'),
+                   selectcolor=DT_ENTRY, activebackground=DT_PANEL,
+                   cursor='hand2').pack(side='left', padx=(0, 14))
+    tk.Radiobutton(_smer_btn_f, text='SELL', variable=_smer_var, value='Sell',
+                   bg=DT_PANEL, fg='#b91c1c', font=('Segoe UI',10,'bold'),
+                   selectcolor=DT_ENTRY, activebackground=DT_PANEL,
+                   cursor='hand2').pack(side='left')
+    vars_['smer'] = _smer_var
+
     for key, label, color in fields:
         row = tk.Frame(win, bg=DT_PANEL); row.pack(fill='x', padx=24, pady=2)
         tk.Label(row, text=label, width=15, anchor='w',
