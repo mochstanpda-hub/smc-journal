@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.62"
+VERSION = "1.5.63"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4048,6 +4048,22 @@ def analyze_screenshot_tomas(image_path):
                            if _sl_p / 5.0 <= d['price'] <= _sl_p * 5.0]
             if len(other_bands) < _before:
                 debug_lines.append(f"  SL-proximity filter: {_before} → {len(other_bands)} 'other' bandů")
+        except Exception: pass
+
+    # Filtr: ceny na OBOU stranách SL → Buy nebo Sell setup → zahoď menšinovou stranu
+    # Příklad: SL=3289, nad=[3348,3309], pod=[3260] → Buy → zahoď 3260 (je to šum, ne entry)
+    if result.get('stoploss') and len(other_bands) >= 2:
+        try:
+            _sl_p  = float(result['stoploss'])
+            _above = [d for d in other_bands if d['price'] > _sl_p]
+            _below = [d for d in other_bands if d['price'] < _sl_p]
+            if _above and _below:
+                if len(_above) >= len(_below):
+                    other_bands = _above
+                    debug_lines.append(f"  SL-side filter (Buy): ponecháno {len(_above)} nad SL, zahozeno {len(_below)} pod SL")
+                else:
+                    other_bands = _below
+                    debug_lines.append(f"  SL-side filter (Sell): ponecháno {len(_below)} pod SL, zahozeno {len(_above)} nad SL")
         except Exception: pass
 
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
