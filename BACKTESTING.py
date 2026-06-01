@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.69"
+VERSION = "1.5.70"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1655,8 +1655,8 @@ def prepocitat_historii():
         if not t.get('delka_obchodu') and t.get('cas_otevreni') and t.get('cas_zavreni'):
             try:
                 dt_start = datetime.strptime(t.get('cas_otevreni'), "%Y-%m-%d %H:%M")
-                dt_end = datetime.strptime(t.get('cas_zavreni'), "%Y-%m-%d %H:%M")
-                diff = dt_end - dt_start; total_seconds = int(diff.total_seconds()); hours, remainder = divmod(total_seconds, 3600); minutes, _ = divmod(remainder, 60); t['delka_obchodu'] = f"{hours}h {minutes}m"
+                dt_end   = datetime.strptime(t.get('cas_zavreni'),  "%Y-%m-%d %H:%M")
+                t['delka_obchodu'] = _weekday_duration(dt_start, dt_end)
             except: pass
         total = 0; total += cfg["setups"].get(t.get('fibo', ''), 0); total += cfg["sessions"].get(t.get('session', ''), 0); total += cfg["days"].get(t.get('den_tydne', ''), 0)
         try:
@@ -2445,7 +2445,8 @@ def update_calculated_fields():
             elif 17 <= h < 21: session_combo.set("NY PM")
             else: session_combo.set("Asia")
             if t_end:
-                dt_end = datetime.strptime(t_end, "%Y-%m-%d %H:%M"); diff = dt_end - dt_start; total_seconds = int(diff.total_seconds()); hours, remainder = divmod(total_seconds, 3600); minutes, _ = divmod(remainder, 60); duration_str = f"{hours}h {minutes}m"
+                dt_end = datetime.strptime(t_end, "%Y-%m-%d %H:%M")
+                duration_str = _weekday_duration(dt_start, dt_end)
                 delka_obchodu_entry.config(state='normal'); delka_obchodu_entry.delete(0, tk.END); delka_obchodu_entry.insert(0, duration_str); delka_obchodu_entry.config(state='readonly')
         except: pass
     try:
@@ -3246,6 +3247,33 @@ def naci_obchod_pro_upravu():
     tags_entry.delete(0, tk.END); tags_entry.insert(0, t.get('tags', ''))
     if zisk_mena_entry: zisk_mena_entry.delete(0, tk.END); zisk_mena_entry.insert(0, t.get('zisk_mena', ''))
     update_calculated_fields(); calculate_auto_score(); save_btn.config(text="AKTUALIZOVAT OBCHOD", bg="#e67e22")
+
+# ==============================================================================
+# POMOCNÉ FUNKCE — ČASY
+# ==============================================================================
+
+def _weekday_duration(dt_start, dt_end):
+    """Spočítej dobu obchodu v hodinách a minutách BEZ víkendů (So, Ne).
+    Příklad: Pá 20:00 → Po 10:00 = 14h 0m  (ne 62h).
+    """
+    from datetime import timedelta as _td
+    if dt_start >= dt_end:
+        return "0h 0m"
+    total_sec = int((dt_end - dt_start).total_seconds())
+    # Odečti sekundy strávené v sobotu a neděli
+    day = dt_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day <= dt_end:
+        if day.weekday() >= 5:          # 5=So, 6=Ne
+            we_start = max(dt_start, day)
+            we_end   = min(dt_end,   day + _td(days=1))
+            if we_end > we_start:
+                total_sec -= int((we_end - we_start).total_seconds())
+        day += _td(days=1)
+    total_sec = max(0, total_sec)
+    hours, remainder = divmod(total_sec, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes}m"
+
 
 # ==============================================================================
 # SCREENSHOT ANALYZER
@@ -6719,10 +6747,9 @@ def setup_tradingview_tab(parent):
         # Délka obchodu
         delka = ""
         try:
-            dt_o = datetime.strptime(open_t,  "%Y-%m-%d %H:%M")
-            dt_c = datetime.strptime(close_t, "%Y-%m-%d %H:%M")
-            diff = dt_c - dt_o; h, r = divmod(int(diff.total_seconds()), 3600)
-            delka = f"{h}h {r//60}m"
+            dt_o  = datetime.strptime(open_t,  "%Y-%m-%d %H:%M")
+            dt_c  = datetime.strptime(close_t, "%Y-%m-%d %H:%M")
+            delka = _weekday_duration(dt_o, dt_c)
         except: pass
 
         d = {
