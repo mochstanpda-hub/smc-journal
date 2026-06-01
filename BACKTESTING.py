@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.68"
+VERSION = "1.5.69"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3251,6 +3251,16 @@ def naci_obchod_pro_upravu():
 # SCREENSHOT ANALYZER
 # ==============================================================================
 
+def _fmt_price(p):
+    """Formátuj cenu s vhodným počtem desetinných míst (zachová trailing zeros).
+    Sdílená pomocná funkce pro oba analyzátory (Patrik i Tomáš).
+    """
+    if p < 10:      return f"{p:.5f}"   # GBPUSD, EURUSD → 1.16220
+    elif p < 200:   return f"{p:.3f}"   # USDJPY         → 145.500
+    elif p < 10000: return f"{p:.2f}"   # XAUUSD, DAX    → 3504.00
+    else:           return f"{p:.0f}"   # BTC, indices   → 98500
+
+
 def analyze_screenshot(image_path):
     """
     Analyzuje TradingView screenshot pomocí řádkové BGR analýzy + HSV contour fallback.
@@ -3426,14 +3436,14 @@ def analyze_screenshot(image_path):
     if red_bands:
         # Vezmi nejpravější / nejčistší červený band (největší Y rozsah)
         best_sl = sorted(red_bands, key=lambda d: d['price'])[0]
-        result['stoploss'] = f"{best_sl['price']:.6g}"
+        result['stoploss'] = _fmt_price(best_sl['price'])
         debug_lines.append(f"  → SL(red)={best_sl['price']}")
 
     # Zbývající bary seřaď podle Y polohy (nahoře = malé Y = vyšší cena)
     all_non_sl = sorted(other_bands, key=lambda d: d['y_mid'])
 
     if len(all_non_sl) == 1:
-        result['vstupni_hodnota'] = f"{all_non_sl[0]['price']:.6g}"
+        result['vstupni_hodnota'] = _fmt_price(all_non_sl[0]['price'])
         debug_lines.append(f"  → Entry(only)={all_non_sl[0]['price']}")
 
     elif len(all_non_sl) >= 2:
@@ -3455,7 +3465,7 @@ def analyze_screenshot(image_path):
                 remaining.sort(key=lambda d: abs(d['price'] - entry['price']))
                 sl_band = remaining[0]   # blíže Entry = SL
                 tp      = remaining[-1]  # dál od Entry = TP
-                result['stoploss'] = f"{sl_band['price']:.6g}"
+                result['stoploss'] = _fmt_price(sl_band['price'])
                 debug_lines.append(f"  3-band-no-red: SL(closest)={sl_band['price']}  TP(farthest)={tp['price']}")
             else:
                 # 2 pásma bez červené: Entry = prostřední ze dvou → nem možné určit přesně
@@ -3477,8 +3487,8 @@ def analyze_screenshot(image_path):
                     tp    = by_y[1]
                 debug_lines.append(f"  2-band-no-red: tentative Entry={entry['price']}  TP={tp['price']}")
 
-        result['vstupni_hodnota'] = f"{entry['price']:.6g}"
-        result['takeprofit']      = f"{tp['price']:.6g}"
+        result['vstupni_hodnota'] = _fmt_price(entry['price'])
+        result['takeprofit']      = _fmt_price(tp['price'])
         debug_lines.append(f"  → Entry={entry['price']}  TP={tp['price']}")
 
     # ── 5. HSV fallback — pokud chybí některá hodnota ────────────────────────
@@ -3767,12 +3777,7 @@ def analyze_screenshot_tomas(image_path):
     if img is None:
         raise ValueError("Nelze načíst obrázek.")
 
-    def _fmt_p(p):
-        """Formátuj cenu s vhodným počtem desetinných míst (bez ztráty trailing zeros)."""
-        if p < 10:      return f"{p:.5f}"   # GBPUSD, EURUSD → 1.25300
-        elif p < 200:   return f"{p:.3f}"   # USDJPY         → 145.500
-        elif p < 10000: return f"{p:.2f}"   # XAUUSD, DAX    → 2378.64
-        else:           return f"{p:.0f}"   # BTC, indices   → 98500
+    _fmt_p = _fmt_price   # použij globální sdílenou funkci
 
     h, w = img.shape[:2]
     result = {}
