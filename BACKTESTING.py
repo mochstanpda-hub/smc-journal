@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.70"
+VERSION = "1.5.71"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1649,39 +1649,64 @@ def open_prop_settings():
         update_statistics()
 
 def prepocitat_historii():
-    if not os.path.exists(DATA_FILE): return
-    trades = load_data(); cfg = load_scoring_config(); updated_count = 0
-    for t in trades:
-        if not t.get('delka_obchodu') and t.get('cas_otevreni') and t.get('cas_zavreni'):
+    if not DATA_FILE or not os.path.exists(DATA_FILE):
+        messagebox.showwarning("Upozornění", "Nejdřív otevři projekt!"); return
+    try:
+        trades = load_data()
+        cfg    = load_scoring_config()
+        if not trades:
+            messagebox.showinfo("Info", "Žádné obchody k přepočítání."); return
+
+        updated_count = 0
+        for t in trades:
+            # Přepočítej délku obchodu vždy (i u existujících hodnot — nová logika bez víkendů)
+            if t.get('cas_otevreni') and t.get('cas_zavreni'):
+                try:
+                    dt_start = datetime.strptime(t['cas_otevreni'], "%Y-%m-%d %H:%M")
+                    dt_end   = datetime.strptime(t['cas_zavreni'],  "%Y-%m-%d %H:%M")
+                    t['delka_obchodu'] = _weekday_duration(dt_start, dt_end)
+                except Exception as _e:
+                    pass
+
+            # Přepočítej scoring
+            total = 0
+            total += cfg["setups"].get(t.get('fibo', ''), 0)
+            total += cfg["sessions"].get(t.get('session', ''), 0)
+            total += cfg["days"].get(t.get('den_tydne', ''), 0)
             try:
-                dt_start = datetime.strptime(t.get('cas_otevreni'), "%Y-%m-%d %H:%M")
-                dt_end   = datetime.strptime(t.get('cas_zavreni'),  "%Y-%m-%d %H:%M")
-                t['delka_obchodu'] = _weekday_duration(dt_start, dt_end)
+                r = float(str(t.get('rrr', 0)).replace(',', '.'))
+                rrr_pts = cfg["rrr"]
+                if r >= 5.0:   total += rrr_pts.get("1:5+", 0)
+                elif r >= 4.0: total += rrr_pts.get("1:4",  0)
+                elif r >= 3.0: total += rrr_pts.get("1:3",  0)
+                elif r >= 2.0: total += rrr_pts.get("1:2",  0)
+                else:          total += rrr_pts.get("1:1",  0)
             except: pass
-        total = 0; total += cfg["setups"].get(t.get('fibo', ''), 0); total += cfg["sessions"].get(t.get('session', ''), 0); total += cfg["days"].get(t.get('den_tydne', ''), 0)
-        try:
-            r = float(str(t.get('rrr', 0)).replace(',', '.')); rrr_pts = cfg["rrr"]
-            if r >= 5.0: total += rrr_pts.get("1:5+", 0)
-            elif r >= 4.0: total += rrr_pts.get("1:4", 0)
-            elif r >= 3.0: total += rrr_pts.get("1:3", 0)
-            elif r >= 2.0: total += rrr_pts.get("1:2", 0)
-            else: total += rrr_pts.get("1:1", 0)
-        except: pass
-        try:
-            p = float(str(t.get('pips', 0)).replace(',', '.')); pips_pts = cfg["pips"]
-            if p >= 20: total += pips_pts.get("20+", 0)
-            elif 15 <= p < 20: total += pips_pts.get("15-20", 0)
-            elif 10 <= p < 15: total += pips_pts.get("10-15", 0)
-            elif 5 <= p < 10: total += pips_pts.get("5-10", 0)
-        except: pass
-        thr = cfg["thresholds"]; res = "C"
-        if total >= thr["A+"]: res = "A+"
-        elif total >= thr["A"]: res = "A"
-        elif total >= thr["B"]: res = "B"
-        t['kvalita'] = res; updated_count += 1
-    with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-        if trades: w = csv.DictWriter(f, fieldnames=list(trades[0].keys())); w.writeheader(); w.writerows(trades)
-    update_listbox(); update_statistics(); messagebox.showinfo("Hotovo", f"Aktualizováno {updated_count} obchodů.")
+            try:
+                p = float(str(t.get('pips', 0)).replace(',', '.'))
+                pips_pts = cfg["pips"]
+                if p >= 20:        total += pips_pts.get("20+",   0)
+                elif p >= 15:      total += pips_pts.get("15-20", 0)
+                elif p >= 10:      total += pips_pts.get("10-15", 0)
+                elif p >= 5:       total += pips_pts.get("5-10",  0)
+            except: pass
+
+            thr = cfg["thresholds"]
+            if   total >= thr["A+"]: t['kvalita'] = "A+"
+            elif total >= thr["A"]:  t['kvalita'] = "A"
+            elif total >= thr["B"]:  t['kvalita'] = "B"
+            else:                    t['kvalita'] = "C"
+            updated_count += 1
+
+        with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
+            if trades:
+                w = csv.DictWriter(f, fieldnames=list(trades[0].keys()))
+                w.writeheader(); w.writerows(trades)
+        update_listbox()
+        update_statistics()
+        messagebox.showinfo("Hotovo", f"Přepočítáno {updated_count} obchodů.\n(scoring + délka bez víkendů)")
+    except Exception as e:
+        messagebox.showerror("Chyba při přepočtu", str(e))
 
 def export_trade_to_pdf():
     try: from reportlab.lib.pagesizes import A4
