@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.65"
+VERSION = "1.5.66"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4142,6 +4142,8 @@ def analyze_screenshot_tomas(image_path):
             except (ValueError, TypeError): pass
 
     # ── 7. Směr z poměru cen ─────────────────────────────────────────────────
+    # Pravidlo: Buy = TP > Entry > SL  |  Sell = SL > Entry > TP
+    # Záloha:   Buy = TP > SL          |  Sell = TP < SL  (stačí 2 ceny)
     try:
         entry = float(result.get('vstupni_hodnota', 0))
         sl    = float(result.get('stoploss', 0))
@@ -4152,15 +4154,24 @@ def analyze_screenshot_tomas(image_path):
             elif sl > entry > tp:
                 result['smer'] = 'Sell'
             else:
+                # SL a TP možná proházené → zkus prohodit
                 if sl > tp > entry or entry > tp > sl:
                     result['stoploss'], result['takeprofit'] = result.get('takeprofit',''), result.get('stoploss','')
                     sl, tp = tp, sl
                     debug_lines.append(f"  postproc: prohodil SL↔TP → SL={sl} TP={tp}")
-                    if tp > entry > sl:   result['smer'] = 'Buy'
-                    elif sl > entry > tp: result['smer'] = 'Sell'
-        elif entry and tp and not sl:
-            if tp > entry: result['smer'] = 'Buy'
-            else:          result['smer'] = 'Sell'
+                if tp > entry > sl:   result['smer'] = 'Buy'
+                elif sl > entry > tp: result['smer'] = 'Sell'
+                # Záloha: aspoň TP vs SL
+                elif not result.get('smer') and sl and tp:
+                    result['smer'] = 'Buy' if tp > sl else 'Sell'
+        elif sl and tp:
+            # Nemáme Entry — stačí porovnat TP vs SL
+            result['smer'] = 'Buy' if tp > sl else 'Sell'
+            debug_lines.append(f"  smer (TP vs SL): {'Buy' if tp > sl else 'Sell'}")
+        elif entry and tp:
+            result['smer'] = 'Buy' if tp > entry else 'Sell'
+        elif entry and sl:
+            result['smer'] = 'Buy' if entry > sl else 'Sell'
     except (ValueError, TypeError): pass
 
     debug_lines.append(f"FINAL_RESULT_TOMAS: {result}")
