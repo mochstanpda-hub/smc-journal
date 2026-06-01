@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.73"
+VERSION = "1.5.74"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1823,6 +1823,255 @@ def run_ab_simulation():
     canvas = FigureCanvasTkAgg(fig, master=popup)
     canvas.draw()
     canvas.get_tk_widget().pack(fill='both', expand=True)
+
+def export_for_ai():
+    """Exportuje kompletní statistiky do Markdown souboru pro analýzu v AI."""
+    if not DATA_FILE or not os.path.exists(DATA_FILE):
+        messagebox.showwarning("Export", "Nejdřív otevři projekt!"); return
+    trades = load_data()
+    if not trades:
+        messagebox.showinfo("Export", "Žádné obchody k exportu."); return
+
+    from datetime import timedelta as _td
+    from collections import defaultdict as _dd
+
+    # ── Výpočet statistik ────────────────────────────────────────────────────
+    valid = [t for t in trades if t.get('vysledek','').lower() in ('win','loss','be')]
+    if not valid:
+        messagebox.showinfo("Export", "Žádné dokončené obchody."); return
+
+    total = len(valid)
+    wins  = sum(1 for t in valid if t.get('vysledek','').lower() == 'win')
+    losses= sum(1 for t in valid if t.get('vysledek','').lower() == 'loss')
+    bes   = sum(1 for t in valid if t.get('vysledek','').lower() == 'be')
+    winrate = wins / total * 100 if total else 0
+
+    def _r(t):
+        try: return float(str(t.get('rrr',0)).replace(',','.'))
+        except: return 0.0
+
+    gross_profit = sum(_r(t) for t in valid if t.get('vysledek','').lower()=='win')
+    gross_loss   = sum(1.0   for t in valid if t.get('vysledek','').lower()=='loss')
+    profit_factor= (gross_profit / gross_loss) if gross_loss > 0 else gross_profit
+    avg_rrr      = sum(_r(t) for t in valid) / total if total else 0
+    avg_win_r    = gross_profit / wins  if wins   > 0 else 0
+    avg_loss_r   = gross_loss   / losses if losses > 0 else 0
+    expectancy   = (winrate/100 * avg_win_r) - ((1-winrate/100) * avg_loss_r)
+
+    # Equity curve + max drawdown
+    equity = [0.0]
+    for t in valid:
+        res = t.get('vysledek','').lower()
+        if res == 'win':  equity.append(equity[-1] + _r(t))
+        elif res == 'loss': equity.append(equity[-1] - 1.0)
+        else: equity.append(equity[-1])
+    peak = equity[0]; max_dd = 0.0
+    for v in equity:
+        if v > peak: peak = v
+        dd = peak - v
+        if dd > max_dd: max_dd = dd
+
+    # Streaks
+    best_win_str = best_loss_str = cur_str = 0
+    cur_type = None
+    for t in valid:
+        r = t.get('vysledek','').lower()
+        if r not in ('win','loss'): continue
+        if r == cur_type: cur_str += 1
+        else: cur_str = 1; cur_type = r
+        if cur_type == 'win'  and cur_str > best_win_str:  best_win_str  = cur_str
+        if cur_type == 'loss' and cur_str > best_loss_str: best_loss_str = cur_str
+
+    # Délky obchodů
+    def _mins(t):
+        raw = t.get('delka_obchodu','')
+        try:
+            parts = raw.split(); return int(parts[0].replace('h',''))*60 + int(parts[1].replace('m',''))
+        except: return 0
+    all_dur = [_mins(t) for t in valid if _mins(t) > 0]
+    win_dur = [_mins(t) for t in valid if t.get('vysledek','').lower()=='win' and _mins(t)>0]
+    loss_dur= [_mins(t) for t in valid if t.get('vysledek','').lower()=='loss' and _mins(t)>0]
+    def _fmt_dur(mins_list):
+        if not mins_list: return "N/A"
+        avg = sum(mins_list)/len(mins_list); h,m = divmod(int(avg),60); return f"{h}h {m}m"
+
+    # Agregace per-kategorie
+    def _agg(key_fn):
+        d = _dd(lambda: {'wins':0,'losses':0,'count':0,'r':0.0,'rrr_sum':0.0})
+        for t in valid:
+            k = key_fn(t); res = t.get('vysledek','').lower(); rv = _r(t)
+            d[k]['count'] += 1; d[k]['r'] += rv if res=='win' else -1.0 if res=='loss' else 0
+            d[k]['rrr_sum'] += rv
+            if res=='win': d[k]['wins'] += 1
+            elif res=='loss': d[k]['losses'] += 1
+        return d
+
+    def _setup_norm(t):
+        s = t.get('fibo','?').upper()
+        if 'GOLDEN' in s: return 'Golden Zone'
+        if 'DISCOUNT' in s: return 'Discount'
+        if 'PREMIUM' in s: return 'Premium'
+        if 'ORDER' in s: return 'Order Block'
+        if 'BREAKER' in s: return 'Breaker'
+        if 'FVG' in s: return 'FVG Only'
+        return s if s else 'Nezadáno'
+
+    by_session = _agg(lambda t: t.get('session','Nezadáno') or 'Nezadáno')
+    by_setup   = _agg(_setup_norm)
+    by_symbol  = _agg(lambda t: t.get('symbol','Nezadáno') or 'Nezadáno')
+    by_day     = _agg(lambda t: t.get('den_tydne','Nezadáno') or 'Nezadáno')
+    by_dir     = _agg(lambda t: t.get('smer','Nezadáno') or 'Nezadáno')
+    by_tf      = _agg(lambda t: t.get('timeframe_vstup','N/A') or 'N/A')
+    by_month   = _agg(lambda t: (t.get('cas_otevreni','')[:7] or 'N/A'))
+    by_combo   = _agg(lambda t: f"{t.get('session','?')} | {t.get('symbol','?')} | {_setup_norm(t)}")
+
+    # Tags
+    tag_stats = _dd(lambda: {'wins':0,'count':0,'r':0.0})
+    for t in valid:
+        tags = t.get('tags','')
+        if not tags: continue
+        for tag in tags.replace(',',' ').split():
+            tag = tag.strip()
+            if not tag: continue
+            res = t.get('vysledek','').lower()
+            tag_stats[tag]['count'] += 1
+            tag_stats[tag]['r'] += _r(t) if res=='win' else -1.0 if res=='loss' else 0
+            if res=='win': tag_stats[tag]['wins'] += 1
+
+    # Datum range
+    dates = sorted([t.get('cas_otevreni','')[:10] for t in valid if t.get('cas_otevreni','')])
+    date_range = f"{dates[0]} → {dates[-1]}" if dates else "N/A"
+
+    # ── Formátování Markdown ─────────────────────────────────────────────────
+    def _wr(d): return d['wins']/d['count']*100 if d['count']>0 else 0
+    def _table_row(name, d):
+        wr = _wr(d); net = d['r']
+        sign = '+' if net >= 0 else ''
+        return f"| {name:<28} | {d['count']:>6} | {d['wins']:>4} | {d['losses']:>5} | {wr:>6.1f}% | {sign}{net:>6.2f}R |"
+
+    def _section(title, data_dict, sort_by='wr', top=None):
+        lines = [f"\n## {title}\n",
+                 f"| {'Kategorie':<28} | {'Počet':>6} | {'WIN':>4} | {'LOSS':>5} | {'Winrate':>7} | {'Net R':>7} |",
+                  "|" + "-"*30 + "|" + "-"*8 + "|" + "-"*6 + "|" + "-"*7 + "|" + "-"*9 + "|" + "-"*9 + "|"]
+        items = list(data_dict.items())
+        if sort_by == 'wr':
+            items.sort(key=lambda x: _wr(x[1]), reverse=True)
+        elif sort_by == 'r':
+            items.sort(key=lambda x: x[1]['r'], reverse=True)
+        elif sort_by == 'count':
+            items.sort(key=lambda x: x[1]['count'], reverse=True)
+        if top: items = items[:top]
+        for name, d in items:
+            lines.append(_table_row(name, d))
+        return '\n'.join(lines)
+
+    # Plný seznam obchodů
+    trade_rows = []
+    trade_rows.append("\n## Kompletní seznam obchodů\n")
+    trade_rows.append("| Datum       | Symbol   | Směr | Setup            | Seance  | RRR  | Výsledek | Net R  | Délka    | Kvalita | Poznámka |")
+    trade_rows.append("|-------------|----------|------|------------------|---------|------|----------|--------|----------|---------|----------|")
+    for t in sorted(valid, key=lambda x: x.get('cas_otevreni','')):
+        res = t.get('vysledek','').lower()
+        rv = _r(t) if res=='win' else -1.0 if res=='loss' else 0.0
+        sign = '+' if rv >= 0 else ''
+        trade_rows.append(
+            f"| {t.get('cas_otevreni','')[:10]:<11} "
+            f"| {t.get('symbol',''):<8} "
+            f"| {t.get('smer',''):<4} "
+            f"| {_setup_norm(t):<16} "
+            f"| {t.get('session',''):<7} "
+            f"| {_r(t):<4.1f} "
+            f"| {t.get('vysledek','').upper():<8} "
+            f"| {sign}{rv:<6.2f} "
+            f"| {t.get('delka_obchodu',''):<8} "
+            f"| {t.get('kvalita',''):<7} "
+            f"| {(t.get('poznamka','') or '')[:40]:<40} |"
+        )
+
+    # Top 5 nejlepší / nejhorší obchody
+    win_trades  = sorted([t for t in valid if t.get('vysledek','').lower()=='win'],  key=_r, reverse=True)[:5]
+    loss_trades = sorted([t for t in valid if t.get('vysledek','').lower()=='loss'], key=_r)[:5]
+
+    def _trade_line(t):
+        return (f"  - {t.get('cas_otevreni','')[:10]} | {t.get('symbol','')} {t.get('smer','')} | "
+                f"{_setup_norm(t)} | {t.get('session','')} | RRR {_r(t):.1f} | "
+                f"{t.get('poznamka','')[:60]}")
+
+    # ── Sestavení dokumentu ──────────────────────────────────────────────────
+    lines = []
+    lines.append(f"# 📊 SMC Trading Journal — AI Analýza")
+    lines.append(f"\n**Projekt:** {current_project_name or 'N/A'}  ")
+    lines.append(f"**Mód:** {current_mode}  ")
+    lines.append(f"**Období:** {date_range}  ")
+    lines.append(f"**Exportováno:** {datetime.now().strftime('%Y-%m-%d %H:%M')}  ")
+    lines.append(f"**Celkem obchodů:** {total} (WIN: {wins} | LOSS: {losses} | BE: {bes})")
+
+    lines.append(f"\n---\n")
+    lines.append(f"## Celkové statistiky\n")
+    lines.append(f"| Metrika               | Hodnota       |")
+    lines.append(f"|-----------------------|---------------|")
+    lines.append(f"| Winrate               | {winrate:.1f}%       |")
+    lines.append(f"| Profit Factor         | {profit_factor:.2f}         |")
+    lines.append(f"| Expectancy            | {expectancy:+.3f}R      |")
+    lines.append(f"| Celkový net P&L       | {equity[-1]:+.2f}R      |")
+    lines.append(f"| Max Drawdown          | {max_dd:.2f}R         |")
+    lines.append(f"| Průměrné RRR          | 1:{avg_rrr:.2f}       |")
+    lines.append(f"| Průměrný WIN          | +{avg_win_r:.2f}R      |")
+    lines.append(f"| Průměrný LOSS         | -{avg_loss_r:.2f}R      |")
+    lines.append(f"| Nejlepší WIN série    | {best_win_str} v řadě     |")
+    lines.append(f"| Nejhorší LOSS série   | {best_loss_str} v řadě     |")
+    lines.append(f"| Průměrná délka (vše)  | {_fmt_dur(all_dur)}       |")
+    lines.append(f"| Průměrná délka (WIN)  | {_fmt_dur(win_dur)}       |")
+    lines.append(f"| Průměrná délka (LOSS) | {_fmt_dur(loss_dur)}       |")
+
+    lines.append(_section("Výkonnost podle SEANCE", by_session, sort_by='wr'))
+    lines.append(_section("Výkonnost podle SETUPU", by_setup, sort_by='wr'))
+    lines.append(_section("Výkonnost podle SYMBOLU", by_symbol, sort_by='r'))
+    lines.append(_section("Výkonnost podle DNE V TÝDNU", by_day, sort_by='wr'))
+    lines.append(_section("Výkonnost podle SMĚRU (Buy/Sell)", by_dir, sort_by='wr'))
+    lines.append(_section("Výkonnost podle TIMEFRAME", by_tf, sort_by='wr'))
+    lines.append(_section("Výkonnost podle MĚSÍCE", by_month, sort_by='count'))
+    lines.append(_section("TOP 15 KOMBINACÍ (Seance | Symbol | Setup)", by_combo, sort_by='r', top=15))
+
+    if tag_stats:
+        lines.append(f"\n## Výkonnost podle TAGŮ\n")
+        lines.append(f"| {'Tag':<20} | {'Počet':>6} | {'WIN':>4} | {'Winrate':>7} | {'Net R':>7} |")
+        lines.append("|" + "-"*22 + "|" + "-"*8 + "|" + "-"*6 + "|" + "-"*9 + "|" + "-"*9 + "|")
+        for tag, d in sorted(tag_stats.items(), key=lambda x: x[1]['r'], reverse=True):
+            wr = d['wins']/d['count']*100 if d['count']>0 else 0
+            lines.append(f"| {tag:<20} | {d['count']:>6} | {d['wins']:>4} | {wr:>6.1f}% | {d['r']:>+7.2f}R |")
+
+    lines.append(f"\n## TOP 5 nejlepších obchodů (WIN)\n")
+    for t in win_trades: lines.append(_trade_line(t))
+
+    lines.append(f"\n## TOP 5 nejhorších obchodů (LOSS)\n")
+    for t in loss_trades: lines.append(_trade_line(t))
+
+    lines.extend(trade_rows)
+
+    lines.append(f"\n---")
+    lines.append(f"\n> *Export vygenerován programem SMC Journal PRO v{VERSION}*")
+    lines.append(f"> *Nahraj tento soubor do AI (ChatGPT / Claude) a zeptej se:*")
+    lines.append(f"> *\"Analyzuj moje výsledky, řekni mi co mi funguje nejlépe a co bych měl změnit.\"*")
+
+    content = '\n'.join(lines)
+
+    # ── Uložení souboru ──────────────────────────────────────────────────────
+    default_name = f"AI_export_{current_project_name or 'journal'}_{datetime.now().strftime('%Y%m%d')}.md"
+    filepath = filedialog.asksaveasfilename(
+        defaultextension=".md",
+        filetypes=[("Markdown", "*.md"), ("Text", "*.txt"), ("Vše", "*.*")],
+        initialfile=default_name,
+        title="Export pro AI — uložit jako"
+    )
+    if not filepath: return
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(content)
+    messagebox.showinfo("Export hotov",
+        f"Soubor uložen:\n{filepath}\n\n"
+        f"Nahraj ho do ChatGPT nebo Claude a zeptej se:\n"
+        f"\"Analyzuj moje výsledky a řekni co mi funguje nejlépe.\"")
+
 
 def update_statistics():
     global best_performers_frame, stats_symbol_combo, prop_equity_label, prop_balance_label, bar_chart_canvases, kpi_frame, tables_frame
@@ -8150,6 +8399,9 @@ def show_main_screen(p_name):
     tk.Button(stats_ctrl_frame, text="🧪  A/B SIMULACE", command=run_ab_simulation,
               bg=DT_BTN, fg=DT_SUBTEXT, font=("Segoe UI", 9, "bold"),
               relief='flat', padx=12, pady=4).pack(side="right", padx=4)
+    tk.Button(stats_ctrl_frame, text="🤖  EXPORT PRO AI", command=export_for_ai,
+              bg='#7c3aed', fg='white', font=("Segoe UI", 9, "bold"),
+              relief='flat', padx=12, pady=4, cursor='hand2').pack(side="right", padx=4)
 
     # ── KPI karty ──────────────────────────────────────────────────────────────
     kpi_frame = tk.Frame(st_f, bg=DT_BG)
