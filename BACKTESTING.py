@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.72"
+VERSION = "1.5.73"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2552,6 +2552,9 @@ def setup_settings_ui(parent):
     canvas = tk.Canvas(main_frame); scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview); scrollable_frame = tk.Frame(canvas, padx=20, pady=20)
     scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     canvas.create_window((0, 0), window=scrollable_frame, anchor="nw"); canvas.configure(yscrollcommand=scrollbar.set); canvas.pack(side="left", fill="both", expand=True); scrollbar.pack(side="right", fill="y")
+    def _on_wheel(e): canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+    canvas.bind("<MouseWheel>", _on_wheel)
+    scrollable_frame.bind("<MouseWheel>", _on_wheel)
     cats = ["thresholds", "setups", "sessions", "days", "rrr", "pips"]
     for cat in cats:
         tk.Label(scrollable_frame, text=cat.upper(), font=('Arial', 10, 'bold'), fg="#2c3e50").pack(pady=(15,5), anchor='center'); entries[cat] = {}; cf = tk.Frame(scrollable_frame); cf.pack(anchor='center'); col = 0; keys = list(cfg[cat].keys())
@@ -7005,10 +7008,10 @@ def open_settings_window(initial_tab=0):
     """Centrální nastavení — motiv, aktualizace, páry, scoring, sloupce, složka projektu."""
     sw = tk.Toplevel(root)
     sw.title("Nastavení")
-    sw.geometry("720x560")
+    sw.geometry("1060x580")
     sw.configure(bg=DT_BG)
     sw.resizable(True, True)
-    sw.minsize(600, 480)
+    sw.minsize(900, 480)
     sw.lift(); sw.focus_set()
 
     # Hlavička
@@ -7021,7 +7024,7 @@ def open_settings_window(initial_tab=0):
     nb.pack(fill='both', expand=True, padx=8, pady=8)
 
     # ── Tab: Motiv ────────────────────────────────────────────────────────────
-    t_theme = ttk.Frame(nb); nb.add(t_theme, text='  🎨 Motiv  ')
+    t_theme = ttk.Frame(nb); nb.add(t_theme, text=' 🎨 Motiv ')
     _th_frame = tk.Frame(t_theme, bg=DT_BG, padx=28, pady=24)
     _th_frame.pack(fill='both', expand=True)
     tk.Label(_th_frame, text="Barevný motiv aplikace", bg=DT_BG, fg=DT_TEXT,
@@ -7066,7 +7069,7 @@ def open_settings_window(initial_tab=0):
                  font=('Segoe UI', 9)).pack(side='left', padx=12)
 
     # ── Tab: Obecné (měna, jazyk) ─────────────────────────────────────────────
-    t_gen = ttk.Frame(nb); nb.add(t_gen, text='  ⚙ Obecné  ')
+    t_gen = ttk.Frame(nb); nb.add(t_gen, text=' ⚙ Obecné ')
     _gen_frame = tk.Frame(t_gen, bg=DT_BG, padx=28, pady=24)
     _gen_frame.pack(fill='both', expand=True)
     tk.Label(_gen_frame, text="Obecné nastavení", bg=DT_BG, fg=DT_TEXT,
@@ -7097,7 +7100,7 @@ def open_settings_window(initial_tab=0):
               padx=12, pady=4, relief='flat', cursor='hand2').pack(side='left', padx=10)
 
     # ── Tab: Aktualizace ─────────────────────────────────────────────────────
-    t_upd = ttk.Frame(nb); nb.add(t_upd, text='  🔄 Aktualizace  ')
+    t_upd = ttk.Frame(nb); nb.add(t_upd, text=' 🔄 Aktualizace ')
     _upd_frame = tk.Frame(t_upd, bg=DT_BG, padx=28, pady=24)
     _upd_frame.pack(fill='both', expand=True)
     tk.Label(_upd_frame, text="Aktualizace programu", bg=DT_BG, fg=DT_TEXT,
@@ -7117,15 +7120,15 @@ def open_settings_window(initial_tab=0):
               padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
 
     # ── Tab: Páry & Timeframes ────────────────────────────────────────────────
-    t_lists = ttk.Frame(nb); nb.add(t_lists, text='  📊 Páry & TF  ')
+    t_lists = ttk.Frame(nb); nb.add(t_lists, text=' 📊 Páry & TF ')
     setup_lists_manager_ui(t_lists)
 
     # ── Tab: Scoring ──────────────────────────────────────────────────────────
-    t_score = ttk.Frame(nb); nb.add(t_score, text='  🏆 Scoring  ')
+    t_score = ttk.Frame(nb); nb.add(t_score, text=' 🏆 Scoring ')
     setup_settings_ui(t_score)
 
     # ── Tab: Sloupce tabulky ─────────────────────────────────────────────────
-    t_cols = ttk.Frame(nb); nb.add(t_cols, text='  ⚙ Sloupce  ')
+    t_cols = ttk.Frame(nb); nb.add(t_cols, text=' ⚙ Sloupce ')
     _cols_frame = tk.Frame(t_cols, bg=DT_BG, padx=28, pady=24)
     _cols_frame.pack(fill='both', expand=True)
     tk.Label(_cols_frame, text="Sloupce tabulky obchodů", bg=DT_BG, fg=DT_TEXT,
@@ -7141,7 +7144,7 @@ def open_settings_window(initial_tab=0):
               padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
 
     # ── Tab: Složka projektu ──────────────────────────────────────────────────
-    t_folder = ttk.Frame(nb); nb.add(t_folder, text='  📁 Složka projektu  ')
+    t_folder = ttk.Frame(nb); nb.add(t_folder, text=' 📁 Složka ')
     _fld_frame = tk.Frame(t_folder, bg=DT_BG, padx=28, pady=24)
     _fld_frame.pack(fill='both', expand=True)
     tk.Label(_fld_frame, text="Vlastní složka projektu", bg=DT_BG, fg=DT_TEXT,
@@ -7242,7 +7245,7 @@ def open_settings_window(initial_tab=0):
                   padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
     # ── Tab: Prohlížeč ────────────────────────────────────────────────────────
-    t_browser = ttk.Frame(nb); nb.add(t_browser, text='  🌐 Prohlížeč  ')
+    t_browser = ttk.Frame(nb); nb.add(t_browser, text=' 🌐 Prohlížeč ')
     _br_frame = tk.Frame(t_browser, bg=DT_BG, padx=28, pady=24)
     _br_frame.pack(fill='both', expand=True)
     tk.Label(_br_frame, text="Prohlížeč pro TradingView", bg=DT_BG, fg=DT_TEXT,
@@ -7315,7 +7318,7 @@ def open_settings_window(initial_tab=0):
               padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
     # ── Tab: Firebase ─────────────────────────────────────────────────────────
-    t_fb = ttk.Frame(nb); nb.add(t_fb, text='  🔥 Firebase  ')
+    t_fb = ttk.Frame(nb); nb.add(t_fb, text=' 🔥 Firebase ')
     _fb_frame = tk.Frame(t_fb, bg=DT_BG, padx=28, pady=24)
     _fb_frame.pack(fill='both', expand=True)
 
@@ -7439,7 +7442,7 @@ def open_settings_window(initial_tab=0):
               padx=12, pady=6, relief='flat', cursor='hand2').pack(side='left')
 
     # ── Tab: XP Systém ────────────────────────────────────────────────────────
-    t_xp = ttk.Frame(nb); nb.add(t_xp, text='  ⭐ XP Systém  ')
+    t_xp = ttk.Frame(nb); nb.add(t_xp, text=' ⭐ XP Systém ')
     xp_outer = tk.Frame(t_xp, bg=DT_BG)
     xp_outer.pack(fill='both', expand=True)
 
