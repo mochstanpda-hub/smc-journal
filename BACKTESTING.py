@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.64"
+VERSION = "1.5.65"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4207,6 +4207,10 @@ def _analyze_screenshot_dispatch(image_path):
 
     # Vyber profil s VÍCE nalezenými cenami (Tomáš vyhraje při stejném počtu)
     if cnt_t >= cnt_p:
+        # Tomáš vyhrál na cenách — doplň časy z Patrika (blue-box analýza)
+        for _tk in ('cas_otevreni', 'cas_zavreni', 'symbol'):
+            if result_patrik.get(_tk) and not result_tomas.get(_tk):
+                result_tomas[_tk] = result_patrik[_tk]
         return result_tomas
     return result_patrik
 
