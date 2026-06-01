@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.66"
+VERSION = "1.5.67"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3906,6 +3906,15 @@ def analyze_screenshot_tomas(image_path):
             try:
                 v = float(n)
                 if v > 0.01: return v
+            except: pass
+        # Speciální případ: 6místné číslo bez oddělovačů = XAUUSD/index cena
+        # kde OCR slil čárku tisíců + desetinnou tečku dohromady.
+        # Příklad: "350400" → OCR z "3,504.00" → interpretuj jako 3504.00
+        # Příklad: "344547" → OCR z "3,445.47" → interpretuj jako 3445.47
+        for n in re.findall(r'(?<!\d)\d{6}(?!\d)', text):
+            try:
+                v = float(n[:-2] + '.' + n[-2:])
+                if 200 <= v <= 9999: return v   # rozsah XAUUSD a podobných komodit
             except: pass
         for n in re.findall(r'\d{4,}', text):
             try:
