@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.63"
+VERSION = "1.5.64"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4193,11 +4193,11 @@ def _analyze_screenshot_dispatch(image_path):
         result_patrik = {}
         cnt_p = 0
 
-    if cnt_p >= 2:
-        # Patrikův profil uspěl — použij ho
+    if cnt_p >= 3:
+        # Patrikův profil našel všechny 3 ceny — použij ho ihned, není co řešit
         return result_patrik
 
-    # Patrikův profil nenašel dost cen — zkus Tomáše
+    # Patrikův profil nenašel kompletní sadu — zkus také Tomáše
     try:
         result_tomas = analyze_screenshot_tomas(image_path)
         cnt_t = _count_prices(result_tomas)
@@ -4205,6 +4205,7 @@ def _analyze_screenshot_dispatch(image_path):
         result_tomas = {}
         cnt_t = 0
 
+    # Vyber profil s VÍCE nalezenými cenami (Tomáš vyhraje při stejném počtu)
     if cnt_t >= cnt_p:
         return result_tomas
     return result_patrik
