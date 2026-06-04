@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.85"
+VERSION = "1.5.86"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2024,12 +2024,12 @@ il='IČO' if lang=='CZ' else 'IN'; dl='DIČ' if lang=='CZ' else 'VAT'
 ob=Table([[Paragraph(f"<b>{tr['recipient']}:</b>",st_h),Paragraph(f"<b>{inv_data.get('odberatel_firma','')}</b><br/>{inv_data.get('odberatel_ulice','')}<br/>{inv_data.get('odberatel_psc','')} {inv_data.get('odberatel_mesto','')}, {inv_data.get('odberatel_stat','')}<br/>{il}: {inv_data.get('odberatel_ico','')}{'  |  '+dl+': '+inv_data.get('odberatel_dic','') if inv_data.get('odberatel_dic') else ''}",st_n)]],colWidths=[W*0.22,W*0.78]); ob.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f8fafc')),('BOX',(0,0),(-1,-1),0.5,colors.HexColor('#e2e8f0')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('LEFTPADDING',(0,0),(-1,-1),10)])); story.append(ob); story.append(Spacer(1,6*mm))
 polozky=inv_data.get('polozky',[]); th=[tr['description'],tr['qty'],tr['unit_price'],tr['total']]; td=[th]; cb=0.0; mena=inv_data.get('mena','CZK')
 for p in polozky:
-    q=float(p.get('qty',1)); c=float(p.get('cena',0)); tp=q*c; cb+=tp; td.append([p.get('popis',''),f"{q:.0f}" if q==int(q) else f"{q:.2f}",f"{c:,.2f} {mena}",f"{tp:,.2f} {mena}"])
+    q=float(p.get('qty',1)); c=float(p.get('cena',0)); tp=q*c; cb+=tp; td.append([Paragraph(p.get('popis',''),st_n),f"{q:.0f}" if q==int(q) else f"{q:.2f}",f"{c:,.2f} {mena}",f"{tp:,.2f} {mena}"])
 sd=float(inv_data.get('sazba_dph',0)); dph=cb*sd/100; cel=cb+dph
 if sd>0: td.append(['','',f"{tr['tax_base']}:",f"{cb:,.2f} {mena}"]); td.append(['','',f"{tr['vat']} {sd:.0f}%:",f"{dph:,.2f} {mena}"])
 td.append(['','',f"{tr['total_due']}:",f"{cel:,.2f} {mena}"])
 cw=[W*0.50,W*0.12,W*0.18,W*0.20]; pt=Table(td,colWidths=cw,repeatRows=1); n=len(td); last=n-1
-pt.setStyle(TableStyle([('FONTNAME',(0,0),(-1,-1),fn),('FONTSIZE',(0,0),(-1,-1),9),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1e293b')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),bold_fn),('ALIGN',(1,0),(-1,-1),'RIGHT'),('ROWPADDING',(0,0),(-1,-1),5),('LINEBELOW',(0,0),(-1,-2),0.3,colors.HexColor('#e2e8f0')),('BACKGROUND',(0,last),(-1,last),colors.HexColor('#1e3a5f')),('TEXTCOLOR',(0,last),(-1,last),colors.white),('FONTNAME',(0,last),(-1,last),bold_fn),('FONTSIZE',(0,last),(-1,last),10)])); story.append(pt); story.append(Spacer(1,6*mm))
+pt.setStyle(TableStyle([('FONTNAME',(0,0),(-1,-1),fn),('FONTSIZE',(0,0),(-1,-1),9),('VALIGN',(0,0),(-1,-1),'TOP'),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1e293b')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),bold_fn),('ALIGN',(1,0),(-1,-1),'RIGHT'),('ROWPADDING',(0,0),(-1,-1),5),('LINEBELOW',(0,0),(-1,-2),0.3,colors.HexColor('#e2e8f0')),('BACKGROUND',(0,last),(-1,last),colors.HexColor('#1e3a5f')),('TEXTCOLOR',(0,last),(-1,last),colors.white),('FONTNAME',(0,last),(-1,last),bold_fn),('FONTSIZE',(0,last),(-1,last),10)])); story.append(pt); story.append(Spacer(1,6*mm))
 bi=[]
 if details.get('cislo_uctu'): bi.append(f"{tr['account']}: <b>{details['cislo_uctu']}</b>")
 if details.get('iban'): bi.append(f"IBAN: <b>{details['iban']}</b>")
@@ -2222,7 +2222,7 @@ def generate_invoice_pdf(inv_data, details, filepath):
         total_p = qty * cena
         celkem_bez_dph += total_p
         tbl_data.append([
-            p.get('popis',''),
+            Paragraph(p.get('popis',''), st_n),
             f"{qty:.0f}" if qty == int(qty) else f"{qty:.2f}",
             f"{cena:,.2f} {mena}",
             f"{total_p:,.2f} {mena}"
@@ -2244,6 +2244,7 @@ def generate_invoice_pdf(inv_data, details, filepath):
     pt.setStyle(TableStyle([
         ('FONTNAME',      (0,0),  (-1,-1), fn),
         ('FONTSIZE',      (0,0),  (-1,-1), 9),
+        ('VALIGN',        (0,0),  (-1,-1), 'TOP'),
         ('BACKGROUND',    (0,0),  (-1,0),  colors.HexColor('#1e293b')),
         ('TEXTCOLOR',     (0,0),  (-1,0),  colors.white),
         ('FONTNAME',      (0,0),  (-1,0),  bold_fn),
