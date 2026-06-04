@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.84"
+VERSION = "1.5.85"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -9611,6 +9611,16 @@ def show_intro_screen():
         w = tk.Toplevel(root); w.title("Faktury"); w.geometry("860x560")
         w.configure(bg=DT_BG); w.lift(); w.focus_set()
         setup_invoices_tab(w)
+
+    tk.Button(bottom_bar, text="⚙  Nastavení",
+              command=open_settings_window,
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+
+    tk.Button(bottom_bar, text="🔄  Aktualizace",
+              command=lambda: check_for_updates(silent=False),
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
 
     tk.Button(bottom_bar, text="📄  Faktury",
               command=_open_invoices_window,
