@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.74"
+VERSION = "1.5.75"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -786,6 +786,10 @@ TIMEFRAMES_FILE = '' # NOVÉ: Soubor pro seznam timeframe
 RULES_FILE = '' # NOVÉ: Soubor pro pravidla
 FILTERS_FILE = '' # Soubor pro uložené filtry
 ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
+INVOICES_DIR  = '' # Složka s fakturami projektu
+
+# Osobní údaje pro faktury — globální (nesouvisí s konkrétním projektem)
+INVOICE_DETAILS_FILE = os.path.join(_APP_DIR, 'invoice_details.json')
 
 # XP Systém — bodovací žebříček (globální, napříč projekty)
 XP_FILE             = os.path.join(_APP_DIR, 'xp_data.json')
@@ -1823,6 +1827,631 @@ def run_ab_simulation():
     canvas = FigureCanvasTkAgg(fig, master=popup)
     canvas.draw()
     canvas.get_tk_widget().pack(fill='both', expand=True)
+
+# ==============================================================================
+# FAKTURY — load/save/generate
+# ==============================================================================
+
+def load_invoice_details():
+    """Načte osobní údaje dodavatele pro faktury (globální soubor)."""
+    defaults = {
+        'jmeno': '', 'prijmeni': '', 'firma': '',
+        'ico': '', 'dic': '',
+        'ulice': '', 'mesto': '', 'psc': '', 'stat': 'Česká republika',
+        'email': '', 'telefon': '',
+        'banka': '', 'cislo_uctu': '', 'iban': '', 'swift': '',
+        'platce_dph': False,
+        'footer_text': 'Fyzická osoba zapsaná v živnostenském rejstříku.'
+    }
+    try:
+        if os.path.exists(INVOICE_DETAILS_FILE):
+            with open(INVOICE_DETAILS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            defaults.update(data)
+    except: pass
+    return defaults
+
+def save_invoice_details(data):
+    try:
+        with open(INVOICE_DETAILS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nelze uložit údaje: {e}")
+
+def load_invoices_list():
+    """Načte seznam faktur projektu."""
+    if not INVOICES_DIR: return []
+    idx = os.path.join(INVOICES_DIR, 'invoices_index.json')
+    try:
+        if os.path.exists(idx):
+            with open(idx, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except: pass
+    return []
+
+def save_invoices_list(lst):
+    if not INVOICES_DIR: return
+    os.makedirs(INVOICES_DIR, exist_ok=True)
+    idx = os.path.join(INVOICES_DIR, 'invoices_index.json')
+    with open(idx, 'w', encoding='utf-8') as f:
+        json.dump(lst, f, indent=2, ensure_ascii=False)
+
+def generate_invoice_pdf(inv_data, details, filepath):
+    """Vygeneruje PDF fakturu pomocí reportlab."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                        Paragraph, Spacer, HRFlowable)
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except ImportError:
+        messagebox.showerror("Chyba", "Chybí knihovna 'reportlab'.\npip install reportlab")
+        return False
+
+    try: pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf')); fn = 'Arial'
+    except: fn = 'Helvetica'
+
+    doc = SimpleDocTemplate(filepath, pagesize=A4,
+                            leftMargin=20*mm, rightMargin=20*mm,
+                            topMargin=18*mm, bottomMargin=18*mm)
+
+    W = A4[0] - 40*mm   # šířka obsahu
+    styles = getSampleStyleSheet()
+
+    def ps(name, **kw):
+        return ParagraphStyle(name, fontName=fn, **kw)
+
+    st_title   = ps('T', fontSize=20, textColor=colors.HexColor('#1e293b'), spaceAfter=2)
+    st_sub     = ps('S', fontSize=9,  textColor=colors.HexColor('#64748b'), spaceAfter=2)
+    st_h       = ps('H', fontSize=10, textColor=colors.HexColor('#1e293b'), fontName=fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold')
+    st_n       = ps('N', fontSize=9,  textColor=colors.HexColor('#334155'), leading=13)
+    st_footer  = ps('F', fontSize=8,  textColor=colors.HexColor('#94a3b8'), alignment=1)
+
+    story = []
+
+    # ── Hlavička ─────────────────────────────────────────────────────────────
+    dodavatel_name = inv_data.get('dodavatel_firma') or \
+                     f"{details.get('jmeno','')} {details.get('prijmeni','')}".strip()
+    header_data = [[
+        Paragraph(f"<b>FAKTURA</b>", st_title),
+        Paragraph(f"<b>{dodavatel_name}</b>", st_h)
+    ],[
+        Paragraph(f"č. {inv_data.get('cislo','')}", st_sub),
+        Paragraph(f"{details.get('ulice','')}<br/>"
+                  f"{details.get('psc','')} {details.get('mesto','')}<br/>"
+                  f"IČO: {details.get('ico','')}{'  |  DIČ: '+details.get('dic','') if details.get('dic') else ''}<br/>"
+                  f"{details.get('email','')}{'  |  '+details.get('telefon','') if details.get('telefon') else ''}",
+                  st_n)
+    ]]
+    ht = Table(header_data, colWidths=[W*0.45, W*0.55])
+    ht.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('ALIGN',  (1,0), (1,-1), 'RIGHT'),
+    ]))
+    story.append(ht)
+    story.append(Spacer(1, 6*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0')))
+    story.append(Spacer(1, 5*mm))
+
+    # ── Info řádek (data + splatnost) ────────────────────────────────────────
+    info_data = [
+        ['Datum vystavení:', inv_data.get('datum_vystaveni',''),
+         'Datum splatnosti:', inv_data.get('datum_splatnosti','')],
+        ['Způsob platby:', inv_data.get('zpusob_platby','Bankovním převodem'),
+         'Variabilní symbol:', inv_data.get('var_symbol', inv_data.get('cislo',''))],
+    ]
+    it = Table(info_data, colWidths=[W*0.22, W*0.28, W*0.22, W*0.28])
+    it.setStyle(TableStyle([
+        ('FONTNAME',  (0,0), (-1,-1), fn),
+        ('FONTSIZE',  (0,0), (-1,-1), 9),
+        ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#64748b')),
+        ('TEXTCOLOR', (2,0), (2,-1), colors.HexColor('#64748b')),
+        ('TEXTCOLOR', (1,0), (1,-1), colors.HexColor('#1e293b')),
+        ('TEXTCOLOR', (3,0), (3,-1), colors.HexColor('#1e293b')),
+        ('FONTNAME',  (1,0), (1,-1), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('FONTNAME',  (3,0), (3,-1), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('ROWPADDING',(0,0), (-1,-1), 3),
+    ]))
+    story.append(it)
+    story.append(Spacer(1, 5*mm))
+
+    # ── Odběratel ────────────────────────────────────────────────────────────
+    odb_box = Table([[
+        Paragraph('<b>Odběratel:</b>', st_h),
+        Paragraph(
+            f"<b>{inv_data.get('odberatel_firma','')}</b><br/>"
+            f"{inv_data.get('odberatel_ulice','')}<br/>"
+            f"{inv_data.get('odberatel_psc','')} {inv_data.get('odberatel_mesto','')}, {inv_data.get('odberatel_stat','')}<br/>"
+            f"IČO: {inv_data.get('odberatel_ico','')}{'  |  DIČ: '+inv_data.get('odberatel_dic','') if inv_data.get('odberatel_dic') else ''}",
+            st_n)
+    ]], colWidths=[W*0.22, W*0.78])
+    odb_box.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+        ('ROUNDEDCORNERS', [4]),
+        ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+    ]))
+    story.append(odb_box)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Tabulka položek ──────────────────────────────────────────────────────
+    polozky = inv_data.get('polozky', [])
+    tbl_header = ['Popis', 'Množství', 'J. cena', 'Celkem']
+    tbl_data = [tbl_header]
+    celkem_bez_dph = 0.0
+    mena = inv_data.get('mena', 'CZK')
+    for p in polozky:
+        qty  = float(p.get('qty', 1))
+        cena = float(p.get('cena', 0))
+        total_p = qty * cena
+        celkem_bez_dph += total_p
+        tbl_data.append([
+            p.get('popis',''),
+            f"{qty:.0f}" if qty == int(qty) else f"{qty:.2f}",
+            f"{cena:,.2f} {mena}",
+            f"{total_p:,.2f} {mena}"
+        ])
+
+    sazba_dph = float(inv_data.get('sazba_dph', 0))
+    dph = celkem_bez_dph * sazba_dph / 100
+    celkem = celkem_bez_dph + dph
+
+    if sazba_dph > 0:
+        tbl_data.append(['','','Základ DPH:', f"{celkem_bez_dph:,.2f} {mena}"])
+        tbl_data.append(['','',f'DPH {sazba_dph:.0f}%:', f"{dph:,.2f} {mena}"])
+    tbl_data.append(['','','CELKEM K ÚHRADĚ:', f"{celkem:,.2f} {mena}"])
+
+    col_w = [W*0.50, W*0.12, W*0.18, W*0.20]
+    pt = Table(tbl_data, colWidths=col_w, repeatRows=1)
+    n_rows = len(tbl_data)
+    last = n_rows - 1
+    pt.setStyle(TableStyle([
+        ('FONTNAME',      (0,0),  (-1,-1), fn),
+        ('FONTSIZE',      (0,0),  (-1,-1), 9),
+        ('BACKGROUND',    (0,0),  (-1,0),  colors.HexColor('#1e293b')),
+        ('TEXTCOLOR',     (0,0),  (-1,0),  colors.white),
+        ('FONTNAME',      (0,0),  (-1,0),  fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('ALIGN',         (1,0),  (-1,-1), 'RIGHT'),
+        ('ROWPADDING',    (0,0),  (-1,-1), 5),
+        ('LINEBELOW',     (0,0),  (-1,-2), 0.3, colors.HexColor('#e2e8f0')),
+        ('BACKGROUND',    (0,last),(-1,last), colors.HexColor('#1e3a5f')),
+        ('TEXTCOLOR',     (0,last),(-1,last), colors.white),
+        ('FONTNAME',      (0,last),(-1,last), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('FONTSIZE',      (0,last),(-1,last), 10),
+    ]))
+    story.append(pt)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Bankovní spojení ──────────────────────────────────────────────────────
+    bank_items = []
+    if details.get('cislo_uctu'): bank_items.append(f"Číslo účtu: <b>{details['cislo_uctu']}</b>")
+    if details.get('iban'):       bank_items.append(f"IBAN: <b>{details['iban']}</b>")
+    if details.get('swift'):      bank_items.append(f"BIC/SWIFT: <b>{details['swift']}</b>")
+    if details.get('banka'):      bank_items.append(f"Banka: <b>{details['banka']}</b>")
+    if bank_items:
+        bank_box = Table([[Paragraph('Bankovní spojení', st_h),
+                           Paragraph('  |  '.join(bank_items), st_n)]],
+                         colWidths=[W*0.22, W*0.78])
+        bank_box.setStyle(TableStyle([
+            ('BACKGROUND', (0,0),(-1,-1), colors.HexColor('#f0fdf4')),
+            ('BOX', (0,0),(-1,-1), 0.5, colors.HexColor('#86efac')),
+            ('VALIGN', (0,0),(-1,-1),'MIDDLE'),
+            ('TOPPADDING', (0,0),(-1,-1), 8),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 8),
+            ('LEFTPADDING', (0,0),(-1,-1), 10),
+        ]))
+        story.append(bank_box)
+        story.append(Spacer(1, 4*mm))
+
+    # ── Poznámka ─────────────────────────────────────────────────────────────
+    if inv_data.get('poznamka'):
+        story.append(Paragraph(f"<b>Poznámka:</b> {inv_data['poznamka']}", st_n))
+        story.append(Spacer(1, 3*mm))
+
+    # ── Footer ───────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 4*mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e2e8f0')))
+    story.append(Spacer(1, 2*mm))
+    footer_txt = details.get('footer_text', '')
+    if not details.get('platce_dph', False):
+        footer_txt = (footer_txt + '  Nejsem plátce DPH.').strip()
+    story.append(Paragraph(footer_txt, st_footer))
+
+    doc.build(story)
+    return True
+
+
+def open_new_invoice_dialog(refresh_cb=None):
+    """Dialog pro vytvoření nové faktury."""
+    if not INVOICES_DIR:
+        messagebox.showwarning("Faktury", "Nejdřív otevři projekt!"); return
+
+    details = load_invoice_details()
+    invoices = load_invoices_list()
+
+    # Auto-číslo faktury: rok + pořadové číslo
+    yr = datetime.now().year
+    yr_invoices = [i for i in invoices if str(yr) in i.get('cislo','')]
+    next_num = len(yr_invoices) + 1
+    default_cislo = f"{yr}{next_num:03d}"
+
+    win = tk.Toplevel(root)
+    win.title("Nová faktura")
+    win.geometry("720x780")
+    win.configure(bg=DT_BG)
+    win.resizable(True, True)
+    win.grab_set()
+
+    # Scrollovatelný obsah
+    canv = tk.Canvas(win, bg=DT_BG, highlightthickness=0)
+    sb   = ttk.Scrollbar(win, command=canv.yview)
+    canv.pack(side='left', fill='both', expand=True)
+    sb.pack(side='right', fill='y')
+    frm  = tk.Frame(canv, bg=DT_BG, padx=28, pady=20)
+    canv.create_window((0,0), window=frm, anchor='nw')
+    frm.bind("<Configure>", lambda e: canv.configure(scrollregion=canv.bbox("all")))
+    canv.configure(yscrollcommand=sb.set)
+    canv.bind("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+    frm.bind("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+
+    tk.Label(frm, text="📄  Nová faktura", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI',14,'bold')).pack(anchor='w', pady=(0,16))
+
+    def _section(parent, title):
+        f = tk.LabelFrame(parent, text=f"  {title}  ", bg=DT_BG, fg=DT_SUBTEXT,
+                          font=('Segoe UI',9,'bold'), relief='solid', bd=1,
+                          labelanchor='nw')
+        f.pack(fill='x', pady=(0,10))
+        return f
+
+    def _row(parent, label, var=None, width=28, row=None, col=0, readonly=False):
+        r = tk.Frame(parent, bg=DT_BG)
+        r.pack(fill='x', padx=12, pady=3)
+        tk.Label(r, text=label, bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI',9), width=22, anchor='w').pack(side='left')
+        v = var or tk.StringVar()
+        state = 'readonly' if readonly else 'normal'
+        e = tk.Entry(r, textvariable=v, font=('Segoe UI',10), width=width,
+                     bg=DT_ENTRY, fg=DT_TEXT, relief='solid', bd=1,
+                     insertbackground=DT_ACCENT, state=state)
+        e.pack(side='left', fill='x', expand=True)
+        return v
+
+    vars_ = {}
+
+    # ── Faktura ──────────────────────────────────────────────────────────────
+    sf1 = _section(frm, "Faktura")
+    vars_['cislo']            = _row(sf1, "Číslo faktury:"); vars_['cislo'].set(default_cislo)
+    vars_['datum_vystaveni']  = _row(sf1, "Datum vystavení:"); vars_['datum_vystaveni'].set(datetime.now().strftime('%d.%m.%Y'))
+    vars_['datum_splatnosti'] = _row(sf1, "Datum splatnosti:"); vars_['datum_splatnosti'].set((datetime.now() + __import__('datetime').timedelta(days=14)).strftime('%d.%m.%Y'))
+    vars_['var_symbol']       = _row(sf1, "Variabilní symbol:"); vars_['var_symbol'].set(default_cislo)
+    vars_['zpusob_platby']    = _row(sf1, "Způsob platby:"); vars_['zpusob_platby'].set("Bankovním převodem")
+    vars_['mena']             = _row(sf1, "Měna:"); vars_['mena'].set("CZK")
+    vars_['sazba_dph']        = _row(sf1, "DPH sazba (%):"); vars_['sazba_dph'].set("0")
+
+    # ── Odběratel (prop firma) ───────────────────────────────────────────────
+    sf2 = _section(frm, "Odběratel — Prop firma")
+    vars_['odberatel_firma']  = _row(sf2, "Název firmy:")
+    vars_['odberatel_ulice']  = _row(sf2, "Ulice:")
+    vars_['odberatel_mesto']  = _row(sf2, "Město:")
+    vars_['odberatel_psc']    = _row(sf2, "PSČ:")
+    vars_['odberatel_stat']   = _row(sf2, "Stát:"); vars_['odberatel_stat'].set("Česká republika")
+    vars_['odberatel_ico']    = _row(sf2, "IČO:")
+    vars_['odberatel_dic']    = _row(sf2, "DIČ:")
+
+    # ── Položky faktury ──────────────────────────────────────────────────────
+    sf3 = _section(frm, "Položky faktury")
+    polozky_frame = tk.Frame(sf3, bg=DT_BG)
+    polozky_frame.pack(fill='x', padx=12, pady=6)
+    polozky_rows = []  # list of (popis_var, qty_var, cena_var)
+
+    def _add_polozka(popis='', qty='1', cena=''):
+        row_f = tk.Frame(polozky_frame, bg=DT_BG)
+        row_f.pack(fill='x', pady=2)
+        pv = tk.StringVar(value=popis)
+        qv = tk.StringVar(value=qty)
+        cv = tk.StringVar(value=cena)
+        tk.Entry(row_f, textvariable=pv, width=36, bg=DT_ENTRY, fg=DT_TEXT,
+                 font=('Segoe UI',9), relief='solid', bd=1,
+                 insertbackground=DT_ACCENT).pack(side='left', padx=(0,4))
+        tk.Label(row_f, text="Ks:", bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',9)).pack(side='left')
+        tk.Entry(row_f, textvariable=qv, width=5, bg=DT_ENTRY, fg=DT_TEXT,
+                 font=('Segoe UI',9), relief='solid', bd=1,
+                 insertbackground=DT_ACCENT).pack(side='left', padx=(2,4))
+        tk.Label(row_f, text="Cena:", bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',9)).pack(side='left')
+        tk.Entry(row_f, textvariable=cv, width=10, bg=DT_ENTRY, fg=DT_TEXT,
+                 font=('Segoe UI',9), relief='solid', bd=1,
+                 insertbackground=DT_ACCENT).pack(side='left', padx=(2,4))
+        def _rm():
+            row_f.destroy()
+            polozky_rows.remove((pv, qv, cv))
+        tk.Button(row_f, text="✕", command=_rm, bg=DT_SURFACE, fg='#ef4444',
+                  font=('Segoe UI',9), relief='flat', cursor='hand2',
+                  padx=4).pack(side='left')
+        polozky_rows.append((pv, qv, cv))
+
+    _add_polozka("Trading services — " + datetime.now().strftime('%B %Y'), '1', '')
+    tk.Button(sf3, text="＋  Přidat položku", command=_add_polozka,
+              bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI',9), relief='flat',
+              cursor='hand2', padx=10, pady=4).pack(anchor='w', padx=12, pady=(0,8))
+
+    # ── Poznámka ─────────────────────────────────────────────────────────────
+    sf4 = _section(frm, "Poznámka (volitelné)")
+    vars_['poznamka'] = _row(sf4, "Poznámka:")
+
+    # ── Uložit / Generovat ───────────────────────────────────────────────────
+    btn_f = tk.Frame(frm, bg=DT_BG)
+    btn_f.pack(fill='x', pady=(10,0))
+
+    def _save_invoice():
+        polozky = []
+        for pv, qv, cv in polozky_rows:
+            try:
+                polozky.append({'popis': pv.get(), 'qty': float(qv.get()), 'cena': float(cv.get().replace(',','.'))})
+            except:
+                messagebox.showerror("Chyba", "Zkontroluj množství a cenu (čísla)!"); return
+        if not polozky:
+            messagebox.showerror("Chyba", "Přidej alespoň jednu položku!"); return
+        if not vars_['odberatel_firma'].get().strip():
+            messagebox.showerror("Chyba", "Vyplň název odběratele!"); return
+
+        inv_data = {k: v.get() for k, v in vars_.items()}
+        inv_data['polozky'] = polozky
+        inv_data['created'] = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+        # Celková částka
+        try:
+            total = sum(float(p['qty'])*float(p['cena']) for p in polozky)
+            dph   = total * float(inv_data.get('sazba_dph',0)) / 100
+            inv_data['celkem'] = f"{total+dph:.2f} {inv_data.get('mena','CZK')}"
+        except: inv_data['celkem'] = ''
+
+        # Cesta k PDF
+        os.makedirs(INVOICES_DIR, exist_ok=True)
+        safe_num = inv_data['cislo'].replace('/','-').replace('\\','-')
+        pdf_name = f"faktura_{safe_num}.pdf"
+        pdf_path = os.path.join(INVOICES_DIR, pdf_name)
+
+        # Generuj PDF
+        det = load_invoice_details()
+        ok  = generate_invoice_pdf(inv_data, det, pdf_path)
+        if not ok: return
+
+        inv_data['pdf_file'] = pdf_name
+        invoices = load_invoices_list()
+        # Aktualizuj nebo přidej
+        existing = next((i for i,x in enumerate(invoices) if x.get('cislo')==inv_data['cislo']), None)
+        if existing is not None:
+            invoices[existing] = inv_data
+        else:
+            invoices.append(inv_data)
+        save_invoices_list(invoices)
+
+        messagebox.showinfo("Faktura uložena",
+            f"Faktura č. {inv_data['cislo']} uložena.\nPDF: {pdf_path}")
+        win.destroy()
+        if refresh_cb: refresh_cb()
+
+    def _save_and_open():
+        _save_invoice()
+        # Otevři PDF
+        invoices = load_invoices_list()
+        last = next((x for x in reversed(invoices) if x.get('cislo')==vars_['cislo'].get()), None)
+        if last and last.get('pdf_file'):
+            pdf_path = os.path.join(INVOICES_DIR, last['pdf_file'])
+            if os.path.exists(pdf_path):
+                try: os.startfile(pdf_path)
+                except: pass
+
+    tk.Button(btn_f, text="💾  Uložit fakturu", command=_save_invoice,
+              bg='#1d4ed8', fg='white', font=('Segoe UI',10,'bold'),
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+    tk.Button(btn_f, text="📄  Uložit a otevřít PDF", command=_save_and_open,
+              bg='#15803d', fg='white', font=('Segoe UI',10,'bold'),
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+    tk.Button(btn_f, text="Zrušit", command=win.destroy,
+              bg=DT_SURFACE, fg=DT_SUBTEXT, font=('Segoe UI',9),
+              padx=12, pady=8, relief='flat', cursor='hand2').pack(side='left')
+
+
+def setup_invoices_tab(parent):
+    """Záložka Faktury — přehled a správa faktur projektu."""
+    outer = tk.Frame(parent, bg=DT_BG)
+    outer.pack(fill='both', expand=True)
+
+    # Hlavička
+    hdr = tk.Frame(outer, bg=DT_PANEL, pady=10, padx=16)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="📄  Faktury", bg=DT_PANEL, fg=DT_TEXT,
+             font=('Segoe UI',12,'bold')).pack(side='left')
+
+    tree_frame = [None]  # bude vyplněno níže
+
+    def _refresh():
+        if tree_frame[0]:
+            for w in tree_frame[0].winfo_children(): w.destroy()
+        _build_list()
+
+    tk.Button(hdr, text="＋  Nová faktura",
+              command=lambda: open_new_invoice_dialog(refresh_cb=_refresh),
+              bg='#1d4ed8', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', padx=12, pady=4, cursor='hand2').pack(side='right')
+
+    # Tabulka faktur
+    cols_f = tk.Frame(outer, bg=DT_BG)
+    cols_f.pack(fill='both', expand=True, padx=12, pady=8)
+    tree_frame[0] = cols_f
+
+    def _build_list():
+        for w in cols_f.winfo_children(): w.destroy()
+        invoices = load_invoices_list()
+        if not invoices:
+            tk.Label(cols_f, text="Žádné faktury. Klikni '+ Nová faktura'.",
+                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',11)).pack(pady=40)
+            return
+
+        # Treeview
+        cols = ('Číslo', 'Datum', 'Splatnost', 'Odběratel', 'Celkem', 'Stav')
+        tv = ttk.Treeview(cols_f, columns=cols, show='headings', height=16)
+        widths = [100, 95, 95, 220, 120, 80]
+        for c, w in zip(cols, widths):
+            tv.heading(c, text=c); tv.column(c, width=w, anchor='w')
+        sb2 = ttk.Scrollbar(cols_f, command=tv.yview)
+        tv.configure(yscrollcommand=sb2.set)
+        tv.pack(side='left', fill='both', expand=True)
+        sb2.pack(side='right', fill='y')
+
+        for inv in sorted(invoices, key=lambda x: x.get('created',''), reverse=True):
+            tv.insert('', 'end', values=(
+                inv.get('cislo',''),
+                inv.get('datum_vystaveni',''),
+                inv.get('datum_splatnosti',''),
+                inv.get('odberatel_firma',''),
+                inv.get('celkem',''),
+                inv.get('stav','Vystavena')
+            ))
+
+        # Akce po výběru
+        btn_row = tk.Frame(cols_f, bg=DT_BG)
+        # btn_row placed below tv — need a different layout
+        btn_row2 = tk.Frame(outer, bg=DT_BG, pady=6)
+        btn_row2.pack(fill='x', padx=12)
+
+        def _get_selected_inv():
+            sel = tv.selection()
+            if not sel: return None
+            idx_tv = tv.index(sel[0])
+            inv_sorted = sorted(invoices, key=lambda x: x.get('created',''), reverse=True)
+            return inv_sorted[idx_tv] if idx_tv < len(inv_sorted) else None
+
+        def _open_pdf():
+            inv = _get_selected_inv()
+            if not inv: messagebox.showwarning("Faktury","Vyber fakturu."); return
+            pdf = os.path.join(INVOICES_DIR, inv.get('pdf_file',''))
+            if os.path.exists(pdf):
+                try: os.startfile(pdf)
+                except: messagebox.showerror("Chyba", f"Nelze otevřít: {pdf}")
+            else: messagebox.showerror("Chyba","PDF soubor nenalezen.")
+
+        def _mark_paid():
+            inv = _get_selected_inv()
+            if not inv: messagebox.showwarning("Faktury","Vyber fakturu."); return
+            inv['stav'] = 'Zaplacena'
+            invs = load_invoices_list()
+            for i, x in enumerate(invs):
+                if x.get('cislo') == inv.get('cislo'): invs[i] = inv
+            save_invoices_list(invs)
+            _refresh()
+
+        def _delete_inv():
+            inv = _get_selected_inv()
+            if not inv: return
+            if not messagebox.askyesno("Smazat", f"Smazat fakturu č. {inv.get('cislo','')}?"): return
+            invs = [x for x in load_invoices_list() if x.get('cislo') != inv.get('cislo')]
+            save_invoices_list(invs)
+            pdf = os.path.join(INVOICES_DIR, inv.get('pdf_file',''))
+            try:
+                if os.path.exists(pdf): os.remove(pdf)
+            except: pass
+            _refresh()
+
+        for txt, cmd, bg in [
+            ("📂 Otevřít PDF", _open_pdf,   '#1d4ed8'),
+            ("✅ Zaplacena",   _mark_paid,   '#15803d'),
+            ("🗑  Smazat",     _delete_inv,  '#b91c1c'),
+        ]:
+            tk.Button(btn_row2, text=txt, command=cmd, bg=bg, fg='white',
+                      font=('Segoe UI',9,'bold'), relief='flat',
+                      padx=12, pady=5, cursor='hand2').pack(side='left', padx=(0,6))
+
+    _build_list()
+
+
+def setup_invoice_details_settings(parent):
+    """Záložka Nastavení → Údaje — osobní údaje pro faktury."""
+    canv = tk.Canvas(parent, bg=DT_BG, highlightthickness=0)
+    sb   = ttk.Scrollbar(parent, command=canv.yview)
+    canv.pack(side='left', fill='both', expand=True)
+    sb.pack(side='right', fill='y')
+    frm = tk.Frame(canv, bg=DT_BG, padx=28, pady=20)
+    canv.create_window((0,0), window=frm, anchor='nw')
+    frm.bind("<Configure>", lambda e: canv.configure(scrollregion=canv.bbox("all")))
+    canv.configure(yscrollcommand=sb.set)
+    canv.bind("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+    frm.bind("<MouseWheel>", lambda e: canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+
+    tk.Label(frm, text="Osobní údaje pro faktury", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI',12,'bold')).pack(anchor='w', pady=(0,4))
+    tk.Label(frm, text="Tyto údaje se automaticky předvyplní na každé faktuře jako dodavatel.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',9)).pack(anchor='w', pady=(0,16))
+
+    det = load_invoice_details()
+    evars = {}
+
+    def _section(title):
+        f = tk.LabelFrame(frm, text=f"  {title}  ", bg=DT_BG, fg=DT_SUBTEXT,
+                          font=('Segoe UI',9,'bold'), relief='solid', bd=1)
+        f.pack(fill='x', pady=(0,10))
+        return f
+
+    def _field(parent, label, key, width=30):
+        r = tk.Frame(parent, bg=DT_BG); r.pack(fill='x', padx=12, pady=3)
+        tk.Label(r, text=label, bg=DT_BG, fg=DT_SUBTEXT,
+                 font=('Segoe UI',9), width=20, anchor='w').pack(side='left')
+        v = tk.StringVar(value=str(det.get(key,'')))
+        tk.Entry(r, textvariable=v, font=('Segoe UI',10), width=width,
+                 bg=DT_ENTRY, fg=DT_TEXT, relief='solid', bd=1,
+                 insertbackground=DT_ACCENT).pack(side='left', fill='x', expand=True)
+        evars[key] = v
+
+    s1 = _section("Identifikace")
+    _field(s1, "Jméno:", 'jmeno')
+    _field(s1, "Příjmení:", 'prijmeni')
+    _field(s1, "Název firmy (volitelné):", 'firma')
+    _field(s1, "IČO:", 'ico')
+    _field(s1, "DIČ (pokud plátce DPH):", 'dic')
+
+    s2 = _section("Adresa")
+    _field(s2, "Ulice a č.p.:", 'ulice')
+    _field(s2, "Město:", 'mesto')
+    _field(s2, "PSČ:", 'psc')
+    _field(s2, "Stát:", 'stat')
+
+    s3 = _section("Kontakt")
+    _field(s3, "E-mail:", 'email')
+    _field(s3, "Telefon:", 'telefon')
+
+    s4 = _section("Bankovní spojení")
+    _field(s4, "Číslo účtu:", 'cislo_uctu')
+    _field(s4, "IBAN:", 'iban')
+    _field(s4, "BIC / SWIFT:", 'swift')
+    _field(s4, "Název banky:", 'banka')
+
+    s5 = _section("Ostatní")
+    dph_var = tk.BooleanVar(value=bool(det.get('platce_dph', False)))
+    r_dph = tk.Frame(s5, bg=DT_BG); r_dph.pack(fill='x', padx=12, pady=3)
+    tk.Label(r_dph, text="Plátce DPH:", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI',9), width=20, anchor='w').pack(side='left')
+    tk.Checkbutton(r_dph, variable=dph_var, bg=DT_BG, fg=DT_TEXT,
+                   activebackground=DT_BG, cursor='hand2').pack(side='left')
+    _field(s5, "Text v patičce faktury:", 'footer_text', width=40)
+
+    def _save():
+        data = {k: v.get() for k, v in evars.items()}
+        data['platce_dph'] = dph_var.get()
+        save_invoice_details(data)
+        messagebox.showinfo("Uloženo", "Osobní údaje uloženy.")
+
+    tk.Button(frm, text="💾  Uložit údaje", command=_save,
+              bg='#15803d', fg='white', font=('Segoe UI',10,'bold'),
+              padx=20, pady=8, relief='flat', cursor='hand2').pack(anchor='w', pady=(12,0))
+
 
 def export_for_ai():
     """Exportuje kompletní statistiky do Markdown souboru pro analýzu v AI."""
@@ -7471,7 +8100,7 @@ def open_settings_window(initial_tab=0):
             PAIRS_FILE = os.path.join(p, 'pairs_config.json')
             TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json')
             RULES_FILE = os.path.join(p, 'rules.txt')
-            FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
+            FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
             messagebox.showinfo("Uloženo", f"Složka projektu uložena:\n{new_path}")
             sw.destroy()
             show_main_screen(current_project_name)
@@ -7692,6 +8321,9 @@ def open_settings_window(initial_tab=0):
 
     # ── Tab: XP Systém ────────────────────────────────────────────────────────
     t_xp = ttk.Frame(nb); nb.add(t_xp, text=' ⭐ XP Systém ')
+    # ── Tab: Osobní údaje (faktury) ───────────────────────────────────────────
+    t_inv_det = ttk.Frame(nb); nb.add(t_inv_det, text=' 🧾 Údaje ')
+    setup_invoice_details_settings(t_inv_det)
     xp_outer = tk.Frame(t_xp, bg=DT_BG)
     xp_outer.pack(fill='both', expand=True)
 
@@ -7833,7 +8465,7 @@ def open_project_by_name(mode, name):
     IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
     SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json')
     TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-    FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
+    FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
     current_mode = mode
     show_main_screen(name)
 
@@ -8449,6 +9081,11 @@ def show_main_screen(p_name):
     # TAB PERIODY (týden / měsíc)
     tab_periods = ttk.Frame(nb); nb.add(tab_periods, text='  📅 PERIODY  ')
 
+    # TAB FAKTURY
+    tab_inv = ttk.Frame(nb)
+    nb.add(tab_inv, text='  📄 FAKTURY  ')
+    setup_invoices_tab(tab_inv)
+
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
     nb.add(tab_tv, text='  TRADINGVIEW GRAF  ')
@@ -8745,7 +9382,7 @@ def create_new_project(mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE, ACCOUNTS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
         current_mode = mode
         if mode == "REAL": save_prop_config({"balance": 100000, "currency": "USD", "risk_per_trade_percent": 1.0})
         show_main_screen(n)
@@ -8775,7 +9412,7 @@ def open_project(lb, mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE, ACCOUNTS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
         current_mode = mode
         show_main_screen(n)
 
