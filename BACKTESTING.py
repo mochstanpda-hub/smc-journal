@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.80"
+VERSION = "1.5.81"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1967,21 +1967,40 @@ def generate_invoice_pdf(inv_data, details, filepath):
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
     except ImportError as _ie:
-        # Zkus nainstalovat reportlab za běhu
-        import subprocess, sys
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'reportlab'],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            from reportlab.lib.pagesizes import A4
-            from reportlab.lib import colors
-            from reportlab.lib.units import mm
-            from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
-                                            Paragraph, Spacer, HRFlowable)
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-        except Exception as _e2:
-            messagebox.showerror("Chyba", f"Nelze načíst knihovnu reportlab.\n{_ie}\n\nSpusť ručně:\npip install reportlab")
+        # Najdi skutečný python.exe (ne frozen exe) a nainstaluj reportlab
+        import subprocess
+        _python_exe = None
+        _username = os.environ.get('USERNAME', '')
+        _candidates = []
+        for _ver in ['312', '311', '313', '310', '39']:
+            _candidates += [
+                fr'C:\Users\{_username}\AppData\Local\Programs\Python\Python{_ver}\python.exe',
+                fr'C:\Python{_ver}\python.exe',
+                fr'C:\Program Files\Python{_ver}\python.exe',
+            ]
+        for _c in _candidates:
+            if os.path.exists(_c):
+                _python_exe = _c; break
+        if _python_exe:
+            try:
+                subprocess.check_call([_python_exe, '-m', 'pip', 'install', 'reportlab'],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib import colors
+                from reportlab.lib.units import mm
+                from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                                Paragraph, Spacer, HRFlowable)
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.pdfbase import pdfmetrics
+                from reportlab.pdfbase.ttfonts import TTFont
+            except Exception as _e2:
+                messagebox.showerror("Chyba PDF",
+                    f"Nelze načíst knihovnu reportlab.\n\n"
+                    f"Spusť v příkazovém řádku:\n{_python_exe} -m pip install reportlab")
+                return False
+        else:
+            messagebox.showerror("Chyba PDF",
+                f"Nelze najít Python.\nSpusť ručně:\npip install reportlab\n\n({_ie})")
             return False
 
     lang = inv_data.get('jazyk', 'CZ')
