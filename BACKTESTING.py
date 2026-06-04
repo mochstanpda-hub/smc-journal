@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.76"
+VERSION = "1.5.77"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1889,8 +1889,74 @@ def save_recipients(lst):
     with open(INVOICE_RECIPIENTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(lst, f, indent=2, ensure_ascii=False)
 
+def _ensure_default_recipients():
+    """Přidá výchozí odběratele pokud ještě neexistují."""
+    recs = load_recipients()
+    known = {r.get('odberatel_firma','') for r in recs}
+    defaults = [
+        {'odberatel_firma': 'FTMO Trading Global s.r.o.',
+         'odberatel_ulice': 'Purkyňova 2121/3',
+         'odberatel_mesto': 'Prague',
+         'odberatel_psc':   '110 00',
+         'odberatel_stat':  'Czech Republic',
+         'odberatel_ico':   '09418415',
+         'odberatel_dic':   'CZ699005540'},
+    ]
+    changed = False
+    for d in defaults:
+        if d['odberatel_firma'] not in known:
+            recs.append(d); changed = True
+    if changed:
+        save_recipients(recs)
+
+# Překlady pro PDF fakturu (CZ / EN)
+INVOICE_TRANSLATIONS = {
+    'CZ': {
+        'invoice':         'FAKTURA',
+        'issue_date':      'Datum vystavení',
+        'due_date':        'Datum splatnosti',
+        'payment_method':  'Způsob platby',
+        'var_symbol':      'Variabilní symbol',
+        'order_number':    'Číslo objednávky',
+        'recipient':       'Odběratel',
+        'bank':            'Bankovní spojení',
+        'account':         'Číslo účtu',
+        'description':     'Popis',
+        'qty':             'Množství',
+        'unit_price':      'J. cena',
+        'total':           'Celkem',
+        'tax_base':        'Základ DPH',
+        'vat':             'DPH',
+        'total_due':       'CELKEM K ÚHRADĚ',
+        'note':            'Poznámka',
+        'not_vat':         'Nejsem plátce DPH.',
+        'bank_transfer':   'Bankovním převodem',
+    },
+    'EN': {
+        'invoice':         'INVOICE',
+        'issue_date':      'Issue Date',
+        'due_date':        'Due Date',
+        'payment_method':  'Payment Method',
+        'var_symbol':      'Variable Symbol',
+        'order_number':    'Order Number',
+        'recipient':       'Bill To',
+        'bank':            'Bank Details',
+        'account':         'Account No.',
+        'description':     'Description',
+        'qty':             'Qty',
+        'unit_price':      'Unit Price',
+        'total':           'Total',
+        'tax_base':        'Tax Base',
+        'vat':             'VAT',
+        'total_due':       'TOTAL DUE',
+        'note':            'Note',
+        'not_vat':         'Not a VAT payer.',
+        'bank_transfer':   'Bank transfer',
+    },
+}
+
 def generate_invoice_pdf(inv_data, details, filepath):
-    """Vygeneruje PDF fakturu pomocí reportlab."""
+    """Vygeneruje PDF fakturu pomocí reportlab (CZ nebo EN podle inv_data['jazyk'])."""
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -1904,24 +1970,28 @@ def generate_invoice_pdf(inv_data, details, filepath):
         messagebox.showerror("Chyba", "Chybí knihovna 'reportlab'.\npip install reportlab")
         return False
 
+    lang = inv_data.get('jazyk', 'CZ')
+    tr   = INVOICE_TRANSLATIONS.get(lang, INVOICE_TRANSLATIONS['CZ'])
+
     try: pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf')); fn = 'Arial'
     except: fn = 'Helvetica'
+    bold_fn = fn + '-Bold' if fn != 'Helvetica' else 'Helvetica-Bold'
 
     doc = SimpleDocTemplate(filepath, pagesize=A4,
                             leftMargin=20*mm, rightMargin=20*mm,
                             topMargin=18*mm, bottomMargin=18*mm)
 
-    W = A4[0] - 40*mm   # šířka obsahu
+    W = A4[0] - 40*mm
     styles = getSampleStyleSheet()
 
     def ps(name, **kw):
         return ParagraphStyle(name, fontName=fn, **kw)
 
-    st_title   = ps('T', fontSize=20, textColor=colors.HexColor('#1e293b'), spaceAfter=2)
-    st_sub     = ps('S', fontSize=9,  textColor=colors.HexColor('#64748b'), spaceAfter=2)
-    st_h       = ps('H', fontSize=10, textColor=colors.HexColor('#1e293b'), fontName=fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold')
-    st_n       = ps('N', fontSize=9,  textColor=colors.HexColor('#334155'), leading=13)
-    st_footer  = ps('F', fontSize=8,  textColor=colors.HexColor('#94a3b8'), alignment=1)
+    st_title  = ps('T', fontSize=20, textColor=colors.HexColor('#1e293b'), spaceAfter=2)
+    st_sub    = ps('S', fontSize=9,  textColor=colors.HexColor('#64748b'), spaceAfter=2)
+    st_h      = ps('H', fontSize=10, textColor=colors.HexColor('#1e293b'), fontName=bold_fn)
+    st_n      = ps('N', fontSize=9,  textColor=colors.HexColor('#334155'), leading=13)
+    st_footer = ps('F', fontSize=8,  textColor=colors.HexColor('#94a3b8'), alignment=1)
 
     story = []
 
@@ -1949,14 +2019,16 @@ def generate_invoice_pdf(inv_data, details, filepath):
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0')))
     story.append(Spacer(1, 5*mm))
 
-    # ── Info řádek (data + splatnost) ────────────────────────────────────────
-    info_data = [
-        ['Datum vystavení:', inv_data.get('datum_vystaveni',''),
-         'Datum splatnosti:', inv_data.get('datum_splatnosti','')],
-        ['Způsob platby:', inv_data.get('zpusob_platby','Bankovním převodem'),
-         'Variabilní symbol:', inv_data.get('var_symbol', inv_data.get('cislo',''))],
+    # ── Info řádek (data + splatnost + číslo objednávky) ─────────────────────
+    info_rows = [
+        [f"{tr['issue_date']}:", inv_data.get('datum_vystaveni',''),
+         f"{tr['due_date']}:",   inv_data.get('datum_splatnosti','')],
+        [f"{tr['payment_method']}:", inv_data.get('zpusob_platby', tr['bank_transfer']),
+         f"{tr['var_symbol']}:",     inv_data.get('var_symbol', inv_data.get('cislo',''))],
     ]
-    it = Table(info_data, colWidths=[W*0.22, W*0.28, W*0.22, W*0.28])
+    if inv_data.get('cislo_objednavky','').strip():
+        info_rows.append([f"{tr['order_number']}:", inv_data['cislo_objednavky'], '', ''])
+    it = Table(info_rows, colWidths=[W*0.22, W*0.28, W*0.22, W*0.28])
     it.setStyle(TableStyle([
         ('FONTNAME',  (0,0), (-1,-1), fn),
         ('FONTSIZE',  (0,0), (-1,-1), 9),
@@ -1964,26 +2036,28 @@ def generate_invoice_pdf(inv_data, details, filepath):
         ('TEXTCOLOR', (2,0), (2,-1), colors.HexColor('#64748b')),
         ('TEXTCOLOR', (1,0), (1,-1), colors.HexColor('#1e293b')),
         ('TEXTCOLOR', (3,0), (3,-1), colors.HexColor('#1e293b')),
-        ('FONTNAME',  (1,0), (1,-1), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
-        ('FONTNAME',  (3,0), (3,-1), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('FONTNAME',  (1,0), (1,-1), bold_fn),
+        ('FONTNAME',  (3,0), (3,-1), bold_fn),
         ('ROWPADDING',(0,0), (-1,-1), 3),
     ]))
     story.append(it)
     story.append(Spacer(1, 5*mm))
 
     # ── Odběratel ────────────────────────────────────────────────────────────
+    ico_label = 'IČO' if lang == 'CZ' else 'IN'
+    dic_label = 'DIČ' if lang == 'CZ' else 'VAT'
     odb_box = Table([[
-        Paragraph('<b>Odběratel:</b>', st_h),
+        Paragraph(f'<b>{tr["recipient"]}:</b>', st_h),
         Paragraph(
             f"<b>{inv_data.get('odberatel_firma','')}</b><br/>"
             f"{inv_data.get('odberatel_ulice','')}<br/>"
             f"{inv_data.get('odberatel_psc','')} {inv_data.get('odberatel_mesto','')}, {inv_data.get('odberatel_stat','')}<br/>"
-            f"IČO: {inv_data.get('odberatel_ico','')}{'  |  DIČ: '+inv_data.get('odberatel_dic','') if inv_data.get('odberatel_dic') else ''}",
+            f"{ico_label}: {inv_data.get('odberatel_ico','')}"
+            f"{'  |  '+dic_label+': '+inv_data.get('odberatel_dic','') if inv_data.get('odberatel_dic') else ''}",
             st_n)
     ]], colWidths=[W*0.22, W*0.78])
     odb_box.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
-        ('ROUNDEDCORNERS', [4]),
         ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('TOPPADDING', (0,0), (-1,-1), 8),
@@ -1995,7 +2069,7 @@ def generate_invoice_pdf(inv_data, details, filepath):
 
     # ── Tabulka položek ──────────────────────────────────────────────────────
     polozky = inv_data.get('polozky', [])
-    tbl_header = ['Popis', 'Množství', 'J. cena', 'Celkem']
+    tbl_header = [tr['description'], tr['qty'], tr['unit_price'], tr['total']]
     tbl_data = [tbl_header]
     celkem_bez_dph = 0.0
     mena = inv_data.get('mena', 'CZK')
@@ -2016,9 +2090,9 @@ def generate_invoice_pdf(inv_data, details, filepath):
     celkem = celkem_bez_dph + dph
 
     if sazba_dph > 0:
-        tbl_data.append(['','','Základ DPH:', f"{celkem_bez_dph:,.2f} {mena}"])
-        tbl_data.append(['','',f'DPH {sazba_dph:.0f}%:', f"{dph:,.2f} {mena}"])
-    tbl_data.append(['','','CELKEM K ÚHRADĚ:', f"{celkem:,.2f} {mena}"])
+        tbl_data.append(['','', f"{tr['tax_base']}:", f"{celkem_bez_dph:,.2f} {mena}"])
+        tbl_data.append(['','', f"{tr['vat']} {sazba_dph:.0f}%:", f"{dph:,.2f} {mena}"])
+    tbl_data.append(['','', f"{tr['total_due']}:", f"{celkem:,.2f} {mena}"])
 
     col_w = [W*0.50, W*0.12, W*0.18, W*0.20]
     pt = Table(tbl_data, colWidths=col_w, repeatRows=1)
@@ -2043,12 +2117,12 @@ def generate_invoice_pdf(inv_data, details, filepath):
 
     # ── Bankovní spojení ──────────────────────────────────────────────────────
     bank_items = []
-    if details.get('cislo_uctu'): bank_items.append(f"Číslo účtu: <b>{details['cislo_uctu']}</b>")
+    if details.get('cislo_uctu'): bank_items.append(f"{tr['account']}: <b>{details['cislo_uctu']}</b>")
     if details.get('iban'):       bank_items.append(f"IBAN: <b>{details['iban']}</b>")
     if details.get('swift'):      bank_items.append(f"BIC/SWIFT: <b>{details['swift']}</b>")
-    if details.get('banka'):      bank_items.append(f"Banka: <b>{details['banka']}</b>")
+    if details.get('banka'):      bank_items.append(f"{'Banka' if lang=='CZ' else 'Bank'}: <b>{details['banka']}</b>")
     if bank_items:
-        bank_box = Table([[Paragraph('Bankovní spojení', st_h),
+        bank_box = Table([[Paragraph(tr['bank'], st_h),
                            Paragraph('  |  '.join(bank_items), st_n)]],
                          colWidths=[W*0.22, W*0.78])
         bank_box.setStyle(TableStyle([
@@ -2064,7 +2138,7 @@ def generate_invoice_pdf(inv_data, details, filepath):
 
     # ── Poznámka ─────────────────────────────────────────────────────────────
     if inv_data.get('poznamka'):
-        story.append(Paragraph(f"<b>Poznámka:</b> {inv_data['poznamka']}", st_n))
+        story.append(Paragraph(f"<b>{tr['note']}:</b> {inv_data['poznamka']}", st_n))
         story.append(Spacer(1, 3*mm))
 
     # ── Footer ───────────────────────────────────────────────────────────────
@@ -2073,7 +2147,7 @@ def generate_invoice_pdf(inv_data, details, filepath):
     story.append(Spacer(1, 2*mm))
     footer_txt = details.get('footer_text', '')
     if not details.get('platce_dph', False):
-        footer_txt = (footer_txt + '  Nejsem plátce DPH.').strip()
+        footer_txt = (footer_txt + '  ' + tr['not_vat']).strip()
     story.append(Paragraph(footer_txt, st_footer))
 
     doc.build(story)
@@ -2138,12 +2212,25 @@ def open_new_invoice_dialog(refresh_cb=None, prefill=None):
 
     # ── Faktura ──────────────────────────────────────────────────────────────
     sf1 = _section(frm, "Faktura")
-    vars_['cislo']            = _row(sf1, "Číslo faktury:"); vars_['cislo'].set(default_cislo)
-    vars_['datum_vystaveni']  = _row(sf1, "Datum vystavení:"); vars_['datum_vystaveni'].set(datetime.now().strftime('%d.%m.%Y'))
-    vars_['datum_splatnosti'] = _row(sf1, "Datum splatnosti:"); vars_['datum_splatnosti'].set((datetime.now() + __import__('datetime').timedelta(days=14)).strftime('%d.%m.%Y'))
-    vars_['var_symbol']       = _row(sf1, "Variabilní symbol:"); vars_['var_symbol'].set(default_cislo)
-    vars_['zpusob_platby']    = _row(sf1, "Způsob platby:"); vars_['zpusob_platby'].set("Bankovním převodem")
-    vars_['mena']             = _row(sf1, "Měna:"); vars_['mena'].set("CZK")
+
+    # Jazyk + Měna na jednom řádku
+    lang_row = tk.Frame(sf1, bg=DT_BG); lang_row.pack(fill='x', padx=12, pady=3)
+    tk.Label(lang_row, text="Jazyk faktury:", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI',9), width=22, anchor='w').pack(side='left')
+    lang_var = tk.StringVar(value='CZ')
+    for lbl, val in [('🇨🇿  Čeština', 'CZ'), ('🇬🇧  English', 'EN')]:
+        tk.Radiobutton(lang_row, text=lbl, variable=lang_var, value=val,
+                       bg=DT_BG, fg=DT_TEXT, font=('Segoe UI',9),
+                       activebackground=DT_BG, cursor='hand2').pack(side='left', padx=(0,16))
+    vars_['jazyk'] = lang_var
+
+    vars_['cislo']              = _row(sf1, "Číslo faktury:");      vars_['cislo'].set(default_cislo)
+    vars_['cislo_objednavky']   = _row(sf1, "Číslo objednávky:")
+    vars_['datum_vystaveni']    = _row(sf1, "Datum vystavení:");    vars_['datum_vystaveni'].set(datetime.now().strftime('%d.%m.%Y'))
+    vars_['datum_splatnosti']   = _row(sf1, "Datum splatnosti:");   vars_['datum_splatnosti'].set((datetime.now() + __import__('datetime').timedelta(days=14)).strftime('%d.%m.%Y'))
+    vars_['var_symbol']         = _row(sf1, "Variabilní symbol:");  vars_['var_symbol'].set(default_cislo)
+    vars_['zpusob_platby']      = _row(sf1, "Způsob platby:");      vars_['zpusob_platby'].set("Bankovním převodem")
+    vars_['mena']               = _row(sf1, "Měna:");               vars_['mena'].set("CZK")
     vars_['sazba_dph']        = _row(sf1, "DPH sazba (%):"); vars_['sazba_dph'].set("0")
 
     # ── Odběratel (prop firma) ───────────────────────────────────────────────
@@ -9479,6 +9566,7 @@ def open_project(lb, mode):
 
 if __name__ == "__main__":
     _dbg_log('STARTUP', f"═══ SMC Journal PRO v{VERSION} spuštěn ═══  APP_DIR={_APP_DIR}  frozen={getattr(sys,'frozen',False)}")
+    _ensure_default_recipients()   # přidá FTMO a další výchozí odběratele
     try:
         root = tk.Tk(); root.title(load_app_title()); root.geometry("1400x900")
         root.tk.call('encoding', 'system', 'utf-8')
