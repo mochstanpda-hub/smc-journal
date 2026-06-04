@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.78"
+VERSION = "1.5.79"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1966,9 +1966,23 @@ def generate_invoice_pdf(inv_data, details, filepath):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-    except ImportError:
-        messagebox.showerror("Chyba", "Chybí knihovna 'reportlab'.\npip install reportlab")
-        return False
+    except ImportError as _ie:
+        # Zkus nainstalovat reportlab za běhu
+        import subprocess, sys
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'reportlab'],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.units import mm
+            from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                            Paragraph, Spacer, HRFlowable)
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+        except Exception as _e2:
+            messagebox.showerror("Chyba", f"Nelze načíst knihovnu reportlab.\n{_ie}\n\nSpusť ručně:\npip install reportlab")
+            return False
 
     lang = inv_data.get('jazyk', 'CZ')
     tr   = INVOICE_TRANSLATIONS.get(lang, INVOICE_TRANSLATIONS['CZ'])
