@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.83"
+VERSION = "1.5.84"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1997,9 +1997,12 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-try: pdfmetrics.registerFont(TTFont('Arial','arial.ttf')); fn='Arial'
+try:
+    pdfmetrics.registerFont(TTFont('Arial','arial.ttf'))
+    pdfmetrics.registerFont(TTFont('Arial-Bold','arialbd.ttf'))
+    fn='Arial'
 except: fn='Helvetica'
-bold_fn = fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'
+bold_fn='Arial-Bold' if fn=='Arial' else 'Helvetica-Bold'
 doc = SimpleDocTemplate(filepath, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=18*mm)
 W = A4[0]-40*mm
 def ps(name,**kw):
@@ -2109,9 +2112,12 @@ def generate_invoice_pdf(inv_data, details, filepath):
     lang = inv_data.get('jazyk', 'CZ')
     tr   = INVOICE_TRANSLATIONS.get(lang, INVOICE_TRANSLATIONS['CZ'])
 
-    try: pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf')); fn = 'Arial'
+    try:
+        pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf'))
+        pdfmetrics.registerFont(TTFont('Arial-Bold', 'arialbd.ttf'))
+        fn = 'Arial'
     except: fn = 'Helvetica'
-    bold_fn = fn + '-Bold' if fn != 'Helvetica' else 'Helvetica-Bold'
+    bold_fn = 'Arial-Bold' if fn == 'Arial' else 'Helvetica-Bold'
 
     doc = SimpleDocTemplate(filepath, pagesize=A4,
                             leftMargin=20*mm, rightMargin=20*mm,
@@ -2240,13 +2246,13 @@ def generate_invoice_pdf(inv_data, details, filepath):
         ('FONTSIZE',      (0,0),  (-1,-1), 9),
         ('BACKGROUND',    (0,0),  (-1,0),  colors.HexColor('#1e293b')),
         ('TEXTCOLOR',     (0,0),  (-1,0),  colors.white),
-        ('FONTNAME',      (0,0),  (-1,0),  fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('FONTNAME',      (0,0),  (-1,0),  bold_fn),
         ('ALIGN',         (1,0),  (-1,-1), 'RIGHT'),
         ('ROWPADDING',    (0,0),  (-1,-1), 5),
         ('LINEBELOW',     (0,0),  (-1,-2), 0.3, colors.HexColor('#e2e8f0')),
         ('BACKGROUND',    (0,last),(-1,last), colors.HexColor('#1e3a5f')),
         ('TEXTCOLOR',     (0,last),(-1,last), colors.white),
-        ('FONTNAME',      (0,last),(-1,last), fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'),
+        ('FONTNAME',      (0,last),(-1,last), bold_fn),
         ('FONTSIZE',      (0,last),(-1,last), 10),
     ]))
     story.append(pt)
