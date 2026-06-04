@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.81"
+VERSION = "1.5.82"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1955,6 +1955,110 @@ INVOICE_TRANSLATIONS = {
     },
 }
 
+def _find_python312():
+    """Najde Python312 na disku — pro generování PDF přes subprocess."""
+    username = os.environ.get('USERNAME', '')
+    candidates = [
+        fr'C:\Users\{username}\AppData\Local\Programs\Python\Python312\python.exe',
+        fr'C:\Users\{username}\AppData\Local\Programs\Python\Python313\python.exe',
+        fr'C:\Users\{username}\AppData\Local\Programs\Python\Python311\python.exe',
+        fr'C:\Python312\python.exe',
+        fr'C:\Python311\python.exe',
+    ]
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+def _generate_invoice_pdf_subprocess(inv_data, details, filepath):
+    """Záloha: generuje PDF přes subprocess s externím Python312 (pro frozen exe)."""
+    import subprocess, tempfile, json as _json
+    python_exe = _find_python312()
+    if not python_exe:
+        messagebox.showerror("Chyba PDF", "Nelze najít Python.\nNainstaluj reportlab:\npip install reportlab")
+        return False
+
+    # Serializuj data do dočasného JSON souboru
+    tmp_data = tempfile.mktemp(suffix='_inv.json')
+    try:
+        with open(tmp_data, 'w', encoding='utf-8') as f:
+            _json.dump({'inv': inv_data, 'det': details, 'tr': INVOICE_TRANSLATIONS,
+                        'out': filepath}, f, ensure_ascii=False)
+
+        # Inline Python skript pro generování PDF
+        script = r'''
+import sys, json
+data = json.load(open(sys.argv[1], encoding='utf-8'))
+inv_data = data['inv']; details = data['det']
+INVOICE_TRANSLATIONS = data['tr']; filepath = data['out']
+lang = inv_data.get('jazyk','CZ'); tr = INVOICE_TRANSLATIONS.get(lang, INVOICE_TRANSLATIONS['CZ'])
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+try: pdfmetrics.registerFont(TTFont('Arial','arial.ttf')); fn='Arial'
+except: fn='Helvetica'
+bold_fn = fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'
+doc = SimpleDocTemplate(filepath, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=18*mm)
+W = A4[0]-40*mm
+def ps(name,**kw): return ParagraphStyle(name,fontName=fn,**kw)
+st_title=ps('T',fontSize=20,textColor=colors.HexColor('#1e293b'),spaceAfter=2)
+st_sub=ps('S',fontSize=9,textColor=colors.HexColor('#64748b'),spaceAfter=2)
+st_h=ps('H',fontSize=10,textColor=colors.HexColor('#1e293b'),fontName=bold_fn)
+st_n=ps('N',fontSize=9,textColor=colors.HexColor('#334155'),leading=13)
+st_footer=ps('F',fontSize=8,textColor=colors.HexColor('#94a3b8'),alignment=1)
+story=[]
+dname=(inv_data.get('dodavatel_firma') or f"{details.get('jmeno','')} {details.get('prijmeni','')}".strip())
+hd=[[Paragraph(f"<b>{tr['invoice']}</b>",st_title),Paragraph(f"<b>{dname}</b>",st_h)],[Paragraph(f"č. {inv_data.get('cislo','')}",st_sub),Paragraph(f"{details.get('ulice','')}<br/>{details.get('psc','')} {details.get('mesto','')}<br/>IČO: {details.get('ico','')}{'  |  DIČ: '+details.get('dic','') if details.get('dic') else ''}<br/>{details.get('email','')}{'  |  '+details.get('telefon','') if details.get('telefon') else ''}",st_n)]]
+ht=Table(hd,colWidths=[W*0.45,W*0.55]); ht.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('ALIGN',(1,0),(1,-1),'RIGHT')])); story.append(ht); story.append(Spacer(1,6*mm)); story.append(HRFlowable(width="100%",thickness=1,color=colors.HexColor('#e2e8f0'))); story.append(Spacer(1,5*mm))
+info=[[f"{tr['issue_date']}:",inv_data.get('datum_vystaveni',''),f"{tr['due_date']}:",inv_data.get('datum_splatnosti','')],[f"{tr['payment_method']}:",inv_data.get('zpusob_platby',tr['bank_transfer']),f"{tr['var_symbol']}:",inv_data.get('var_symbol',inv_data.get('cislo',''))]]
+if inv_data.get('cislo_objednavky','').strip(): info.append([f"{tr['order_number']}:",inv_data['cislo_objednavky'],'',''])
+it=Table(info,colWidths=[W*0.22,W*0.28,W*0.22,W*0.28]); it.setStyle(TableStyle([('FONTNAME',(0,0),(-1,-1),fn),('FONTSIZE',(0,0),(-1,-1),9),('TEXTCOLOR',(0,0),(0,-1),colors.HexColor('#64748b')),('TEXTCOLOR',(2,0),(2,-1),colors.HexColor('#64748b')),('FONTNAME',(1,0),(1,-1),bold_fn),('FONTNAME',(3,0),(3,-1),bold_fn),('ROWPADDING',(0,0),(-1,-1),3)])); story.append(it); story.append(Spacer(1,5*mm))
+il='IČO' if lang=='CZ' else 'IN'; dl='DIČ' if lang=='CZ' else 'VAT'
+ob=Table([[Paragraph(f"<b>{tr['recipient']}:</b>",st_h),Paragraph(f"<b>{inv_data.get('odberatel_firma','')}</b><br/>{inv_data.get('odberatel_ulice','')}<br/>{inv_data.get('odberatel_psc','')} {inv_data.get('odberatel_mesto','')}, {inv_data.get('odberatel_stat','')}<br/>{il}: {inv_data.get('odberatel_ico','')}{'  |  '+dl+': '+inv_data.get('odberatel_dic','') if inv_data.get('odberatel_dic') else ''}",st_n)]],colWidths=[W*0.22,W*0.78]); ob.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f8fafc')),('BOX',(0,0),(-1,-1),0.5,colors.HexColor('#e2e8f0')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('LEFTPADDING',(0,0),(-1,-1),10)])); story.append(ob); story.append(Spacer(1,6*mm))
+polozky=inv_data.get('polozky',[]); th=[tr['description'],tr['qty'],tr['unit_price'],tr['total']]; td=[th]; cb=0.0; mena=inv_data.get('mena','CZK')
+for p in polozky:
+    q=float(p.get('qty',1)); c=float(p.get('cena',0)); tp=q*c; cb+=tp; td.append([p.get('popis',''),f"{q:.0f}" if q==int(q) else f"{q:.2f}",f"{c:,.2f} {mena}",f"{tp:,.2f} {mena}"])
+sd=float(inv_data.get('sazba_dph',0)); dph=cb*sd/100; cel=cb+dph
+if sd>0: td.append(['','',f"{tr['tax_base']}:",f"{cb:,.2f} {mena}"]); td.append(['','',f"{tr['vat']} {sd:.0f}%:",f"{dph:,.2f} {mena}"])
+td.append(['','',f"{tr['total_due']}:",f"{cel:,.2f} {mena}"])
+cw=[W*0.50,W*0.12,W*0.18,W*0.20]; pt=Table(td,colWidths=cw,repeatRows=1); n=len(td); last=n-1
+pt.setStyle(TableStyle([('FONTNAME',(0,0),(-1,-1),fn),('FONTSIZE',(0,0),(-1,-1),9),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1e293b')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),bold_fn),('ALIGN',(1,0),(-1,-1),'RIGHT'),('ROWPADDING',(0,0),(-1,-1),5),('LINEBELOW',(0,0),(-1,-2),0.3,colors.HexColor('#e2e8f0')),('BACKGROUND',(0,last),(-1,last),colors.HexColor('#1e3a5f')),('TEXTCOLOR',(0,last),(-1,last),colors.white),('FONTNAME',(0,last),(-1,last),bold_fn),('FONTSIZE',(0,last),(-1,last),10)])); story.append(pt); story.append(Spacer(1,6*mm))
+bi=[]
+if details.get('cislo_uctu'): bi.append(f"{tr['account']}: <b>{details['cislo_uctu']}</b>")
+if details.get('iban'): bi.append(f"IBAN: <b>{details['iban']}</b>")
+if details.get('swift'): bi.append(f"BIC/SWIFT: <b>{details['swift']}</b>")
+if details.get('banka'): bi.append(f"{'Banka' if lang=='CZ' else 'Bank'}: <b>{details['banka']}</b>")
+if bi:
+    bb=Table([[Paragraph(tr['bank'],st_h),Paragraph('  |  '.join(bi),st_n)]],colWidths=[W*0.22,W*0.78]); bb.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f0fdf4')),('BOX',(0,0),(-1,-1),0.5,colors.HexColor('#86efac')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('LEFTPADDING',(0,0),(-1,-1),10)])); story.append(bb); story.append(Spacer(1,4*mm))
+if inv_data.get('poznamka'): story.append(Paragraph(f"<b>{tr['note']}:</b> {inv_data['poznamka']}",st_n)); story.append(Spacer(1,3*mm))
+story.append(Spacer(1,4*mm)); story.append(HRFlowable(width="100%",thickness=0.5,color=colors.HexColor('#e2e8f0'))); story.append(Spacer(1,2*mm))
+ft=details.get('footer_text','')
+if not details.get('platce_dph',False): ft=(ft+'  '+tr['not_vat']).strip()
+story.append(Paragraph(ft,st_footer))
+doc.build(story)
+print('PDF_OK')
+'''
+        tmp_script = tempfile.mktemp(suffix='_pdf_gen.py')
+        with open(tmp_script, 'w', encoding='utf-8') as f:
+            f.write(script)
+
+        result = subprocess.run([python_exe, tmp_script, tmp_data],
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode != 0 or 'PDF_OK' not in result.stdout:
+            messagebox.showerror("Chyba PDF", f"Chyba generování PDF:\n{result.stderr[:300]}")
+            return False
+        return True
+    except Exception as e:
+        messagebox.showerror("Chyba PDF", f"Chyba: {e}")
+        return False
+    finally:
+        for f in [tmp_data, tmp_script]:
+            try: os.remove(f)
+            except: pass
+
+
 def generate_invoice_pdf(inv_data, details, filepath):
     """Vygeneruje PDF fakturu pomocí reportlab (CZ nebo EN podle inv_data['jazyk'])."""
     try:
@@ -1993,15 +2097,12 @@ def generate_invoice_pdf(inv_data, details, filepath):
                 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
                 from reportlab.pdfbase import pdfmetrics
                 from reportlab.pdfbase.ttfonts import TTFont
-            except Exception as _e2:
-                messagebox.showerror("Chyba PDF",
-                    f"Nelze načíst knihovnu reportlab.\n\n"
-                    f"Spusť v příkazovém řádku:\n{_python_exe} -m pip install reportlab")
-                return False
+            except Exception:
+                # Přímý import stále selhává → použij subprocess zálohu
+                return _generate_invoice_pdf_subprocess(inv_data, details, filepath)
         else:
-            messagebox.showerror("Chyba PDF",
-                f"Nelze najít Python.\nSpusť ručně:\npip install reportlab\n\n({_ie})")
-            return False
+            # Python nenalezen → použij subprocess zálohu (zkusí sama najít)
+            return _generate_invoice_pdf_subprocess(inv_data, details, filepath)
 
     lang = inv_data.get('jazyk', 'CZ')
     tr   = INVOICE_TRANSLATIONS.get(lang, INVOICE_TRANSLATIONS['CZ'])
