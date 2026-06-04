@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.75"
+VERSION = "1.5.76"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -786,10 +786,11 @@ TIMEFRAMES_FILE = '' # NOVÉ: Soubor pro seznam timeframe
 RULES_FILE = '' # NOVÉ: Soubor pro pravidla
 FILTERS_FILE = '' # Soubor pro uložené filtry
 ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
-INVOICES_DIR  = '' # Složka s fakturami projektu
 
-# Osobní údaje pro faktury — globální (nesouvisí s konkrétním projektem)
-INVOICE_DETAILS_FILE = os.path.join(_APP_DIR, 'invoice_details.json')
+# Faktury — GLOBÁLNÍ (nezávislé na projektu)
+INVOICES_DIR             = os.path.join(_APP_DIR, 'invoices')
+INVOICE_DETAILS_FILE     = os.path.join(_APP_DIR, 'invoice_details.json')
+INVOICE_RECIPIENTS_FILE  = os.path.join(_APP_DIR, 'invoice_recipients.json')
 
 # XP Systém — bodovací žebříček (globální, napříč projekty)
 XP_FILE             = os.path.join(_APP_DIR, 'xp_data.json')
@@ -1859,8 +1860,8 @@ def save_invoice_details(data):
         messagebox.showerror("Chyba", f"Nelze uložit údaje: {e}")
 
 def load_invoices_list():
-    """Načte seznam faktur projektu."""
-    if not INVOICES_DIR: return []
+    """Načte seznam faktur (globální)."""
+    os.makedirs(INVOICES_DIR, exist_ok=True)
     idx = os.path.join(INVOICES_DIR, 'invoices_index.json')
     try:
         if os.path.exists(idx):
@@ -1870,10 +1871,22 @@ def load_invoices_list():
     return []
 
 def save_invoices_list(lst):
-    if not INVOICES_DIR: return
     os.makedirs(INVOICES_DIR, exist_ok=True)
     idx = os.path.join(INVOICES_DIR, 'invoices_index.json')
     with open(idx, 'w', encoding='utf-8') as f:
+        json.dump(lst, f, indent=2, ensure_ascii=False)
+
+def load_recipients():
+    """Načte uložené odběratele."""
+    try:
+        if os.path.exists(INVOICE_RECIPIENTS_FILE):
+            with open(INVOICE_RECIPIENTS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except: pass
+    return []
+
+def save_recipients(lst):
+    with open(INVOICE_RECIPIENTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(lst, f, indent=2, ensure_ascii=False)
 
 def generate_invoice_pdf(inv_data, details, filepath):
@@ -2067,12 +2080,10 @@ def generate_invoice_pdf(inv_data, details, filepath):
     return True
 
 
-def open_new_invoice_dialog(refresh_cb=None):
-    """Dialog pro vytvoření nové faktury."""
-    if not INVOICES_DIR:
-        messagebox.showwarning("Faktury", "Nejdřív otevři projekt!"); return
-
-    details = load_invoice_details()
+def open_new_invoice_dialog(refresh_cb=None, prefill=None):
+    """Dialog pro vytvoření nové faktury (globální — bez projektu)."""
+    os.makedirs(INVOICES_DIR, exist_ok=True)
+    details  = load_invoice_details()
     invoices = load_invoices_list()
 
     # Auto-číslo faktury: rok + pořadové číslo
@@ -2137,6 +2148,28 @@ def open_new_invoice_dialog(refresh_cb=None):
 
     # ── Odběratel (prop firma) ───────────────────────────────────────────────
     sf2 = _section(frm, "Odběratel — Prop firma")
+
+    # Výběr uloženého odběratele
+    recipients = load_recipients()
+    rec_names  = [r['odberatel_firma'] for r in recipients if r.get('odberatel_firma')]
+    rec_sel_f  = tk.Frame(sf2, bg=DT_BG); rec_sel_f.pack(fill='x', padx=12, pady=(6,2))
+    tk.Label(rec_sel_f, text="Uložený odběratel:", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI',9), width=22, anchor='w').pack(side='left')
+    rec_var = tk.StringVar(value="— nový —")
+    rec_combo = ttk.Combobox(rec_sel_f, textvariable=rec_var, state='readonly',
+                              values=["— nový —"] + rec_names, width=30)
+    rec_combo.pack(side='left', padx=(0,6))
+
+    def _load_recipient(event=None):
+        name = rec_var.get()
+        if name == "— nový —": return
+        rec = next((r for r in load_recipients() if r.get('odberatel_firma') == name), None)
+        if not rec: return
+        for k in ('odberatel_firma','odberatel_ulice','odberatel_mesto',
+                  'odberatel_psc','odberatel_stat','odberatel_ico','odberatel_dic'):
+            if k in vars_: vars_[k].set(rec.get(k,''))
+    rec_combo.bind("<<ComboboxSelected>>", _load_recipient)
+
     vars_['odberatel_firma']  = _row(sf2, "Název firmy:")
     vars_['odberatel_ulice']  = _row(sf2, "Ulice:")
     vars_['odberatel_mesto']  = _row(sf2, "Město:")
@@ -2144,6 +2177,24 @@ def open_new_invoice_dialog(refresh_cb=None):
     vars_['odberatel_stat']   = _row(sf2, "Stát:"); vars_['odberatel_stat'].set("Česká republika")
     vars_['odberatel_ico']    = _row(sf2, "IČO:")
     vars_['odberatel_dic']    = _row(sf2, "DIČ:")
+
+    # Tlačítko uložit odběratele
+    def _save_recipient():
+        firma = vars_['odberatel_firma'].get().strip()
+        if not firma: messagebox.showwarning("Odběratel","Vyplň název firmy."); return
+        recs = load_recipients()
+        data = {k: vars_[k].get() for k in ('odberatel_firma','odberatel_ulice','odberatel_mesto',
+                                              'odberatel_psc','odberatel_stat','odberatel_ico','odberatel_dic')}
+        existing = next((i for i,r in enumerate(recs) if r.get('odberatel_firma')==firma), None)
+        if existing is not None: recs[existing] = data
+        else: recs.append(data)
+        save_recipients(recs)
+        rec_combo['values'] = ["— nový —"] + [r['odberatel_firma'] for r in recs]
+        messagebox.showinfo("Uloženo", f"Odběratel \"{firma}\" uložen.")
+    tk.Button(sf2, text="💾  Uložit tohoto odběratele pro příště",
+              command=_save_recipient, bg=DT_BTN, fg=DT_TEXT,
+              font=('Segoe UI',8), relief='flat', cursor='hand2',
+              padx=8, pady=3).pack(anchor='w', padx=12, pady=(2,8))
 
     # ── Položky faktury ──────────────────────────────────────────────────────
     sf3 = _section(frm, "Položky faktury")
@@ -2261,7 +2312,7 @@ def open_new_invoice_dialog(refresh_cb=None):
 
 
 def setup_invoices_tab(parent):
-    """Záložka Faktury — přehled a správa faktur projektu."""
+    """Záložka Faktury — globální přehled a správa faktur (nezávislé na projektu)."""
     outer = tk.Frame(parent, bg=DT_BG)
     outer.pack(fill='both', expand=True)
 
@@ -8100,7 +8151,7 @@ def open_settings_window(initial_tab=0):
             PAIRS_FILE = os.path.join(p, 'pairs_config.json')
             TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json')
             RULES_FILE = os.path.join(p, 'rules.txt')
-            FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
+            FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
             messagebox.showinfo("Uloženo", f"Složka projektu uložena:\n{new_path}")
             sw.destroy()
             show_main_screen(current_project_name)
@@ -8465,7 +8516,7 @@ def open_project_by_name(mode, name):
     IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
     SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json')
     TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-    FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
+    FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
     current_mode = mode
     show_main_screen(name)
 
@@ -9326,6 +9377,16 @@ def show_intro_screen():
     bottom_bar = tk.Frame(main_container, bg=DT_BG)
     bottom_bar.pack(side="bottom", pady=12)
 
+    def _open_invoices_window():
+        w = tk.Toplevel(root); w.title("Faktury"); w.geometry("860x560")
+        w.configure(bg=DT_BG); w.lift(); w.focus_set()
+        setup_invoices_tab(w)
+
+    tk.Button(bottom_bar, text="📄  Faktury",
+              command=_open_invoices_window,
+              bg='#1d4ed8', fg='white', font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+
     tk.Button(bottom_bar, text="📂  Importovat projekt ze složky",
               command=import_project_from_folder,
               bg=DT_ACCENT, fg="#ffffff", font=('Segoe UI', 9, 'bold'),
@@ -9382,7 +9443,7 @@ def create_new_project(mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE, ACCOUNTS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
         current_mode = mode
         if mode == "REAL": save_prop_config({"balance": 100000, "currency": "USD", "risk_per_trade_percent": 1.0})
         show_main_screen(n)
@@ -9412,7 +9473,7 @@ def open_project(lb, mode):
         global DATA_FILE, IMAGES_DIR, PROP_CONFIG_FILE, CHECKLIST_FILE, SCORING_FILE, PAIRS_FILE, TIMEFRAMES_FILE, RULES_FILE, current_mode, FILTERS_FILE, ACCOUNTS_FILE
         DATA_FILE = os.path.join(p, 'trades.csv'); PROP_CONFIG_FILE = os.path.join(p, 'prop_config.json'); IMAGES_DIR = os.path.join(p, 'images'); CHECKLIST_FILE = os.path.join(p, 'checklist.json')
         SCORING_FILE = os.path.join(p, 'scoring_config.json'); PAIRS_FILE = os.path.join(p, 'pairs_config.json'); TIMEFRAMES_FILE = os.path.join(p, 'timeframes_config.json'); RULES_FILE = os.path.join(p, 'rules.txt')
-        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json'); INVOICES_DIR = os.path.join(p, 'invoices')
+        FILTERS_FILE = os.path.join(p, 'filters_config.json'); ACCOUNTS_FILE = os.path.join(p, 'accounts.json')
         current_mode = mode
         show_main_screen(n)
 
