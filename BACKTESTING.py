@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.86"
+VERSION = "1.5.87"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2003,7 +2003,8 @@ try:
     fn='Arial'
 except: fn='Helvetica'
 bold_fn='Arial-Bold' if fn=='Arial' else 'Helvetica-Bold'
-doc = SimpleDocTemplate(filepath, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=18*mm)
+_auth=(inv_data.get('dodavatel_firma') or f"{details.get('jmeno','')} {details.get('prijmeni','')}".strip() or 'SMC Journal')
+doc = SimpleDocTemplate(filepath, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=18*mm, title=f"Faktura č. {inv_data.get('cislo','')}", author=_auth, subject='Faktura / Invoice')
 W = A4[0]-40*mm
 def ps(name,**kw):
     if 'fontName' not in kw: kw['fontName']=fn
@@ -2119,9 +2120,15 @@ def generate_invoice_pdf(inv_data, details, filepath):
     except: fn = 'Helvetica'
     bold_fn = 'Arial-Bold' if fn == 'Arial' else 'Helvetica-Bold'
 
+    _author = (inv_data.get('dodavatel_firma') or
+               f"{details.get('jmeno','')} {details.get('prijmeni','')}".strip() or
+               'SMC Journal')
     doc = SimpleDocTemplate(filepath, pagesize=A4,
                             leftMargin=20*mm, rightMargin=20*mm,
-                            topMargin=18*mm, bottomMargin=18*mm)
+                            topMargin=18*mm, bottomMargin=18*mm,
+                            title=f"Faktura č. {inv_data.get('cislo','')}",
+                            author=_author,
+                            subject='Faktura / Invoice')
 
     W = A4[0] - 40*mm
     styles = getSampleStyleSheet()
