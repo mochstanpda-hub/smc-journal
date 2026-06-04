@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.82"
+VERSION = "1.5.83"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2002,7 +2002,9 @@ except: fn='Helvetica'
 bold_fn = fn+'-Bold' if fn!='Helvetica' else 'Helvetica-Bold'
 doc = SimpleDocTemplate(filepath, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=18*mm)
 W = A4[0]-40*mm
-def ps(name,**kw): return ParagraphStyle(name,fontName=fn,**kw)
+def ps(name,**kw):
+    if 'fontName' not in kw: kw['fontName']=fn
+    return ParagraphStyle(name,**kw)
 st_title=ps('T',fontSize=20,textColor=colors.HexColor('#1e293b'),spaceAfter=2)
 st_sub=ps('S',fontSize=9,textColor=colors.HexColor('#64748b'),spaceAfter=2)
 st_h=ps('H',fontSize=10,textColor=colors.HexColor('#1e293b'),fontName=bold_fn)
@@ -2119,7 +2121,8 @@ def generate_invoice_pdf(inv_data, details, filepath):
     styles = getSampleStyleSheet()
 
     def ps(name, **kw):
-        return ParagraphStyle(name, fontName=fn, **kw)
+        if 'fontName' not in kw: kw['fontName'] = fn
+        return ParagraphStyle(name, **kw)
 
     st_title  = ps('T', fontSize=20, textColor=colors.HexColor('#1e293b'), spaceAfter=2)
     st_sub    = ps('S', fontSize=9,  textColor=colors.HexColor('#64748b'), spaceAfter=2)
