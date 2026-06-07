@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.87"
+VERSION = "1.5.88"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1035,6 +1035,28 @@ PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "GBPAUD", "AUDUSD", "USDCAD", "
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1W", "1M"]
 FIBO_OPTIONS = ["DISCOUNT", "GOLDEN ZONE", "PREMIUM", "ORDER BLOCK", "BREAKER", "FVG ONLY"]
 SESSIONS_LIST = ["Asia", "London", "NY AM", "NY PM", "Close"]
+
+# Globální soubor pro vlastní setupy (nezávislý na projektu)
+SETUPS_FILE = os.path.join(_APP_DIR, 'setups_config.json')
+
+def load_setups():
+    """Načte vlastní setupy. Vrátí list stringů."""
+    try:
+        if os.path.exists(SETUPS_FILE):
+            with open(SETUPS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                return data
+    except: pass
+    return list(FIBO_OPTIONS)  # výchozí hodnoty
+
+def save_setups(setups_list):
+    """Uloží vlastní setupy."""
+    try:
+        with open(SETUPS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(setups_list, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nelze uložit setupy: {e}")
 
 def _get_setup_pts(cfg_setups, fibo_val):
     """Najdi body pro setup — case-insensitive, ignoruje závorky/extra text.
@@ -3819,6 +3841,109 @@ def setup_lists_manager_ui(parent):
 
     tk.Button(ctrl_tf, text="PŘIDAT TF", command=add_tf, bg="#2ecc71", fg="white", font=("Arial", 9, "bold")).pack(fill="x", pady=2)
     tk.Button(ctrl_tf, text="ODEBRAT VYBRANÝ", command=remove_tf, bg="#e74c3c", fg="white", font=("Arial", 9)).pack(fill="x", pady=2)
+
+    # --- SEKCE SETUPY ---
+    frame_setups = tk.LabelFrame(main, text="Setupy (vlastní seznam)", padx=10, pady=10,
+                                  font=("Arial", 10, "bold"), fg="#2c3e50")
+    frame_setups.pack(fill="x", pady=(16, 0))
+
+    tk.Label(frame_setups,
+             text="Definuj svoje vlastní setupy — zobrazí se v dropdownu Setup/Fibo ve formuláři a ve scoringu.",
+             font=("Arial", 9), fg="#7f8c8d").pack(anchor="w", pady=(0, 6))
+
+    setups_row = tk.Frame(frame_setups)
+    setups_row.pack(fill="x")
+
+    lb_setups = tk.Listbox(setups_row, font=("Arial", 10), selectmode=tk.SINGLE,
+                            height=8, width=30)
+    lb_setups.pack(side="left", fill="both", expand=True)
+    sb_setups = tk.Scrollbar(setups_row, orient="vertical", command=lb_setups.yview)
+    sb_setups.pack(side="left", fill="y")
+    lb_setups.config(yscrollcommand=sb_setups.set)
+
+    current_setups = load_setups()
+    for s in current_setups:
+        lb_setups.insert(tk.END, s)
+
+    ctrl_setups = tk.Frame(setups_row, padx=10)
+    ctrl_setups.pack(side="left", fill="y")
+
+    entry_setup = tk.Entry(ctrl_setups, font=("Arial", 10), width=22)
+    entry_setup.pack(fill="x", pady=(0, 5))
+    tk.Label(ctrl_setups, text="Název setupu (např. ICT OB, FVG, BOS...)",
+             font=("Arial", 8), fg="#95a5a6").pack(anchor="w", pady=(0, 6))
+
+    def _refresh_fibo_combos():
+        """Aktualizuj dropdown ve formuláři po změně setupů."""
+        global FIBO_OPTIONS
+        FIBO_OPTIONS = load_setups()
+        if fibo_combo:
+            fibo_combo['values'] = FIBO_OPTIONS
+        if qs_setup_var := globals().get('qs_setup_var'):
+            pass  # quick-save combo se vytváří dynamicky
+
+    def add_setup():
+        val = entry_setup.get().strip().upper()
+        if not val:
+            messagebox.showwarning("Setupy", "Zadej název setupu."); return
+        setups = load_setups()
+        if val in [s.upper() for s in setups]:
+            messagebox.showwarning("Setupy", f"Setup '{val}' již existuje."); return
+        setups.append(val)
+        save_setups(setups)
+        lb_setups.insert(tk.END, val)
+        entry_setup.delete(0, tk.END)
+        _refresh_fibo_combos()
+        # Přidej do scoring config s výchozím skóre 0
+        cfg = load_scoring_config()
+        if val not in cfg["setups"]:
+            cfg["setups"][val] = 0
+            save_scoring_config(cfg)
+
+    def remove_setup():
+        sel = lb_setups.curselection()
+        if not sel:
+            messagebox.showwarning("Setupy", "Vyber setup ze seznamu."); return
+        val = lb_setups.get(sel[0])
+        if not messagebox.askyesno("Smazat setup", f"Odebrat setup '{val}'?"): return
+        setups = load_setups()
+        if val in setups: setups.remove(val)
+        save_setups(setups)
+        lb_setups.delete(sel[0])
+        _refresh_fibo_combos()
+
+    def move_up():
+        sel = lb_setups.curselection()
+        if not sel or sel[0] == 0: return
+        i = sel[0]; val = lb_setups.get(i)
+        lb_setups.delete(i); lb_setups.insert(i - 1, val)
+        lb_setups.selection_set(i - 1)
+        setups = [lb_setups.get(j) for j in range(lb_setups.size())]
+        save_setups(setups); _refresh_fibo_combos()
+
+    def move_down():
+        sel = lb_setups.curselection()
+        if not sel or sel[0] >= lb_setups.size() - 1: return
+        i = sel[0]; val = lb_setups.get(i)
+        lb_setups.delete(i); lb_setups.insert(i + 1, val)
+        lb_setups.selection_set(i + 1)
+        setups = [lb_setups.get(j) for j in range(lb_setups.size())]
+        save_setups(setups); _refresh_fibo_combos()
+
+    tk.Button(ctrl_setups, text="➕  Přidat setup",    command=add_setup,
+              bg="#2ecc71", fg="white", font=("Arial", 9, "bold"), width=18).pack(fill="x", pady=2)
+    tk.Button(ctrl_setups, text="🗑  Odebrat vybraný", command=remove_setup,
+              bg="#e74c3c", fg="white", font=("Arial", 9), width=18).pack(fill="x", pady=2)
+    tk.Button(ctrl_setups, text="▲  Posunout výš",    command=move_up,
+              bg=DT_BTN, fg=DT_TEXT, font=("Arial", 9), width=18).pack(fill="x", pady=2)
+    tk.Button(ctrl_setups, text="▼  Posunout níž",    command=move_down,
+              bg=DT_BTN, fg=DT_TEXT, font=("Arial", 9), width=18).pack(fill="x", pady=2)
+    tk.Label(ctrl_setups,
+             text="💡 Skóre pro každý setup\nnastavíš v záložce Scoring",
+             font=("Arial", 8), fg="#95a5a6", justify="left").pack(anchor="w", pady=(10, 0))
+
+    # Načti setupy do FIBO_OPTIONS při otevření nastavení
+    _refresh_fibo_combos()
 
 def setup_rules_ui(parent):
     frame = tk.Frame(parent, padx=20, pady=20)
@@ -9728,6 +9853,9 @@ def open_project(lb, mode):
 if __name__ == "__main__":
     _dbg_log('STARTUP', f"═══ SMC Journal PRO v{VERSION} spuštěn ═══  APP_DIR={_APP_DIR}  frozen={getattr(sys,'frozen',False)}")
     _ensure_default_recipients()   # přidá FTMO a další výchozí odběratele
+    # Načti vlastní setupy ze souboru do FIBO_OPTIONS
+    global FIBO_OPTIONS
+    FIBO_OPTIONS = load_setups()
     try:
         root = tk.Tk(); root.title(load_app_title()); root.geometry("1400x900")
         root.tk.call('encoding', 'system', 'utf-8')
