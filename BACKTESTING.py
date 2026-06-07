@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.90"
+VERSION = "1.5.91"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4189,20 +4189,15 @@ def setup_konzistence_tab(parent):
     # ── Přidat týden ──────────────────────────────────────────────────────────
     def add_week():
         from datetime import timedelta as _td
-        # Zjisti číslo dalšího týdne
         existing = len(data['weeks'])
         now = datetime.now()
-        # Začátek aktuálního týdne (pondělí) + existing týdnů
-        monday = now - __import__('datetime').timedelta(days=now.weekday())
+        # Pondělí aktuálního týdne + počet existujících týdnů dopředu
+        monday = now - _td(days=now.weekday())
         monday += _td(weeks=existing)
-        days = [(monday + _td(days=i)).strftime('%-d.%-m.') if hasattr(datetime, 'strptime') else
-                (monday + _td(days=i)).strftime('%d.%m.').lstrip('0')
-                for i in range(5)]
-        # Fallback pro Windows (%-d nefunguje)
-        days_fmt = []
-        for i in range(5):
-            d = monday + _td(days=i)
-            days_fmt.append(f"{d.day}.{d.month}.")
+
+        # Windows-safe formát dnů (bez %-d)
+        days_fmt = [f"{(monday + _td(days=i)).day}.{(monday + _td(days=i)).month}."
+                    for i in range(5)]
 
         week_num = monday.isocalendar()[1]
         label = f"{week_num}. týden  ({days_fmt[0]} – {days_fmt[-1]})"
