@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.88"
+VERSION = "1.5.89"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -9853,9 +9853,7 @@ def open_project(lb, mode):
 if __name__ == "__main__":
     _dbg_log('STARTUP', f"═══ SMC Journal PRO v{VERSION} spuštěn ═══  APP_DIR={_APP_DIR}  frozen={getattr(sys,'frozen',False)}")
     _ensure_default_recipients()   # přidá FTMO a další výchozí odběratele
-    # Načti vlastní setupy ze souboru do FIBO_OPTIONS
-    global FIBO_OPTIONS
-    FIBO_OPTIONS = load_setups()
+    FIBO_OPTIONS[:] = load_setups()  # Načti vlastní setupy in-place (bez global)
     try:
         root = tk.Tk(); root.title(load_app_title()); root.geometry("1400x900")
         root.tk.call('encoding', 'system', 'utf-8')
