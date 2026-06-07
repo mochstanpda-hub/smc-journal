@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.89"
+VERSION = "1.5.90"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -791,6 +791,7 @@ ACCOUNTS_FILE = '' # Správce účtů (FTMO Challenge, Verifikace, Funded...)
 INVOICES_DIR             = os.path.join(_APP_DIR, 'invoices')
 INVOICE_DETAILS_FILE     = os.path.join(_APP_DIR, 'invoice_details.json')
 INVOICE_RECIPIENTS_FILE  = os.path.join(_APP_DIR, 'invoice_recipients.json')
+KONZISTENCE_FILE         = os.path.join(_APP_DIR, 'konzistence.json')
 
 # XP Systém — bodovací žebříček (globální, napříč projekty)
 XP_FILE             = os.path.join(_APP_DIR, 'xp_data.json')
@@ -3944,6 +3945,288 @@ def setup_lists_manager_ui(parent):
 
     # Načti setupy do FIBO_OPTIONS při otevření nastavení
     _refresh_fibo_combos()
+
+# ==============================================================================
+# KONZISTENCE
+# ==============================================================================
+
+def load_konzistence():
+    try:
+        if os.path.exists(KONZISTENCE_FILE):
+            with open(KONZISTENCE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except: pass
+    return {'rules': [], 'weeks': []}
+
+def save_konzistence(data):
+    try:
+        with open(KONZISTENCE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        messagebox.showerror("Chyba", f"Nelze uložit konzistenci: {e}")
+
+def setup_konzistence_tab(parent):
+    """Záložka Konzistence — týdenní sledování dodržování pravidel."""
+    data = load_konzistence()
+
+    # Barvy buněk
+    CLR_EMPTY = '#2d3748'
+    CLR_GREEN = '#16a34a'
+    CLR_RED   = '#dc2626'
+    CLR_TXT_EMPTY = '#94a3b8'
+    CLR_TXT_OK    = '#ffffff'
+
+    # ── Hlavní layout ─────────────────────────────────────────────────────────
+    outer = tk.Frame(parent, bg=DT_BG)
+    outer.pack(fill='both', expand=True)
+
+    # Levý panel — pravidla
+    left = tk.Frame(outer, bg=DT_PANEL, width=240)
+    left.pack(side='left', fill='y', padx=(0,0))
+    left.pack_propagate(False)
+
+    tk.Label(left, text="📋  Pravidla", bg=DT_PANEL, fg=DT_TEXT,
+             font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,6))
+    tk.Label(left, text="Klikni pro přepnutí týdenního záznamu:\n⬜ prázdné → 🟢 splněno → 🔴 nesplněno",
+             bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8),
+             wraplength=210, justify='left').pack(anchor='w', padx=14, pady=(0,10))
+
+    lb_rules = tk.Listbox(left, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI',10),
+                           selectbackground=DT_ACCENT, selectforeground='white',
+                           relief='flat', bd=0, height=14)
+    lb_rules.pack(fill='x', padx=10, pady=(0,6))
+    for r in data['rules']:
+        lb_rules.insert(tk.END, r)
+
+    entry_rule = tk.Entry(left, font=('Segoe UI',10), bg=DT_ENTRY, fg=DT_TEXT,
+                          relief='solid', bd=1, insertbackground=DT_ACCENT)
+    entry_rule.pack(fill='x', padx=10, pady=(0,4))
+    tk.Label(left, text="Název pravidla:", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI',8)).pack(anchor='w', padx=12)
+
+    # Pravý panel — týdny (scrollovatelný)
+    right_outer = tk.Frame(outer, bg=DT_BG)
+    right_outer.pack(side='left', fill='both', expand=True)
+
+    top_bar = tk.Frame(right_outer, bg=DT_PANEL, pady=8, padx=12)
+    top_bar.pack(fill='x')
+    tk.Label(top_bar, text="📅  Týdenní konzistence", bg=DT_PANEL, fg=DT_TEXT,
+             font=('Segoe UI',12,'bold')).pack(side='left')
+
+    weeks_canv = tk.Canvas(right_outer, bg=DT_BG, highlightthickness=0)
+    weeks_sb   = ttk.Scrollbar(right_outer, orient='vertical', command=weeks_canv.yview)
+    weeks_canv.pack(side='left', fill='both', expand=True)
+    weeks_sb.pack(side='right', fill='y')
+    weeks_frame = tk.Frame(weeks_canv, bg=DT_BG)
+    weeks_canv.create_window((0,0), window=weeks_frame, anchor='nw')
+    weeks_frame.bind("<Configure>", lambda e: weeks_canv.configure(
+        scrollregion=weeks_canv.bbox("all")))
+    weeks_canv.configure(yscrollcommand=weeks_sb.set)
+    weeks_canv.bind("<MouseWheel>", lambda e: weeks_canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+    weeks_frame.bind("<MouseWheel>", lambda e: weeks_canv.yview_scroll(int(-1*(e.delta/120)),"units"))
+
+    CELL_W = 54
+    CELL_H = 28
+    DAY_NAMES = ['Po', 'Út', 'St', 'Čt', 'Pá']
+
+    def _rebuild_weeks():
+        """Překresli všechny týdny."""
+        for w in weeks_frame.winfo_children():
+            w.destroy()
+
+        rules = data['rules']
+        if not rules:
+            tk.Label(weeks_frame, text="Nejdřív přidej pravidla vlevo.",
+                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',11)).pack(pady=40)
+            return
+
+        for wi, week in enumerate(data['weeks']):
+            wf = tk.Frame(weeks_frame, bg=DT_BG)
+            wf.pack(fill='x', padx=14, pady=(12,0))
+
+            # Záhlaví týdne
+            hdr = tk.Frame(wf, bg='#1e3a5f', pady=5)
+            hdr.pack(fill='x')
+            tk.Label(hdr, text=f"  {week.get('label','Týden')}",
+                     bg='#1e3a5f', fg='#60a5fa',
+                     font=('Segoe UI',10,'bold')).pack(side='left')
+
+            # Smazat týden
+            def _del_week(idx=wi):
+                if messagebox.askyesno("Smazat", f"Smazat {data['weeks'][idx].get('label','')}?"):
+                    data['weeks'].pop(idx)
+                    save_konzistence(data)
+                    _rebuild_weeks()
+            tk.Button(hdr, text="🗑", command=_del_week,
+                      bg='#1e3a5f', fg='#ef4444', font=('Segoe UI',9),
+                      relief='flat', cursor='hand2').pack(side='right', padx=6)
+
+            # Grid: řádky = dny, sloupce = pravidla + výsledek
+            grid = tk.Frame(wf, bg=DT_BG)
+            grid.pack(fill='x', pady=(2,0))
+
+            # Hlavičkový řádek: prázdný + pravidla + výsledek
+            tk.Label(grid, text="", bg=DT_SURFACE, width=8,
+                     font=('Segoe UI',8)).grid(row=0, column=0, padx=1, pady=1, sticky='nsew')
+            for ci, rule in enumerate(rules):
+                lbl_text = rule if len(rule) <= 14 else rule[:12]+'…'
+                tk.Label(grid, text=lbl_text, bg='#1e293b', fg='#94a3b8',
+                         font=('Segoe UI',8), width=CELL_W//7, anchor='center',
+                         wraplength=CELL_W*2).grid(row=0, column=ci+1, padx=1, pady=1, sticky='nsew')
+            tk.Label(grid, text="Výsledek", bg='#1e293b', fg='#94a3b8',
+                     font=('Segoe UI',8)).grid(row=0, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
+
+            # Řádky dnů
+            days = week.get('days', [])
+            day_data = week.setdefault('data', {})
+
+            for ri, day in enumerate(days):
+                # Label dne
+                tk.Label(grid, text=day, bg=DT_SURFACE, fg=DT_TEXT,
+                         font=('Segoe UI',9,'bold'), width=8,
+                         anchor='center').grid(row=ri+1, column=0, padx=1, pady=1, sticky='nsew')
+
+                # Buňky pravidel
+                for ci, rule in enumerate(rules):
+                    rule_days = day_data.setdefault(rule, [''] * len(days))
+                    # Zarovnej délku na počet dnů
+                    while len(rule_days) < len(days): rule_days.append('')
+
+                    state = rule_days[ri]
+                    bg = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_EMPTY
+                    txt = '✓' if state == 'green' else '✗' if state == 'red' else ''
+                    fg = CLR_TXT_OK if state else CLR_TXT_EMPTY
+
+                    btn = tk.Button(grid, text=txt, bg=bg, fg=fg,
+                                    font=('Segoe UI',10,'bold'),
+                                    width=4, height=1, relief='flat', cursor='hand2',
+                                    activebackground=bg)
+
+                    def _toggle(event=None, _wi=wi, _rule=rule, _ri=ri):
+                        _states = ['', 'green', 'red']
+                        cur = data['weeks'][_wi]['data'].get(_rule, [''] * len(days))
+                        while len(cur) < len(days): cur.append('')
+                        nxt = _states[(_states.index(cur[_ri]) + 1) % 3]
+                        cur[_ri] = nxt
+                        data['weeks'][_wi]['data'][_rule] = cur
+                        save_konzistence(data)
+                        _rebuild_weeks()
+
+                    btn.bind('<Button-1>', _toggle)
+                    btn.grid(row=ri+1, column=ci+1, padx=1, pady=1, sticky='nsew')
+
+                # Výsledek pro tento den (kolik pravidel splněno)
+                splneno = sum(1 for r in rules
+                              if day_data.get(r, [''] * len(days))[ri] == 'green'
+                              if ri < len(day_data.get(r, [])))
+                res_txt = f"{splneno}/{len(rules)}"
+                res_bg  = CLR_GREEN if splneno == len(rules) else CLR_RED if splneno == 0 else '#92400e'
+                tk.Label(grid, text=res_txt, bg=res_bg, fg='white',
+                         font=('Segoe UI',9,'bold'), anchor='center').grid(
+                    row=ri+1, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
+
+            # Souhrnný řádek — výsledek per pravidlo
+            tk.Label(grid, text="Celkem:", bg='#1e293b', fg='#94a3b8',
+                     font=('Segoe UI',8), width=8).grid(
+                row=len(days)+1, column=0, padx=1, pady=(4,1), sticky='nsew')
+            total_green = 0
+            for ci, rule in enumerate(rules):
+                rd = day_data.get(rule, [''] * len(days))
+                cnt = sum(1 for s in rd if s == 'green')
+                total = len(days)
+                total_green += cnt
+                pct = int(cnt / total * 100) if total else 0
+                sbg = CLR_GREEN if pct >= 80 else CLR_RED if pct < 50 else '#92400e'
+                tk.Label(grid, text=f"{cnt}/{total}", bg=sbg, fg='white',
+                         font=('Segoe UI',9,'bold')).grid(
+                    row=len(days)+1, column=ci+1, padx=1, pady=(4,1), sticky='nsew')
+            # Celkový výsledek týdne
+            all_cells = len(rules) * len(days)
+            pct_total = int(total_green / all_cells * 100) if all_cells else 0
+            tk.Label(grid, text=f"{pct_total}%", bg='#1e3a5f', fg='#60a5fa',
+                     font=('Segoe UI',10,'bold')).grid(
+                row=len(days)+1, column=len(rules)+1, padx=1, pady=(4,1), sticky='nsew')
+
+            # Oddělovač
+            tk.Frame(weeks_frame, bg='#334155', height=1).pack(fill='x', padx=14, pady=(10,0))
+
+    # ── Tlačítka pro pravidla ─────────────────────────────────────────────────
+    def add_rule():
+        val = entry_rule.get().strip()
+        if not val: return
+        if val in data['rules']:
+            messagebox.showwarning("Pravidla", "Toto pravidlo již existuje."); return
+        data['rules'].append(val)
+        # Přidej prázdné sloupce do existujících týdnů
+        for week in data['weeks']:
+            week.setdefault('data', {})[val] = [''] * len(week.get('days', []))
+        save_konzistence(data)
+        lb_rules.insert(tk.END, val)
+        entry_rule.delete(0, tk.END)
+        _rebuild_weeks()
+
+    def remove_rule():
+        sel = lb_rules.curselection()
+        if not sel: messagebox.showwarning("Pravidla","Vyber pravidlo."); return
+        val = lb_rules.get(sel[0])
+        if not messagebox.askyesno("Smazat", f"Odebrat pravidlo '{val}'?\n(Data za toto pravidlo budou ztracena)"): return
+        data['rules'].remove(val)
+        for week in data['weeks']:
+            week.get('data', {}).pop(val, None)
+        save_konzistence(data)
+        lb_rules.delete(sel[0])
+        _rebuild_weeks()
+
+    btn_f = tk.Frame(left, bg=DT_PANEL)
+    btn_f.pack(fill='x', padx=10, pady=6)
+    tk.Button(btn_f, text="➕ Přidat", command=add_rule,
+              bg='#15803d', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,3))
+    tk.Button(btn_f, text="🗑 Odebrat", command=remove_rule,
+              bg='#b91c1c', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True)
+
+    # ── Přidat týden ──────────────────────────────────────────────────────────
+    def add_week():
+        from datetime import timedelta as _td
+        # Zjisti číslo dalšího týdne
+        existing = len(data['weeks'])
+        now = datetime.now()
+        # Začátek aktuálního týdne (pondělí) + existing týdnů
+        monday = now - __import__('datetime').timedelta(days=now.weekday())
+        monday += _td(weeks=existing)
+        days = [(monday + _td(days=i)).strftime('%-d.%-m.') if hasattr(datetime, 'strptime') else
+                (monday + _td(days=i)).strftime('%d.%m.').lstrip('0')
+                for i in range(5)]
+        # Fallback pro Windows (%-d nefunguje)
+        days_fmt = []
+        for i in range(5):
+            d = monday + _td(days=i)
+            days_fmt.append(f"{d.day}.{d.month}.")
+
+        week_num = monday.isocalendar()[1]
+        label = f"{week_num}. týden  ({days_fmt[0]} – {days_fmt[-1]})"
+
+        new_week = {
+            'label': label,
+            'year':  monday.year,
+            'week':  week_num,
+            'days':  days_fmt,
+            'data':  {r: [''] * 5 for r in data['rules']}
+        }
+        data['weeks'].append(new_week)
+        save_konzistence(data)
+        _rebuild_weeks()
+        # Scroll na konec
+        weeks_canv.after(100, lambda: weeks_canv.yview_moveto(1.0))
+
+    tk.Button(top_bar, text="➕  Přidat týden", command=add_week,
+              bg='#1d4ed8', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', padx=12, pady=4, cursor='hand2').pack(side='right')
+
+    entry_rule.bind('<Return>', lambda e: add_rule())
+    _rebuild_weeks()
+
 
 def setup_rules_ui(parent):
     frame = tk.Frame(parent, padx=20, pady=20)
@@ -9499,6 +9782,11 @@ def show_main_screen(p_name):
     tab_inv = ttk.Frame(nb)
     nb.add(tab_inv, text='  📄 FAKTURY  ')
     setup_invoices_tab(tab_inv)
+
+    # TAB KONZISTENCE
+    tab_konz = ttk.Frame(nb)
+    nb.add(tab_konz, text='  📊 KONZISTENCE  ')
+    setup_konzistence_tab(tab_konz)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
