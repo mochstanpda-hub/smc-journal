@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.93"
+VERSION = "1.5.94"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3976,20 +3976,9 @@ def setup_konzistence_tab(parent):
     """Záložka Konzistence — týdenní sledování dodržování pravidel."""
     data = load_konzistence()
 
-    # ── Pomocné funkce pro rules (dict formát) ────────────────────────────────
-    def _rtxt(r):
-        return r['text'] if isinstance(r, dict) else r
-
-    def _rdict(r):
-        if isinstance(r, dict): return r
-        return {'text': r, 'bold': False, 'italic': False, 'underline': False, 'color': '#94a3b8'}
-
-    def _rfont(r, sz=10):
-        d = _rdict(r)
-        parts = []
-        if d.get('bold'):   parts.append('bold')
-        if d.get('italic'): parts.append('italic')
-        return ('Segoe UI', sz, ' '.join(parts) if parts else 'normal')
+    # Normalizuj rules na plain strings (migrace z dict formátu)
+    data['rules'] = [r['text'] if isinstance(r, dict) else r
+                     for r in data.get('rules', [])]
 
     # Barvy buněk
     CLR_EMPTY     = '#2d3748'
@@ -4003,179 +3992,28 @@ def setup_konzistence_tab(parent):
     outer.pack(fill='both', expand=True)
 
     # ── LEVÝ PANEL ────────────────────────────────────────────────────────────
-    left = tk.Frame(outer, bg=DT_PANEL, width=280)
+    left = tk.Frame(outer, bg=DT_PANEL, width=240)
     left.pack(side='left', fill='y')
     left.pack_propagate(False)
 
     tk.Label(left, text="📋  Pravidla", bg=DT_PANEL, fg=DT_TEXT,
-             font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,4))
-    tk.Label(left, text="⬜ prázdné  →  🟢 splněno  →  🔴 nesplněno",
+             font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,6))
+    tk.Label(left, text="Klikni pro přepnutí týdenního záznamu:\n⬜ prázdné → 🟢 splněno → 🔴 nesplněno",
              bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8),
-             wraplength=250, justify='left').pack(anchor='w', padx=14, pady=(0,6))
+             wraplength=210, justify='left').pack(anchor='w', padx=14, pady=(0,10))
 
-    # Text widget jako stylovaný seznam pravidel (klikatelný)
-    rules_txt = tk.Text(left, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI',10),
-                        relief='flat', bd=0, height=10, cursor='arrow',
-                        state='disabled', padx=6, pady=4, spacing1=4, spacing3=4)
-    rules_txt.pack(fill='x', padx=10, pady=(0,0))
+    lb_rules = tk.Listbox(left, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI',10),
+                          selectbackground=DT_ACCENT, selectforeground='white',
+                          relief='flat', bd=0, height=14)
+    lb_rules.pack(fill='x', padx=10, pady=(0,6))
+    for r in data['rules']:
+        lb_rules.insert(tk.END, r)
 
-    # ── Formátovací sekce ─────────────────────────────────────────────────────
-    tk.Frame(left, bg='#334155', height=1).pack(fill='x', padx=10, pady=(10,6))
-    tk.Label(left, text="Nové / upravit pravidlo:", bg=DT_PANEL, fg=DT_SUBTEXT,
-             font=('Segoe UI',8)).pack(anchor='w', padx=12, pady=(0,3))
-
-    # Stavové proměnné formátování
-    bold_var      = tk.BooleanVar(value=False)
-    italic_var    = tk.BooleanVar(value=False)
-    underline_var = tk.BooleanVar(value=False)
-    color_var     = tk.StringVar(value='#94a3b8')
-    selected_idx  = {'v': None}   # mutovatelný box místo nonlocal
-
-    fmt_bar = tk.Frame(left, bg=DT_PANEL)
-    fmt_bar.pack(fill='x', padx=10, pady=(0,5))
-
-    def _upd_btn(btn, var):
-        """Vizuální stav toggle tlačítka."""
-        btn.config(relief='sunken' if var.get() else 'raised',
-                   bg='#334155' if var.get() else DT_ENTRY)
-
-    btn_bold = tk.Button(fmt_bar, text='B', font=('Segoe UI',10,'bold'), width=3,
-                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
-    btn_bold.pack(side='left', padx=(0,3))
-    btn_bold.config(command=lambda: [bold_var.set(not bold_var.get()), _upd_btn(btn_bold, bold_var)])
-
-    btn_ital = tk.Button(fmt_bar, text='I', font=('Segoe UI',10,'italic'), width=3,
-                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
-    btn_ital.pack(side='left', padx=(0,3))
-    btn_ital.config(command=lambda: [italic_var.set(not italic_var.get()), _upd_btn(btn_ital, italic_var)])
-
-    btn_undr = tk.Button(fmt_bar, text='U', font=('Segoe UI',10,'underline'), width=3,
-                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
-    btn_undr.pack(side='left', padx=(0,3))
-    btn_undr.config(command=lambda: [underline_var.set(not underline_var.get()), _upd_btn(btn_undr, underline_var)])
-
-    # Barevný čtverec — klik = výběr barvy
-    clr_swatch = tk.Label(fmt_bar, bg='#94a3b8', width=4, relief='solid', bd=1,
-                          cursor='hand2')
-    clr_swatch.pack(side='left', padx=(0,4), ipady=7)
-
-    def _pick_color():
-        from tkinter.colorchooser import askcolor
-        col = askcolor(color=color_var.get(), title="Barva pravidla")[1]
-        if col:
-            color_var.set(col)
-            clr_swatch.config(bg=col)
-
-    clr_swatch.bind('<Button-1>', lambda e: _pick_color())
-    tk.Label(fmt_bar, text="barva", bg=DT_PANEL, fg=DT_SUBTEXT,
-             font=('Segoe UI',7)).pack(side='left')
-
-    # Vstupní pole pro text pravidla
     entry_rule = tk.Entry(left, font=('Segoe UI',10), bg=DT_ENTRY, fg=DT_TEXT,
                           relief='solid', bd=1, insertbackground=DT_ACCENT)
-    entry_rule.pack(fill='x', padx=10, pady=(0,6))
-
-    # ── Refresh stylovaného seznamu pravidel ──────────────────────────────────
-    def _refresh_rules_list(keep_sel=None):
-        rules_txt.config(state='normal')
-        rules_txt.delete('1.0', 'end')
-        for i, r in enumerate(data['rules']):
-            d = _rdict(r)
-            tag = f"rule_{i}"
-            is_sel = (keep_sel == i)
-            fs = []
-            if d.get('bold'):   fs.append('bold')
-            if d.get('italic'): fs.append('italic')
-            fnt = ('Segoe UI', 10, ' '.join(fs) if fs else 'normal')
-            rules_txt.tag_config(tag,
-                foreground='#ffffff' if is_sel else d.get('color', '#94a3b8'),
-                background='#1e3a5f' if is_sel else DT_SURFACE,
-                font=fnt,
-                underline=1 if d.get('underline') else 0)
-            bullet = '  ●  ' if is_sel else '  ·  '
-            rules_txt.insert('end', bullet + d['text'] + '\n', tag)
-            rules_txt.tag_bind(tag, '<Button-1>', lambda e, idx=i: _select_rule(idx))
-        rules_txt.config(state='disabled')
-
-    def _select_rule(idx):
-        """Klik na pravidlo → načti do editoru."""
-        selected_idx['v'] = idx
-        d = _rdict(data['rules'][idx])
-        entry_rule.delete(0, tk.END)
-        entry_rule.insert(0, d['text'])
-        bold_var.set(d.get('bold', False))
-        italic_var.set(d.get('italic', False))
-        underline_var.set(d.get('underline', False))
-        color_var.set(d.get('color', '#94a3b8'))
-        clr_swatch.config(bg=d.get('color', '#94a3b8'))
-        _upd_btn(btn_bold, bold_var)
-        _upd_btn(btn_ital, italic_var)
-        _upd_btn(btn_undr, underline_var)
-        _refresh_rules_list(keep_sel=idx)
-
-    # ── Akce pravidel ─────────────────────────────────────────────────────────
-    def add_rule():
-        val = entry_rule.get().strip()
-        if not val: return
-        if val in [_rtxt(r) for r in data['rules']]:
-            messagebox.showwarning("Pravidla", "Toto pravidlo již existuje."); return
-        rule_dict = {'text': val, 'bold': bold_var.get(), 'italic': italic_var.get(),
-                     'underline': underline_var.get(), 'color': color_var.get()}
-        data['rules'].append(rule_dict)
-        for week in data['weeks']:
-            week.setdefault('data', {})[val] = [''] * len(week.get('days', []))
-        save_konzistence(data)
-        entry_rule.delete(0, tk.END)
-        selected_idx['v'] = None
-        _refresh_rules_list()
-        _rebuild_weeks()
-
-    def update_rule():
-        idx = selected_idx['v']
-        if idx is None:
-            messagebox.showwarning("Pravidla", "Klikni na pravidlo v seznamu."); return
-        val = entry_rule.get().strip()
-        if not val: return
-        old_text = _rtxt(data['rules'][idx])
-        new_dict = {'text': val, 'bold': bold_var.get(), 'italic': italic_var.get(),
-                    'underline': underline_var.get(), 'color': color_var.get()}
-        data['rules'][idx] = new_dict
-        # Přejmenuj klíče v týdnech pokud se text změnil
-        if val != old_text:
-            for week in data['weeks']:
-                wd = week.get('data', {})
-                if old_text in wd:
-                    wd[val] = wd.pop(old_text)
-        save_konzistence(data)
-        _refresh_rules_list(keep_sel=idx)
-        _rebuild_weeks()
-
-    def remove_rule():
-        idx = selected_idx['v']
-        if idx is None:
-            messagebox.showwarning("Pravidla", "Klikni na pravidlo v seznamu."); return
-        val = _rtxt(data['rules'][idx])
-        if not messagebox.askyesno("Smazat", f"Odebrat pravidlo '{val}'?\n(Data budou ztracena)"): return
-        data['rules'].pop(idx)
-        for week in data['weeks']:
-            week.get('data', {}).pop(val, None)
-        save_konzistence(data)
-        selected_idx['v'] = None
-        entry_rule.delete(0, tk.END)
-        _refresh_rules_list()
-        _rebuild_weeks()
-
-    btn_f = tk.Frame(left, bg=DT_PANEL)
-    btn_f.pack(fill='x', padx=10, pady=2)
-    tk.Button(btn_f, text="➕ Přidat", command=add_rule,
-              bg='#15803d', fg='white', font=('Segoe UI',9,'bold'),
-              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,2))
-    tk.Button(btn_f, text="✏ Upravit", command=update_rule,
-              bg='#1d4ed8', fg='white', font=('Segoe UI',9,'bold'),
-              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,2))
-    tk.Button(btn_f, text="🗑", command=remove_rule,
-              bg='#b91c1c', fg='white', font=('Segoe UI',9,'bold'),
-              relief='flat', cursor='hand2', width=3).pack(side='left')
+    entry_rule.pack(fill='x', padx=10, pady=(0,4))
+    tk.Label(left, text="Název pravidla:", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI',8)).pack(anchor='w', padx=12)
 
     # ── PRAVÝ PANEL — týdny ───────────────────────────────────────────────────
     right_outer = tk.Frame(outer, bg=DT_BG)
@@ -4236,18 +4074,14 @@ def setup_konzistence_tab(parent):
             grid = tk.Frame(wf, bg=DT_BG)
             grid.pack(fill='x', pady=(2,0))
 
-            # Hlavičkový řádek — šířka dle délky názvu + barva/font z rule dict
+            # Hlavičkový řádek — šířka dle délky názvu pravidla
             tk.Label(grid, text="", bg=DT_SURFACE, width=8,
                      font=('Segoe UI',8)).grid(row=0, column=0, padx=1, pady=1, sticky='nsew')
             for ci, rule in enumerate(rules):
-                d    = _rdict(rule)
-                rtext = d['text']
-                cw   = max(6, min(len(rtext), 22))
+                cw   = max(6, min(len(rule), 22))
                 wrap = max(70, cw * 6)
-                hfnt = _rfont(rule, sz=8)
-                tk.Label(grid, text=rtext, bg='#1e293b',
-                         fg=d.get('color', '#94a3b8'),
-                         font=hfnt, width=cw, anchor='center',
+                tk.Label(grid, text=rule, bg='#1e293b', fg='#94a3b8',
+                         font=('Segoe UI',8), width=cw, anchor='center',
                          wraplength=wrap, justify='center').grid(
                     row=0, column=ci+1, padx=1, pady=1, sticky='nsew')
             tk.Label(grid, text="Výsledek", bg='#1e293b', fg='#94a3b8',
@@ -4264,24 +4098,23 @@ def setup_konzistence_tab(parent):
                          anchor='center').grid(row=ri+1, column=0, padx=1, pady=1, sticky='nsew')
 
                 for ci, rule in enumerate(rules):
-                    rkey      = _rtxt(rule)
-                    rule_days = day_data.setdefault(rkey, [''] * len(days))
+                    rule_days = day_data.setdefault(rule, [''] * len(days))
                     while len(rule_days) < len(days): rule_days.append('')
                     state = rule_days[ri]
                     bg  = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_EMPTY
-                    txt = '✓' if state == 'green' else '✗' if state == 'red' else ''
+                    txt_lbl = '✓' if state == 'green' else '✗' if state == 'red' else ''
                     fg  = CLR_TXT_OK if state else CLR_TXT_EMPTY
-                    btn = tk.Button(grid, text=txt, bg=bg, fg=fg,
+                    btn = tk.Button(grid, text=txt_lbl, bg=bg, fg=fg,
                                     font=('Segoe UI',10,'bold'),
                                     width=4, height=1, relief='flat', cursor='hand2',
                                     activebackground=bg)
-                    def _toggle(event=None, _wi=wi, _rkey=rkey, _ri=ri):
+                    def _toggle(event=None, _wi=wi, _rule=rule, _ri=ri):
                         _states = ['', 'green', 'red']
-                        cur = data['weeks'][_wi]['data'].get(_rkey, [''] * len(days))
+                        cur = data['weeks'][_wi]['data'].get(_rule, [''] * len(days))
                         while len(cur) < len(days): cur.append('')
                         nxt = _states[(_states.index(cur[_ri]) + 1) % 3]
                         cur[_ri] = nxt
-                        data['weeks'][_wi]['data'][_rkey] = cur
+                        data['weeks'][_wi]['data'][_rule] = cur
                         save_konzistence(data)
                         _rebuild_weeks()
                     btn.bind('<Button-1>', _toggle)
@@ -4289,8 +4122,8 @@ def setup_konzistence_tab(parent):
 
                 splneno = sum(
                     1 for r in rules
-                    if ri < len(day_data.get(_rtxt(r), []))
-                    and day_data.get(_rtxt(r), [''] * len(days))[ri] == 'green')
+                    if ri < len(day_data.get(r, []))
+                    and day_data.get(r, [''] * len(days))[ri] == 'green')
                 res_txt = f"{splneno}/{len(rules)}"
                 res_bg  = CLR_GREEN if splneno == len(rules) else CLR_RED if splneno == 0 else '#92400e'
                 tk.Label(grid, text=res_txt, bg=res_bg, fg='white',
@@ -4303,9 +4136,8 @@ def setup_konzistence_tab(parent):
                 row=len(days)+1, column=0, padx=1, pady=(4,1), sticky='nsew')
             total_green = 0
             for ci, rule in enumerate(rules):
-                rkey = _rtxt(rule)
-                rd   = day_data.get(rkey, [''] * len(days))
-                cnt  = sum(1 for s in rd if s == 'green')
+                rd    = day_data.get(rule, [''] * len(days))
+                cnt   = sum(1 for s in rd if s == 'green')
                 total = len(days)
                 total_green += cnt
                 pct = int(cnt / total * 100) if total else 0
@@ -4321,6 +4153,41 @@ def setup_konzistence_tab(parent):
 
             tk.Frame(weeks_frame, bg='#334155', height=1).pack(fill='x', padx=14, pady=(10,0))
 
+    # ── Tlačítka pro pravidla ─────────────────────────────────────────────────
+    def add_rule():
+        val = entry_rule.get().strip()
+        if not val: return
+        if val in data['rules']:
+            messagebox.showwarning("Pravidla", "Toto pravidlo již existuje."); return
+        data['rules'].append(val)
+        for week in data['weeks']:
+            week.setdefault('data', {})[val] = [''] * len(week.get('days', []))
+        save_konzistence(data)
+        lb_rules.insert(tk.END, val)
+        entry_rule.delete(0, tk.END)
+        _rebuild_weeks()
+
+    def remove_rule():
+        sel = lb_rules.curselection()
+        if not sel: messagebox.showwarning("Pravidla","Vyber pravidlo."); return
+        val = lb_rules.get(sel[0])
+        if not messagebox.askyesno("Smazat", f"Odebrat pravidlo '{val}'?\n(Data za toto pravidlo budou ztracena)"): return
+        data['rules'].remove(val)
+        for week in data['weeks']:
+            week.get('data', {}).pop(val, None)
+        save_konzistence(data)
+        lb_rules.delete(sel[0])
+        _rebuild_weeks()
+
+    btn_f = tk.Frame(left, bg=DT_PANEL)
+    btn_f.pack(fill='x', padx=10, pady=6)
+    tk.Button(btn_f, text="➕ Přidat", command=add_rule,
+              bg='#15803d', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,3))
+    tk.Button(btn_f, text="🗑 Odebrat", command=remove_rule,
+              bg='#b91c1c', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True)
+
     # ── Přidat týden ──────────────────────────────────────────────────────────
     def add_week():
         from datetime import timedelta as _td
@@ -4335,7 +4202,7 @@ def setup_konzistence_tab(parent):
         new_week = {
             'label': label, 'year': monday.year, 'week': week_num,
             'days':  days_fmt,
-            'data':  {_rtxt(r): [''] * 5 for r in data['rules']}
+            'data':  {r: [''] * 5 for r in data['rules']}
         }
         data['weeks'].append(new_week)
         save_konzistence(data)
@@ -4347,47 +4214,376 @@ def setup_konzistence_tab(parent):
               relief='flat', padx=12, pady=4, cursor='hand2').pack(side='right')
 
     entry_rule.bind('<Return>', lambda e: add_rule())
-    _refresh_rules_list()
     _rebuild_weeks()
 
 
 def setup_rules_ui(parent):
-    frame = tk.Frame(parent, padx=20, pady=20)
-    frame.pack(fill="both", expand=True)
-    
-    tk.Label(frame, text="MOJE OBCHODNÍ PRAVIDLA", font=("Arial", 14, "bold"), fg="#2c3e50").pack(anchor="w", pady=(0, 10))
-    tk.Label(frame, text="Zde si udržujte aktuální seznam pravidel, která musíte dodržovat.", fg="gray").pack(anchor="w", pady=(0, 5))
-    
-    current_font_size = tk.IntVar(value=12)
-    
-    text_area = tk.Text(frame, font=("Consolas", current_font_size.get()), undo=True, wrap="word", padx=10, pady=10, bg="#fdfefe")
-    text_area.pack(fill="both", expand=True)
-    
-    # Load content
-    content = load_rules_text()
-    text_area.insert("1.0", content)
-    
-    btn_frame = tk.Frame(frame, pady=10)
-    btn_frame.pack(fill="x")
-    
-    tk.Button(btn_frame, text="💾 ULOŽIT PRAVIDLA", command=lambda: save_rules_text(text_area.get("1.0", tk.END)), 
-              bg="#2ecc71", fg="white", font=("Arial", 10, "bold"), height=2, width=20).pack(side="left")
+    """Záložka MOJE PRAVIDLA — plnohodnotný rich text editor."""
 
-    # Font controls
-    font_ctrl = tk.Frame(btn_frame)
-    font_ctrl.pack(side="right")
-    
-    tk.Label(font_ctrl, text="Velikost písma:").pack(side="left", padx=5)
-    
-    def update_font(delta):
-        new_size = current_font_size.get() + delta
-        if 8 <= new_size <= 32:
-            current_font_size.set(new_size)
-            text_area.configure(font=("Consolas", new_size))
-            
-    tk.Button(font_ctrl, text="-", command=lambda: update_font(-1), width=3).pack(side="left")
-    tk.Label(font_ctrl, textvariable=current_font_size, width=4, font=("Arial", 10, "bold")).pack(side="left")
-    tk.Button(font_ctrl, text="+", command=lambda: update_font(1), width=3).pack(side="left")
+    # ── Barvy ─────────────────────────────────────────────────────────────────
+    TB_BG  = '#1e293b'
+    TB_BTN = '#334155'
+    TA_BG  = '#0f172a'
+    TA_FG  = '#e2e8f0'
+    BASE_FAMILY = 'Segoe UI'
+    BASE_SIZE   = 12
+
+    outer = tk.Frame(parent, bg=DT_BG)
+    outer.pack(fill='both', expand=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TOOLBAR
+    # ══════════════════════════════════════════════════════════════════════════
+    tb = tk.Frame(outer, bg=TB_BG, pady=6, padx=8)
+    tb.pack(fill='x')
+
+    def _sep():
+        tk.Frame(tb, bg='#475569', width=1).pack(side='left', fill='y', pady=2, padx=5)
+
+    # ── Font family ───────────────────────────────────────────────────────────
+    ff_var = tk.StringVar(value=BASE_FAMILY)
+    ff_cb  = ttk.Combobox(tb, textvariable=ff_var,
+                          values=['Segoe UI', 'Arial', 'Calibri', 'Consolas',
+                                  'Times New Roman', 'Georgia', 'Verdana'],
+                          width=13, state='readonly', font=('Segoe UI',9))
+    ff_cb.pack(side='left', padx=(0,4))
+
+    # ── Font size ─────────────────────────────────────────────────────────────
+    fs_var = tk.IntVar(value=BASE_SIZE)
+    fs_cb  = ttk.Combobox(tb, textvariable=fs_var,
+                          values=[8,9,10,11,12,13,14,16,18,20,24,28,32,36,48],
+                          width=4, state='readonly', font=('Segoe UI',9))
+    fs_cb.set(BASE_SIZE)
+    fs_cb.pack(side='left', padx=(0,0))
+
+    _sep()
+
+    # ── Format buttons ────────────────────────────────────────────────────────
+    def _tbtn(text, fnt, cmd, tip=''):
+        b = tk.Button(tb, text=text, font=fnt, bg=TB_BTN, fg='white',
+                      width=3, relief='raised', bd=1, cursor='hand2', command=cmd)
+        b.pack(side='left', padx=2)
+        return b
+
+    btn_b = _tbtn('B',  ('Segoe UI',10,'bold'),      lambda: _toggle_bold())
+    btn_i = _tbtn('I',  ('Segoe UI',10,'italic'),     lambda: _toggle_italic())
+    btn_u = _tbtn('U',  ('Segoe UI',10,'underline'),  lambda: _toggle_tag('underline'))
+    btn_s = _tbtn('S',  ('Segoe UI',10,'overstrike'), lambda: _toggle_tag('strike'))
+
+    _sep()
+
+    # ── Text color ────────────────────────────────────────────────────────────
+    fgclr_var = tk.StringVar(value=TA_FG)
+    fgclr_sw  = tk.Label(tb, text='A', bg=TB_BTN, fg=TA_FG,
+                         font=('Segoe UI',10,'bold'), width=3,
+                         relief='solid', bd=1, cursor='hand2')
+    fgclr_sw.pack(side='left', padx=2)
+
+    # ── Highlight color ───────────────────────────────────────────────────────
+    bgclr_var = tk.StringVar(value='')
+    bgclr_sw  = tk.Label(tb, text='▐', bg=TB_BTN, fg='#fbbf24',
+                         font=('Segoe UI',12), width=3,
+                         relief='solid', bd=1, cursor='hand2')
+    bgclr_sw.pack(side='left', padx=2)
+
+    _sep()
+
+    # ── Alignment ─────────────────────────────────────────────────────────────
+    btn_al = _tbtn('⬅', ('Segoe UI',9), lambda: _set_align('left'))
+    btn_ac = _tbtn('↔', ('Segoe UI',9), lambda: _set_align('center'))
+    btn_ar = _tbtn('➡', ('Segoe UI',9), lambda: _set_align('right'))
+
+    _sep()
+
+    # ── Headings + bullet ─────────────────────────────────────────────────────
+    btn_h1 = _tbtn('H1', ('Segoe UI',9,'bold'), lambda: _apply_heading('h1'))
+    btn_h2 = _tbtn('H2', ('Segoe UI',9,'bold'), lambda: _apply_heading('h2'))
+    btn_bl = _tbtn('•',  ('Segoe UI',12),        lambda: _apply_bullet())
+
+    _sep()
+
+    # ── Save (right-aligned) ──────────────────────────────────────────────────
+    tk.Button(tb, text='💾  Uložit', font=('Segoe UI',9,'bold'),
+              bg='#15803d', fg='white', relief='flat', padx=12,
+              cursor='hand2', command=lambda: _save()).pack(side='right', padx=8)
+    tk.Button(tb, text='↩  Zpět', font=('Segoe UI',9),
+              bg=TB_BTN, fg='white', relief='flat', padx=8,
+              cursor='hand2', command=lambda: txt.edit_undo()).pack(side='right', padx=2)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TEXT AREA
+    # ══════════════════════════════════════════════════════════════════════════
+    ta_frame = tk.Frame(outer, bg=TA_BG)
+    ta_frame.pack(fill='both', expand=True)
+
+    txt = tk.Text(ta_frame, font=(BASE_FAMILY, BASE_SIZE), wrap='word',
+                  bg=TA_BG, fg=TA_FG,
+                  insertbackground='#60a5fa',
+                  selectbackground='#3b82f6', selectforeground='white',
+                  relief='flat', bd=0, padx=28, pady=20,
+                  undo=True, maxundo=100,
+                  spacing1=2, spacing3=5)
+    vsb = ttk.Scrollbar(ta_frame, orient='vertical', command=txt.yview)
+    txt.config(yscrollcommand=vsb.set)
+    vsb.pack(side='right', fill='y')
+    txt.pack(fill='both', expand=True)
+
+    # ── Statické tagy ─────────────────────────────────────────────────────────
+    def _cfg_static_tags():
+        ff  = ff_var.get()
+        sz  = int(fs_var.get())
+        txt.tag_config('bold',        font=(ff, sz, 'bold'))
+        txt.tag_config('italic',      font=(ff, sz, 'italic'))
+        txt.tag_config('bold_italic', font=(ff, sz, 'bold italic'))
+        txt.tag_config('underline',   underline=True)
+        txt.tag_config('strike',      overstrike=True)
+        txt.tag_config('h1', font=(ff, 22, 'bold'),  spacing1=10, spacing3=5)
+        txt.tag_config('h2', font=(ff, 16, 'bold'),  spacing1=6,  spacing3=3)
+        txt.tag_config('bullet', lmargin1=20, lmargin2=36)
+        txt.tag_config('align_center', justify='center')
+        txt.tag_config('align_right',  justify='right')
+    _cfg_static_tags()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LOAD / SAVE  (text.txt  +  text_format.json)
+    # ══════════════════════════════════════════════════════════════════════════
+    def _fmt_path():
+        return RULES_FILE.replace('.txt', '_format.json') if RULES_FILE else ''
+
+    def _load():
+        txt.delete('1.0', 'end')
+        content = load_rules_text()
+        txt.insert('1.0', content.rstrip('\n') if content else '')
+        fp = _fmt_path()
+        if fp and os.path.exists(fp):
+            try:
+                with open(fp, 'r', encoding='utf-8') as f:
+                    tags_data = json.load(f)
+                for td in tags_data:
+                    tn  = td['name']
+                    cfg = td.get('cfg', {})
+                    if cfg:
+                        # Obnoví font tuple ze seznamu
+                        if 'font' in cfg and isinstance(cfg['font'], list):
+                            cfg['font'] = tuple(cfg['font'])
+                        try: txt.tag_config(tn, **cfg)
+                        except: pass
+                    for r0, r1 in td.get('ranges', []):
+                        try: txt.tag_add(tn, r0, r1)
+                        except: pass
+            except: pass
+
+    def _save():
+        if not RULES_FILE:
+            messagebox.showwarning("Pravidla", "Nejdřív otevři nebo vytvoř projekt."); return
+        content = txt.get('1.0', 'end-1c')
+        try:
+            with open(RULES_FILE, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nepodařilo se uložit: {e}"); return
+        # Ulož formátování
+        skip = {'sel', 'insert'}
+        tags_data = []
+        for tn in txt.tag_names():
+            if tn in skip: continue
+            ranges = txt.tag_ranges(tn)
+            if not ranges: continue
+            pairs = [(str(ranges[i]), str(ranges[i+1]))
+                     for i in range(0, len(ranges), 2)]
+            cfg = {}
+            if tn.startswith(('fg_', 'bg_', 'sz_', 'ff_')):
+                try:
+                    info = txt.tag_configure(tn)
+                    for k in ('foreground', 'background', 'font'):
+                        val = info.get(k, ('','','','',''))
+                        v = val[-1] if val else None
+                        if v:
+                            cfg[k] = list(v) if isinstance(v, tuple) else v
+                except: pass
+            tags_data.append({'name': tn, 'ranges': pairs, 'cfg': cfg})
+        fp = _fmt_path()
+        if fp:
+            try:
+                with open(fp, 'w', encoding='utf-8') as f:
+                    json.dump(tags_data, f, ensure_ascii=False, indent=2)
+            except: pass
+        messagebox.showinfo("Uloženo", "Pravidla byla uložena.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # FORMATTING HELPERS
+    # ══════════════════════════════════════════════════════════════════════════
+    def _sel():
+        try:    return txt.index('sel.first'), txt.index('sel.last')
+        except: return None, None
+
+    def _has_tag(tag, s, e):
+        for i in range(0, len(txt.tag_ranges(tag)), 2):
+            r = txt.tag_ranges(tag)
+            if txt.compare(str(r[i]), '<=', s) and txt.compare(str(r[i+1]), '>=', e):
+                return True
+        return False
+
+    def _toggle_tag(tag):
+        s, e = _sel()
+        if not s: return
+        if _has_tag(tag, s, e): txt.tag_remove(tag, s, e)
+        else:                   txt.tag_add(tag, s, e)
+        txt.focus_set()
+
+    def _toggle_bold():
+        s, e = _sel()
+        if not s: return
+        has_b  = _has_tag('bold', s, e)
+        has_bi = _has_tag('bold_italic', s, e)
+        has_i  = _has_tag('italic', s, e)
+        if has_b or has_bi:
+            txt.tag_remove('bold', s, e)
+            txt.tag_remove('bold_italic', s, e)
+            if has_bi: txt.tag_add('italic', s, e)
+        else:
+            if has_i:
+                txt.tag_remove('italic', s, e)
+                txt.tag_add('bold_italic', s, e)
+            else:
+                txt.tag_add('bold', s, e)
+        _upd_fmt_btns(s, e)
+        txt.focus_set()
+
+    def _toggle_italic():
+        s, e = _sel()
+        if not s: return
+        has_i  = _has_tag('italic', s, e)
+        has_bi = _has_tag('bold_italic', s, e)
+        has_b  = _has_tag('bold', s, e)
+        if has_i or has_bi:
+            txt.tag_remove('italic', s, e)
+            txt.tag_remove('bold_italic', s, e)
+            if has_bi: txt.tag_add('bold', s, e)
+        else:
+            if has_b:
+                txt.tag_remove('bold', s, e)
+                txt.tag_add('bold_italic', s, e)
+            else:
+                txt.tag_add('italic', s, e)
+        _upd_fmt_btns(s, e)
+        txt.focus_set()
+
+    def _upd_fmt_btns(s, e):
+        if not s: return
+        is_b = _has_tag('bold', s, e) or _has_tag('bold_italic', s, e)
+        is_i = _has_tag('italic', s, e) or _has_tag('bold_italic', s, e)
+        is_u = _has_tag('underline', s, e)
+        btn_b.config(relief='sunken' if is_b else 'raised', bg='#3b82f6' if is_b else TB_BTN)
+        btn_i.config(relief='sunken' if is_i else 'raised', bg='#3b82f6' if is_i else TB_BTN)
+        btn_u.config(relief='sunken' if is_u else 'raised', bg='#3b82f6' if is_u else TB_BTN)
+
+    def _pick_fg():
+        from tkinter.colorchooser import askcolor
+        col = askcolor(color=fgclr_var.get(), title="Barva textu")[1]
+        if col:
+            fgclr_var.set(col); fgclr_sw.config(fg=col)
+            s, e = _sel()
+            if s:
+                tag = f'fg_{col.replace("#","")}'
+                txt.tag_config(tag, foreground=col)
+                txt.tag_add(tag, s, e)
+                txt.focus_set()
+
+    def _pick_bg():
+        from tkinter.colorchooser import askcolor
+        col = askcolor(color='#334155', title="Zvýraznění")[1]
+        if col:
+            bgclr_var.set(col); bgclr_sw.config(fg=col)
+            s, e = _sel()
+            if s:
+                tag = f'bg_{col.replace("#","")}'
+                txt.tag_config(tag, background=col)
+                txt.tag_add(tag, s, e)
+                txt.focus_set()
+
+    def _set_align(align):
+        s, e = _sel()
+        if not s:
+            ln = txt.index('insert').split('.')[0]
+            s, e = f'{ln}.0', f'{ln}.end+1c'
+        l1, l2 = int(s.split('.')[0]), int(e.split('.')[0])
+        for ln in range(l1, l2+1):
+            for t in ('align_center', 'align_right'):
+                txt.tag_remove(t, f'{ln}.0', f'{ln}.end+1c')
+            if align != 'left':
+                txt.tag_add(f'align_{align}', f'{ln}.0', f'{ln}.end+1c')
+        txt.focus_set()
+
+    def _apply_heading(level):
+        s, e = _sel()
+        if not s:
+            ln = txt.index('insert').split('.')[0]
+            s, e = f'{ln}.0', f'{ln}.end+1c'
+        l1, l2 = int(s.split('.')[0]), int(e.split('.')[0])
+        for ln in range(l1, l2+1):
+            for t in ('h1', 'h2'):
+                txt.tag_remove(t, f'{ln}.0', f'{ln}.end+1c')
+            txt.tag_add(level, f'{ln}.0', f'{ln}.end+1c')
+        txt.focus_set()
+
+    def _apply_bullet():
+        s, e = _sel()
+        if not s:
+            ln = txt.index('insert').split('.')[0]
+            s, e = f'{ln}.0', f'{ln}.end'
+        l1, l2 = int(s.split('.')[0]), int(e.split('.')[0])
+        for ln in range(l1, l2+1):
+            line_txt = txt.get(f'{ln}.0', f'{ln}.end')
+            if not line_txt.startswith('• '):
+                txt.insert(f'{ln}.0', '• ')
+            txt.tag_add('bullet', f'{ln}.0', f'{ln}.end+1c')
+        txt.focus_set()
+
+    def _on_fs_change(event=None):
+        try:
+            sz = int(fs_var.get())
+            s, e = _sel()
+            if s:
+                tag = f'sz_{sz}'
+                txt.tag_config(tag, font=(ff_var.get(), sz))
+                txt.tag_add(tag, s, e)
+            else:
+                txt.config(font=(ff_var.get(), sz))
+            _cfg_static_tags()
+        except: pass
+
+    def _on_ff_change(event=None):
+        ff = ff_var.get()
+        s, e = _sel()
+        if s:
+            tag = f'ff_{ff.replace(" ","_")}'
+            txt.tag_config(tag, font=(ff, int(fs_var.get())))
+            txt.tag_add(tag, s, e)
+        else:
+            txt.config(font=(ff, int(fs_var.get())))
+        _cfg_static_tags()
+
+    # ── Bind vše ──────────────────────────────────────────────────────────────
+    fgclr_sw.bind('<Button-1>', lambda e: _pick_fg())
+    bgclr_sw.bind('<Button-1>', lambda e: _pick_bg())
+    fs_cb.bind('<<ComboboxSelected>>', _on_fs_change)
+    ff_cb.bind('<<ComboboxSelected>>', _on_ff_change)
+
+    # Klávesové zkratky
+    txt.bind('<Control-b>', lambda e: (_toggle_bold(),   'break')[1])
+    txt.bind('<Control-i>', lambda e: (_toggle_italic(), 'break')[1])
+    txt.bind('<Control-u>', lambda e: (_toggle_tag('underline'), 'break')[1])
+    txt.bind('<Control-s>', lambda e: (_save(),          'break')[1])
+    txt.bind('<Control-z>', lambda e: (txt.edit_undo(),  'break')[1])
+    txt.bind('<Control-y>', lambda e: (txt.edit_redo(),  'break')[1])
+
+    # Aktualizuj vizuální stav tlačítek při pohybu kurzoru
+    txt.bind('<KeyRelease>', lambda e: _upd_fmt_btns(*_sel()) if _sel()[0] else None)
+    txt.bind('<ButtonRelease-1>', lambda e: _upd_fmt_btns(*_sel()) if _sel()[0] else None)
+
+    _load()
+    txt.focus_set()
 
 # Globální slovník pro filtry galerie (vyplňuje se při stavbě záložky)
 _GAL_FILTERS = {}
