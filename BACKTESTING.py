@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.94"
+VERSION = "1.5.95"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4478,24 +4478,25 @@ def setup_rules_ui(parent):
         btn_i.config(relief='sunken' if is_i else 'raised', bg='#3b82f6' if is_i else TB_BTN)
         btn_u.config(relief='sunken' if is_u else 'raised', bg='#3b82f6' if is_u else TB_BTN)
 
-    def _pick_fg():
+    def _pick_fg(saved_sel=None):
+        # saved_sel zachycen PŘED kliknutím (selekce se kliknutím ztratí)
+        s, e = saved_sel if saved_sel else _sel()
         from tkinter.colorchooser import askcolor
         col = askcolor(color=fgclr_var.get(), title="Barva textu")[1]
         if col:
             fgclr_var.set(col); fgclr_sw.config(fg=col)
-            s, e = _sel()
             if s:
                 tag = f'fg_{col.replace("#","")}'
                 txt.tag_config(tag, foreground=col)
                 txt.tag_add(tag, s, e)
                 txt.focus_set()
 
-    def _pick_bg():
+    def _pick_bg(saved_sel=None):
+        s, e = saved_sel if saved_sel else _sel()
         from tkinter.colorchooser import askcolor
         col = askcolor(color='#334155', title="Zvýraznění")[1]
         if col:
             bgclr_var.set(col); bgclr_sw.config(fg=col)
-            s, e = _sel()
             if s:
                 tag = f'bg_{col.replace("#","")}'
                 txt.tag_config(tag, background=col)
@@ -4565,8 +4566,9 @@ def setup_rules_ui(parent):
         _cfg_static_tags()
 
     # ── Bind vše ──────────────────────────────────────────────────────────────
-    fgclr_sw.bind('<Button-1>', lambda e: _pick_fg())
-    bgclr_sw.bind('<Button-1>', lambda e: _pick_bg())
+    # Selekci zachytíme IHNED při stisku tlačítka myši — ještě než klik odebere focus
+    fgclr_sw.bind('<Button-1>', lambda e: _pick_fg(saved_sel=_sel()))
+    bgclr_sw.bind('<Button-1>', lambda e: _pick_bg(saved_sel=_sel()))
     fs_cb.bind('<<ComboboxSelected>>', _on_fs_change)
     ff_cb.bind('<<ComboboxSelected>>', _on_ff_change)
 
