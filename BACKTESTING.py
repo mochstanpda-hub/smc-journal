@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.91"
+VERSION = "1.5.92"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4066,13 +4066,17 @@ def setup_konzistence_tab(parent):
             grid.pack(fill='x', pady=(2,0))
 
             # Hlavičkový řádek: prázdný + pravidla + výsledek
+            # Vypočti šířku sloupce podle nejdelšího pravidla (min 6 znaků)
+            col_chars = {r: max(6, min(len(r), 22)) for r in rules}
             tk.Label(grid, text="", bg=DT_SURFACE, width=8,
                      font=('Segoe UI',8)).grid(row=0, column=0, padx=1, pady=1, sticky='nsew')
             for ci, rule in enumerate(rules):
-                lbl_text = rule if len(rule) <= 14 else rule[:12]+'…'
-                tk.Label(grid, text=lbl_text, bg='#1e293b', fg='#94a3b8',
-                         font=('Segoe UI',8), width=CELL_W//7, anchor='center',
-                         wraplength=CELL_W*2).grid(row=0, column=ci+1, padx=1, pady=1, sticky='nsew')
+                cw = col_chars[rule]
+                wrap_px = max(70, cw * 6)
+                tk.Label(grid, text=rule, bg='#1e293b', fg='#94a3b8',
+                         font=('Segoe UI',8), width=cw, anchor='center',
+                         wraplength=wrap_px, justify='center').grid(
+                    row=0, column=ci+1, padx=1, pady=1, sticky='nsew')
             tk.Label(grid, text="Výsledek", bg='#1e293b', fg='#94a3b8',
                      font=('Segoe UI',8)).grid(row=0, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
 
