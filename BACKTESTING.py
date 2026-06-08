@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.92"
+VERSION = "1.5.93"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3954,7 +3954,14 @@ def load_konzistence():
     try:
         if os.path.exists(KONZISTENCE_FILE):
             with open(KONZISTENCE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Migrace: plain string rules → dict s formátováním
+            data['rules'] = [
+                r if isinstance(r, dict)
+                else {'text': r, 'bold': False, 'italic': False, 'underline': False, 'color': '#94a3b8'}
+                for r in data.get('rules', [])
+            ]
+            return data
     except: pass
     return {'rules': [], 'weeks': []}
 
@@ -3969,10 +3976,25 @@ def setup_konzistence_tab(parent):
     """Záložka Konzistence — týdenní sledování dodržování pravidel."""
     data = load_konzistence()
 
+    # ── Pomocné funkce pro rules (dict formát) ────────────────────────────────
+    def _rtxt(r):
+        return r['text'] if isinstance(r, dict) else r
+
+    def _rdict(r):
+        if isinstance(r, dict): return r
+        return {'text': r, 'bold': False, 'italic': False, 'underline': False, 'color': '#94a3b8'}
+
+    def _rfont(r, sz=10):
+        d = _rdict(r)
+        parts = []
+        if d.get('bold'):   parts.append('bold')
+        if d.get('italic'): parts.append('italic')
+        return ('Segoe UI', sz, ' '.join(parts) if parts else 'normal')
+
     # Barvy buněk
-    CLR_EMPTY = '#2d3748'
-    CLR_GREEN = '#16a34a'
-    CLR_RED   = '#dc2626'
+    CLR_EMPTY     = '#2d3748'
+    CLR_GREEN     = '#16a34a'
+    CLR_RED       = '#dc2626'
     CLR_TXT_EMPTY = '#94a3b8'
     CLR_TXT_OK    = '#ffffff'
 
@@ -3980,31 +4002,182 @@ def setup_konzistence_tab(parent):
     outer = tk.Frame(parent, bg=DT_BG)
     outer.pack(fill='both', expand=True)
 
-    # Levý panel — pravidla
-    left = tk.Frame(outer, bg=DT_PANEL, width=240)
-    left.pack(side='left', fill='y', padx=(0,0))
+    # ── LEVÝ PANEL ────────────────────────────────────────────────────────────
+    left = tk.Frame(outer, bg=DT_PANEL, width=280)
+    left.pack(side='left', fill='y')
     left.pack_propagate(False)
 
     tk.Label(left, text="📋  Pravidla", bg=DT_PANEL, fg=DT_TEXT,
-             font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,6))
-    tk.Label(left, text="Klikni pro přepnutí týdenního záznamu:\n⬜ prázdné → 🟢 splněno → 🔴 nesplněno",
+             font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,4))
+    tk.Label(left, text="⬜ prázdné  →  🟢 splněno  →  🔴 nesplněno",
              bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8),
-             wraplength=210, justify='left').pack(anchor='w', padx=14, pady=(0,10))
+             wraplength=250, justify='left').pack(anchor='w', padx=14, pady=(0,6))
 
-    lb_rules = tk.Listbox(left, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI',10),
-                           selectbackground=DT_ACCENT, selectforeground='white',
-                           relief='flat', bd=0, height=14)
-    lb_rules.pack(fill='x', padx=10, pady=(0,6))
-    for r in data['rules']:
-        lb_rules.insert(tk.END, r)
+    # Text widget jako stylovaný seznam pravidel (klikatelný)
+    rules_txt = tk.Text(left, bg=DT_SURFACE, fg=DT_TEXT, font=('Segoe UI',10),
+                        relief='flat', bd=0, height=10, cursor='arrow',
+                        state='disabled', padx=6, pady=4, spacing1=4, spacing3=4)
+    rules_txt.pack(fill='x', padx=10, pady=(0,0))
 
+    # ── Formátovací sekce ─────────────────────────────────────────────────────
+    tk.Frame(left, bg='#334155', height=1).pack(fill='x', padx=10, pady=(10,6))
+    tk.Label(left, text="Nové / upravit pravidlo:", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI',8)).pack(anchor='w', padx=12, pady=(0,3))
+
+    # Stavové proměnné formátování
+    bold_var      = tk.BooleanVar(value=False)
+    italic_var    = tk.BooleanVar(value=False)
+    underline_var = tk.BooleanVar(value=False)
+    color_var     = tk.StringVar(value='#94a3b8')
+    selected_idx  = {'v': None}   # mutovatelný box místo nonlocal
+
+    fmt_bar = tk.Frame(left, bg=DT_PANEL)
+    fmt_bar.pack(fill='x', padx=10, pady=(0,5))
+
+    def _upd_btn(btn, var):
+        """Vizuální stav toggle tlačítka."""
+        btn.config(relief='sunken' if var.get() else 'raised',
+                   bg='#334155' if var.get() else DT_ENTRY)
+
+    btn_bold = tk.Button(fmt_bar, text='B', font=('Segoe UI',10,'bold'), width=3,
+                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
+    btn_bold.pack(side='left', padx=(0,3))
+    btn_bold.config(command=lambda: [bold_var.set(not bold_var.get()), _upd_btn(btn_bold, bold_var)])
+
+    btn_ital = tk.Button(fmt_bar, text='I', font=('Segoe UI',10,'italic'), width=3,
+                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
+    btn_ital.pack(side='left', padx=(0,3))
+    btn_ital.config(command=lambda: [italic_var.set(not italic_var.get()), _upd_btn(btn_ital, italic_var)])
+
+    btn_undr = tk.Button(fmt_bar, text='U', font=('Segoe UI',10,'underline'), width=3,
+                         bg=DT_ENTRY, fg=DT_TEXT, relief='raised', cursor='hand2', bd=1)
+    btn_undr.pack(side='left', padx=(0,3))
+    btn_undr.config(command=lambda: [underline_var.set(not underline_var.get()), _upd_btn(btn_undr, underline_var)])
+
+    # Barevný čtverec — klik = výběr barvy
+    clr_swatch = tk.Label(fmt_bar, bg='#94a3b8', width=4, relief='solid', bd=1,
+                          cursor='hand2')
+    clr_swatch.pack(side='left', padx=(0,4), ipady=7)
+
+    def _pick_color():
+        from tkinter.colorchooser import askcolor
+        col = askcolor(color=color_var.get(), title="Barva pravidla")[1]
+        if col:
+            color_var.set(col)
+            clr_swatch.config(bg=col)
+
+    clr_swatch.bind('<Button-1>', lambda e: _pick_color())
+    tk.Label(fmt_bar, text="barva", bg=DT_PANEL, fg=DT_SUBTEXT,
+             font=('Segoe UI',7)).pack(side='left')
+
+    # Vstupní pole pro text pravidla
     entry_rule = tk.Entry(left, font=('Segoe UI',10), bg=DT_ENTRY, fg=DT_TEXT,
                           relief='solid', bd=1, insertbackground=DT_ACCENT)
-    entry_rule.pack(fill='x', padx=10, pady=(0,4))
-    tk.Label(left, text="Název pravidla:", bg=DT_PANEL, fg=DT_SUBTEXT,
-             font=('Segoe UI',8)).pack(anchor='w', padx=12)
+    entry_rule.pack(fill='x', padx=10, pady=(0,6))
 
-    # Pravý panel — týdny (scrollovatelný)
+    # ── Refresh stylovaného seznamu pravidel ──────────────────────────────────
+    def _refresh_rules_list(keep_sel=None):
+        rules_txt.config(state='normal')
+        rules_txt.delete('1.0', 'end')
+        for i, r in enumerate(data['rules']):
+            d = _rdict(r)
+            tag = f"rule_{i}"
+            is_sel = (keep_sel == i)
+            fs = []
+            if d.get('bold'):   fs.append('bold')
+            if d.get('italic'): fs.append('italic')
+            fnt = ('Segoe UI', 10, ' '.join(fs) if fs else 'normal')
+            rules_txt.tag_config(tag,
+                foreground='#ffffff' if is_sel else d.get('color', '#94a3b8'),
+                background='#1e3a5f' if is_sel else DT_SURFACE,
+                font=fnt,
+                underline=1 if d.get('underline') else 0)
+            bullet = '  ●  ' if is_sel else '  ·  '
+            rules_txt.insert('end', bullet + d['text'] + '\n', tag)
+            rules_txt.tag_bind(tag, '<Button-1>', lambda e, idx=i: _select_rule(idx))
+        rules_txt.config(state='disabled')
+
+    def _select_rule(idx):
+        """Klik na pravidlo → načti do editoru."""
+        selected_idx['v'] = idx
+        d = _rdict(data['rules'][idx])
+        entry_rule.delete(0, tk.END)
+        entry_rule.insert(0, d['text'])
+        bold_var.set(d.get('bold', False))
+        italic_var.set(d.get('italic', False))
+        underline_var.set(d.get('underline', False))
+        color_var.set(d.get('color', '#94a3b8'))
+        clr_swatch.config(bg=d.get('color', '#94a3b8'))
+        _upd_btn(btn_bold, bold_var)
+        _upd_btn(btn_ital, italic_var)
+        _upd_btn(btn_undr, underline_var)
+        _refresh_rules_list(keep_sel=idx)
+
+    # ── Akce pravidel ─────────────────────────────────────────────────────────
+    def add_rule():
+        val = entry_rule.get().strip()
+        if not val: return
+        if val in [_rtxt(r) for r in data['rules']]:
+            messagebox.showwarning("Pravidla", "Toto pravidlo již existuje."); return
+        rule_dict = {'text': val, 'bold': bold_var.get(), 'italic': italic_var.get(),
+                     'underline': underline_var.get(), 'color': color_var.get()}
+        data['rules'].append(rule_dict)
+        for week in data['weeks']:
+            week.setdefault('data', {})[val] = [''] * len(week.get('days', []))
+        save_konzistence(data)
+        entry_rule.delete(0, tk.END)
+        selected_idx['v'] = None
+        _refresh_rules_list()
+        _rebuild_weeks()
+
+    def update_rule():
+        idx = selected_idx['v']
+        if idx is None:
+            messagebox.showwarning("Pravidla", "Klikni na pravidlo v seznamu."); return
+        val = entry_rule.get().strip()
+        if not val: return
+        old_text = _rtxt(data['rules'][idx])
+        new_dict = {'text': val, 'bold': bold_var.get(), 'italic': italic_var.get(),
+                    'underline': underline_var.get(), 'color': color_var.get()}
+        data['rules'][idx] = new_dict
+        # Přejmenuj klíče v týdnech pokud se text změnil
+        if val != old_text:
+            for week in data['weeks']:
+                wd = week.get('data', {})
+                if old_text in wd:
+                    wd[val] = wd.pop(old_text)
+        save_konzistence(data)
+        _refresh_rules_list(keep_sel=idx)
+        _rebuild_weeks()
+
+    def remove_rule():
+        idx = selected_idx['v']
+        if idx is None:
+            messagebox.showwarning("Pravidla", "Klikni na pravidlo v seznamu."); return
+        val = _rtxt(data['rules'][idx])
+        if not messagebox.askyesno("Smazat", f"Odebrat pravidlo '{val}'?\n(Data budou ztracena)"): return
+        data['rules'].pop(idx)
+        for week in data['weeks']:
+            week.get('data', {}).pop(val, None)
+        save_konzistence(data)
+        selected_idx['v'] = None
+        entry_rule.delete(0, tk.END)
+        _refresh_rules_list()
+        _rebuild_weeks()
+
+    btn_f = tk.Frame(left, bg=DT_PANEL)
+    btn_f.pack(fill='x', padx=10, pady=2)
+    tk.Button(btn_f, text="➕ Přidat", command=add_rule,
+              bg='#15803d', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,2))
+    tk.Button(btn_f, text="✏ Upravit", command=update_rule,
+              bg='#1d4ed8', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,2))
+    tk.Button(btn_f, text="🗑", command=remove_rule,
+              bg='#b91c1c', fg='white', font=('Segoe UI',9,'bold'),
+              relief='flat', cursor='hand2', width=3).pack(side='left')
+
+    # ── PRAVÝ PANEL — týdny ───────────────────────────────────────────────────
     right_outer = tk.Frame(outer, bg=DT_BG)
     right_outer.pack(side='left', fill='both', expand=True)
 
@@ -4027,7 +4200,6 @@ def setup_konzistence_tab(parent):
 
     CELL_W = 54
     CELL_H = 28
-    DAY_NAMES = ['Po', 'Út', 'St', 'Čt', 'Pá']
 
     def _rebuild_weeks():
         """Překresli všechny týdny."""
@@ -4051,7 +4223,6 @@ def setup_konzistence_tab(parent):
                      bg='#1e3a5f', fg='#60a5fa',
                      font=('Segoe UI',10,'bold')).pack(side='left')
 
-            # Smazat týden
             def _del_week(idx=wi):
                 if messagebox.askyesno("Smazat", f"Smazat {data['weeks'][idx].get('label','')}?"):
                     data['weeks'].pop(idx)
@@ -4061,82 +4232,80 @@ def setup_konzistence_tab(parent):
                       bg='#1e3a5f', fg='#ef4444', font=('Segoe UI',9),
                       relief='flat', cursor='hand2').pack(side='right', padx=6)
 
-            # Grid: řádky = dny, sloupce = pravidla + výsledek
+            # Grid
             grid = tk.Frame(wf, bg=DT_BG)
             grid.pack(fill='x', pady=(2,0))
 
-            # Hlavičkový řádek: prázdný + pravidla + výsledek
-            # Vypočti šířku sloupce podle nejdelšího pravidla (min 6 znaků)
-            col_chars = {r: max(6, min(len(r), 22)) for r in rules}
+            # Hlavičkový řádek — šířka dle délky názvu + barva/font z rule dict
             tk.Label(grid, text="", bg=DT_SURFACE, width=8,
                      font=('Segoe UI',8)).grid(row=0, column=0, padx=1, pady=1, sticky='nsew')
             for ci, rule in enumerate(rules):
-                cw = col_chars[rule]
-                wrap_px = max(70, cw * 6)
-                tk.Label(grid, text=rule, bg='#1e293b', fg='#94a3b8',
-                         font=('Segoe UI',8), width=cw, anchor='center',
-                         wraplength=wrap_px, justify='center').grid(
+                d    = _rdict(rule)
+                rtext = d['text']
+                cw   = max(6, min(len(rtext), 22))
+                wrap = max(70, cw * 6)
+                hfnt = _rfont(rule, sz=8)
+                tk.Label(grid, text=rtext, bg='#1e293b',
+                         fg=d.get('color', '#94a3b8'),
+                         font=hfnt, width=cw, anchor='center',
+                         wraplength=wrap, justify='center').grid(
                     row=0, column=ci+1, padx=1, pady=1, sticky='nsew')
             tk.Label(grid, text="Výsledek", bg='#1e293b', fg='#94a3b8',
-                     font=('Segoe UI',8)).grid(row=0, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
+                     font=('Segoe UI',8)).grid(
+                row=0, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
 
             # Řádky dnů
-            days = week.get('days', [])
+            days     = week.get('days', [])
             day_data = week.setdefault('data', {})
 
             for ri, day in enumerate(days):
-                # Label dne
                 tk.Label(grid, text=day, bg=DT_SURFACE, fg=DT_TEXT,
                          font=('Segoe UI',9,'bold'), width=8,
                          anchor='center').grid(row=ri+1, column=0, padx=1, pady=1, sticky='nsew')
 
-                # Buňky pravidel
                 for ci, rule in enumerate(rules):
-                    rule_days = day_data.setdefault(rule, [''] * len(days))
-                    # Zarovnej délku na počet dnů
+                    rkey      = _rtxt(rule)
+                    rule_days = day_data.setdefault(rkey, [''] * len(days))
                     while len(rule_days) < len(days): rule_days.append('')
-
                     state = rule_days[ri]
-                    bg = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_EMPTY
+                    bg  = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_EMPTY
                     txt = '✓' if state == 'green' else '✗' if state == 'red' else ''
-                    fg = CLR_TXT_OK if state else CLR_TXT_EMPTY
-
+                    fg  = CLR_TXT_OK if state else CLR_TXT_EMPTY
                     btn = tk.Button(grid, text=txt, bg=bg, fg=fg,
                                     font=('Segoe UI',10,'bold'),
                                     width=4, height=1, relief='flat', cursor='hand2',
                                     activebackground=bg)
-
-                    def _toggle(event=None, _wi=wi, _rule=rule, _ri=ri):
+                    def _toggle(event=None, _wi=wi, _rkey=rkey, _ri=ri):
                         _states = ['', 'green', 'red']
-                        cur = data['weeks'][_wi]['data'].get(_rule, [''] * len(days))
+                        cur = data['weeks'][_wi]['data'].get(_rkey, [''] * len(days))
                         while len(cur) < len(days): cur.append('')
                         nxt = _states[(_states.index(cur[_ri]) + 1) % 3]
                         cur[_ri] = nxt
-                        data['weeks'][_wi]['data'][_rule] = cur
+                        data['weeks'][_wi]['data'][_rkey] = cur
                         save_konzistence(data)
                         _rebuild_weeks()
-
                     btn.bind('<Button-1>', _toggle)
                     btn.grid(row=ri+1, column=ci+1, padx=1, pady=1, sticky='nsew')
 
-                # Výsledek pro tento den (kolik pravidel splněno)
-                splneno = sum(1 for r in rules
-                              if day_data.get(r, [''] * len(days))[ri] == 'green'
-                              if ri < len(day_data.get(r, [])))
+                splneno = sum(
+                    1 for r in rules
+                    if ri < len(day_data.get(_rtxt(r), []))
+                    and day_data.get(_rtxt(r), [''] * len(days))[ri] == 'green')
                 res_txt = f"{splneno}/{len(rules)}"
                 res_bg  = CLR_GREEN if splneno == len(rules) else CLR_RED if splneno == 0 else '#92400e'
                 tk.Label(grid, text=res_txt, bg=res_bg, fg='white',
                          font=('Segoe UI',9,'bold'), anchor='center').grid(
                     row=ri+1, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
 
-            # Souhrnný řádek — výsledek per pravidlo
+            # Souhrnný řádek
             tk.Label(grid, text="Celkem:", bg='#1e293b', fg='#94a3b8',
                      font=('Segoe UI',8), width=8).grid(
                 row=len(days)+1, column=0, padx=1, pady=(4,1), sticky='nsew')
             total_green = 0
             for ci, rule in enumerate(rules):
-                rd = day_data.get(rule, [''] * len(days))
-                cnt = sum(1 for s in rd if s == 'green')
+                rkey = _rtxt(rule)
+                rd   = day_data.get(rkey, [''] * len(days))
+                cnt  = sum(1 for s in rd if s == 'green')
                 total = len(days)
                 total_green += cnt
                 pct = int(cnt / total * 100) if total else 0
@@ -4144,79 +4313,33 @@ def setup_konzistence_tab(parent):
                 tk.Label(grid, text=f"{cnt}/{total}", bg=sbg, fg='white',
                          font=('Segoe UI',9,'bold')).grid(
                     row=len(days)+1, column=ci+1, padx=1, pady=(4,1), sticky='nsew')
-            # Celkový výsledek týdne
             all_cells = len(rules) * len(days)
             pct_total = int(total_green / all_cells * 100) if all_cells else 0
             tk.Label(grid, text=f"{pct_total}%", bg='#1e3a5f', fg='#60a5fa',
                      font=('Segoe UI',10,'bold')).grid(
                 row=len(days)+1, column=len(rules)+1, padx=1, pady=(4,1), sticky='nsew')
 
-            # Oddělovač
             tk.Frame(weeks_frame, bg='#334155', height=1).pack(fill='x', padx=14, pady=(10,0))
-
-    # ── Tlačítka pro pravidla ─────────────────────────────────────────────────
-    def add_rule():
-        val = entry_rule.get().strip()
-        if not val: return
-        if val in data['rules']:
-            messagebox.showwarning("Pravidla", "Toto pravidlo již existuje."); return
-        data['rules'].append(val)
-        # Přidej prázdné sloupce do existujících týdnů
-        for week in data['weeks']:
-            week.setdefault('data', {})[val] = [''] * len(week.get('days', []))
-        save_konzistence(data)
-        lb_rules.insert(tk.END, val)
-        entry_rule.delete(0, tk.END)
-        _rebuild_weeks()
-
-    def remove_rule():
-        sel = lb_rules.curselection()
-        if not sel: messagebox.showwarning("Pravidla","Vyber pravidlo."); return
-        val = lb_rules.get(sel[0])
-        if not messagebox.askyesno("Smazat", f"Odebrat pravidlo '{val}'?\n(Data za toto pravidlo budou ztracena)"): return
-        data['rules'].remove(val)
-        for week in data['weeks']:
-            week.get('data', {}).pop(val, None)
-        save_konzistence(data)
-        lb_rules.delete(sel[0])
-        _rebuild_weeks()
-
-    btn_f = tk.Frame(left, bg=DT_PANEL)
-    btn_f.pack(fill='x', padx=10, pady=6)
-    tk.Button(btn_f, text="➕ Přidat", command=add_rule,
-              bg='#15803d', fg='white', font=('Segoe UI',9,'bold'),
-              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True, padx=(0,3))
-    tk.Button(btn_f, text="🗑 Odebrat", command=remove_rule,
-              bg='#b91c1c', fg='white', font=('Segoe UI',9,'bold'),
-              relief='flat', cursor='hand2').pack(side='left', fill='x', expand=True)
 
     # ── Přidat týden ──────────────────────────────────────────────────────────
     def add_week():
         from datetime import timedelta as _td
         existing = len(data['weeks'])
         now = datetime.now()
-        # Pondělí aktuálního týdne + počet existujících týdnů dopředu
         monday = now - _td(days=now.weekday())
         monday += _td(weeks=existing)
-
-        # Windows-safe formát dnů (bez %-d)
         days_fmt = [f"{(monday + _td(days=i)).day}.{(monday + _td(days=i)).month}."
                     for i in range(5)]
-
         week_num = monday.isocalendar()[1]
         label = f"{week_num}. týden  ({days_fmt[0]} – {days_fmt[-1]})"
-
         new_week = {
-            'label': label,
-            'year':  monday.year,
-            'week':  week_num,
+            'label': label, 'year': monday.year, 'week': week_num,
             'days':  days_fmt,
-            'data':  {r: [''] * 5 for r in data['rules']}
+            'data':  {_rtxt(r): [''] * 5 for r in data['rules']}
         }
         data['weeks'].append(new_week)
         save_konzistence(data)
         _rebuild_weeks()
-        # Scroll na konec
         weeks_canv.after(100, lambda: weeks_canv.yview_moveto(1.0))
 
     tk.Button(top_bar, text="➕  Přidat týden", command=add_week,
@@ -4224,6 +4347,7 @@ def setup_konzistence_tab(parent):
               relief='flat', padx=12, pady=4, cursor='hand2').pack(side='right')
 
     entry_rule.bind('<Return>', lambda e: add_rule())
+    _refresh_rules_list()
     _rebuild_weeks()
 
 
