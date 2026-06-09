@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.95"
+VERSION = "1.5.96"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -775,6 +775,7 @@ DIR_BACKTEST = os.path.join(BASE_DIR, 'BACKTEST')
 DIR_REAL     = os.path.join(BASE_DIR, 'REAL')
 DIR_JOURNAL  = os.path.join(BASE_DIR, 'JOURNAL')
 DIR_BACKUPS  = os.path.join(_APP_DIR, 'backups')
+ICT_DIR      = os.path.join(_APP_DIR, 'ict_academy')   # ICT Academy (součást repo)
 
 # Soubory a proměnné
 DATA_FILE = ''
@@ -4215,6 +4216,97 @@ def setup_konzistence_tab(parent):
 
     entry_rule.bind('<Return>', lambda e: add_rule())
     _rebuild_weeks()
+
+
+def setup_ict_tab(parent):
+    """Záložka ICT Academy — spouštěč lokální HTML aplikace v prohlížeči."""
+    import webbrowser
+
+    BG   = DT_BG
+    CARD = DT_PANEL
+
+    outer = tk.Frame(parent, bg=BG)
+    outer.pack(fill='both', expand=True)
+
+    # ── Hlavička ──────────────────────────────────────────────────────────────
+    hdr = tk.Frame(outer, bg='#0f172a', pady=28)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="📚  ICT ACADEMY", bg='#0f172a', fg='#60a5fa',
+             font=('Segoe UI',22,'bold')).pack()
+    tk.Label(hdr, text="Inner Circle Trader — Naučte se obchodovat jako instituce",
+             bg='#0f172a', fg='#94a3b8', font=('Segoe UI',11)).pack(pady=(4,0))
+
+    # ── Detekce souboru ───────────────────────────────────────────────────────
+    ict_path = os.path.join(ICT_DIR, 'index.html')
+    available = os.path.isfile(ict_path)
+
+    # ── Obsah ─────────────────────────────────────────────────────────────────
+    body = tk.Frame(outer, bg=BG)
+    body.pack(fill='both', expand=True, padx=40, pady=30)
+
+    if not available:
+        # Chybová zpráva
+        err = tk.Frame(body, bg='#1e293b', pady=24, padx=24)
+        err.pack(fill='x')
+        tk.Label(err, text="⚠  Složka ict_academy nenalezena",
+                 bg='#1e293b', fg='#f87171', font=('Segoe UI',12,'bold')).pack()
+        tk.Label(err,
+                 text=f"Očekávaná cesta:  {ict_path}\n\n"
+                       "Ujisti se, že složka 'ict_academy' je ve stejném adresáři jako BACKTESTING.py.",
+                 bg='#1e293b', fg='#94a3b8', font=('Segoe UI',9),
+                 justify='center').pack(pady=(8,0))
+        return
+
+    # ── Tlačítko spuštění ─────────────────────────────────────────────────────
+    def _open():
+        url = 'file:///' + ict_path.replace('\\', '/')
+        webbrowser.open_new_tab(url)
+
+    tk.Button(body, text="🚀  Otevřít ICT Academy",
+              command=_open,
+              bg='#1d4ed8', fg='white',
+              font=('Segoe UI',14,'bold'),
+              relief='flat', padx=30, pady=14,
+              cursor='hand2').pack(pady=(0,28))
+
+    tk.Label(body, text="Akademie se otevře v tvém výchozím prohlížeči.",
+             bg=BG, fg='#64748b', font=('Segoe UI',9)).pack(pady=(0,30))
+
+    # ── Přehled modulů ────────────────────────────────────────────────────────
+    tk.Frame(body, bg='#334155', height=1).pack(fill='x', pady=(0,20))
+    tk.Label(body, text="Obsah akademie", bg=BG, fg=DT_TEXT,
+             font=('Segoe UI',11,'bold')).pack(anchor='w', pady=(0,12))
+
+    MODULES = [
+        ("📖", "1. Co je ICT?",          "~15 min", "Základy institucionálního obchodování"),
+        ("📊", "2. Struktura trhu",       "~20 min", "HH/HL/LH/LL, trend a kontext"),
+        ("💧", "3. Likvidita",            "~20 min", "BSL/SSL, liquidity sweepy"),
+        ("🧱", "4. Order Bloky",          "~25 min", "Bullish/Bearish OB, mitigace"),
+        ("⚡", "5. Fair Value Gap",       "~20 min", "FVG, IFVG, překrývání zón"),
+        ("🕐", "6. Seance & Timing",      "~20 min", "Killzóny, ADR, optimální časy"),
+        ("📐", "7. OTE & Fib",            "~25 min", "Optimal Trade Entry, zlatý Fib"),
+        ("📅", "8. AMD cyklus",           "~20 min", "Accumulation–Manipulation–Distribution"),
+        ("🎯", "9. Sestavení setupu",     "~30 min", "HTF → LTF top-down analýza"),
+        ("📋", "10. Backtesting & praxe", "~30 min", "Postup, checklist, journaling"),
+    ]
+
+    grid_f = tk.Frame(body, bg=BG)
+    grid_f.pack(fill='x')
+    for col in range(2): grid_f.columnconfigure(col, weight=1)
+
+    for i, (icon, name, dur, desc) in enumerate(MODULES):
+        row, col = divmod(i, 2)
+        card = tk.Frame(grid_f, bg=CARD, padx=14, pady=10)
+        card.grid(row=row, column=col, padx=6, pady=5, sticky='ew')
+        top = tk.Frame(card, bg=CARD)
+        top.pack(fill='x')
+        tk.Label(top, text=f"{icon}  {name}", bg=CARD, fg=DT_TEXT,
+                 font=('Segoe UI',10,'bold')).pack(side='left')
+        tk.Label(top, text=dur, bg=CARD, fg='#64748b',
+                 font=('Segoe UI',8)).pack(side='right')
+        tk.Label(card, text=desc, bg=CARD, fg='#94a3b8',
+                 font=('Segoe UI',8)).pack(anchor='w', pady=(2,0))
+        card.bind('<Double-Button-1>', lambda e: _open())
 
 
 def setup_rules_ui(parent):
@@ -10108,6 +10200,11 @@ def show_main_screen(p_name):
     tab_konz = ttk.Frame(nb)
     nb.add(tab_konz, text='  📊 KONZISTENCE  ')
     setup_konzistence_tab(tab_konz)
+
+    # TAB ICT ACADEMY
+    tab_ict = ttk.Frame(nb)
+    nb.add(tab_ict, text='  📚 ICT ACADEMY  ')
+    setup_ict_tab(tab_ict)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
