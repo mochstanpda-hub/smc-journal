@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICT Academy — Naučte se obchodovat jako instituce</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .page { display: none; }
+    .page.active { display: block; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-text">ICT ACADEMY</div>
+      <div class="logo-sub">Inner Circle Trader — CZ</div>
+    </div>
+
+    <div class="progress-bar-wrap">
+      <div class="progress-label">
+        <span>Pokrok</span>
+        <span id="progress-text">0 / 10 lekcí</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <a class="nav-item active" data-page="home" onclick="showPage('home',this)">
+      <span class="nav-icon">🏠</span> Domů
+    </a>
+
+    <div class="nav-section">Základy</div>
+    <a class="nav-item" data-page="m1" onclick="showPage('m1',this)">
+      <span class="nav-icon">📖</span> 1. Co je ICT?
+      <span class="nav-num">~15 min</span>
+    </a>
+    <a class="nav-item" data-page="m2" onclick="showPage('m2',this)">
+      <span class="nav-icon">📊</span> 2. Struktura trhu
+      <span class="nav-num">~20 min</span>
+    </a>
+    <a class="nav-item" data-page="m3" onclick="showPage('m3',this)">
+      <span class="nav-icon">💧</span> 3. Likvidita
+      <span class="nav-num">~20 min</span>
+    </a>
+
+    <div class="nav-section">Klíčové koncepty</div>
+    <a class="nav-item" data-page="m4" onclick="showPage('m4',this)">
+      <span class="nav-icon">🧱</span> 4. Order Bloky
+      <span class="nav-num">~25 min</span>
+    </a>
+    <a class="nav-item" data-page="m5" onclick="showPage('m5',this)">
+      <span class="nav-icon">⚡</span> 5. Fair Value Gap
+      <span class="nav-num">~20 min</span>
+    </a>
+    <a class="nav-item" data-page="m6" onclick="showPage('m6',this)">
+      <span class="nav-icon">⏰</span> 6. Killzones & Timing
+      <span class="nav-num">~20 min</span>
+    </a>
+
+    <div class="nav-section">Pokročilé</div>
+    <a class="nav-item" data-page="m7" onclick="showPage('m7',this)">
+      <span class="nav-icon">🎯</span> 7. OTE — Optimální vstup
+      <span class="nav-num">~20 min</span>
+    </a>
+    <a class="nav-item" data-page="m8" onclick="showPage('m8',this)">
+      <span class="nav-icon">🔄</span> 8. Power of 3 (AMD)
+      <span class="nav-num">~20 min</span>
+    </a>
+    <a class="nav-item" data-page="m9" onclick="showPage('m9',this)">
+      <span class="nav-icon">🦄</span> 9. Obchodní modely
+      <span class="nav-num">~25 min</span>
+    </a>
+
+    <div class="nav-section">Praxe</div>
+    <a class="nav-item" data-page="m10" onclick="showPage('m10',this)">
+      <span class="nav-icon">🛡️</span> 10. Risk Management
+      <span class="nav-num">~15 min</span>
+    </a>
+
+    <div class="nav-section">Reference</div>
+    <a class="nav-item" data-page="glossary" onclick="showPage('glossary',this)">
+      <span class="nav-icon">📚</span> Slovník ICT pojmů
+    </a>
+    <a class="nav-item" data-page="cheatsheet" onclick="showPage('cheatsheet',this)">
+      <span class="nav-icon">📋</span> Cheat Sheet
+    </a>
+  </nav>
+
+  <!-- ═══ MAIN ═══ -->
+  <div class="main-content">
+
+    <!-- ─── HOME ─── -->
+    <div id="page-home" class="page active">
+      <div class="home-hero">
+        <div class="hero-label">ICT Academy — Čeština</div>
+        <h1>Obchoduj jako instituce</h1>
+        <p class="sub">Kompletní průvodce ICT (Inner Circle Trader) strategií od základů po pokročilé modely. Interaktivní grafy, kvízy a praktické příklady.</p>
+        <div class="stats-row">
+          <div class="stat-box"><div class="stat-num">10</div><div class="stat-lbl">Modulů</div></div>
+          <div class="stat-box"><div class="stat-num">50+</div><div class="stat-lbl">Konceptů</div></div>
+          <div class="stat-box"><div class="stat-num">15+</div><div class="stat-lbl">Interaktivních grafů</div></div>
+          <div class="stat-box"><div class="stat-num">80+</div><div class="stat-lbl">Kvízových otázek</div></div>
+        </div>
+      </div>
+
+      <div class="module-grid">
+        <a class="module-card" onclick="showPage('m1',null)">
+          <div class="mod-icon">📖</div>
+          <div class="mod-num">Modul 1 · Základy</div>
+          <div class="mod-title">Co je ICT strategie?</div>
+          <div class="mod-desc">Kdo je Michael Huddleston, co je Smart Money a proč retail obchodníci neustále prohrávají.</div>
+          <div class="mod-lessons">3 témata · <span class="badge badge-beginner">Začátečník</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m2',null)">
+          <div class="mod-icon">📊</div>
+          <div class="mod-num">Modul 2 · Základy</div>
+          <div class="mod-title">Struktura trhu</div>
+          <div class="mod-desc">BOS, CHoCH, MSS — jak číst trend a poznat jeho obrátku. Premium vs Discount zóny.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-beginner">Začátečník</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m3',null)">
+          <div class="mod-icon">💧</div>
+          <div class="mod-num">Modul 3 · Základy</div>
+          <div class="mod-title">Likvidita</div>
+          <div class="mod-desc">Kde instituce loví stop-lossy. Buy-side a sell-side likvidita, Equal Highs/Lows, liquidity sweeps.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-beginner">Začátečník</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m4',null)">
+          <div class="mod-icon">🧱</div>
+          <div class="mod-num">Modul 4 · Klíčový</div>
+          <div class="mod-title">Order Bloky</div>
+          <div class="mod-desc">Jak najít zóny, kde instituce otevřely pozice. Bullish OB, Bearish OB, Breaker Block.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-intermediate">Střední</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m5',null)">
+          <div class="mod-icon">⚡</div>
+          <div class="mod-num">Modul 5 · Klíčový</div>
+          <div class="mod-title">Fair Value Gap (FVG)</div>
+          <div class="mod-desc">Nerovnováhy v ceně — jak je identifikovat, obchodovat a kombinovat s OB.</div>
+          <div class="mod-lessons">3 témata · <span class="badge badge-intermediate">Střední</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m6',null)">
+          <div class="mod-icon">⏰</div>
+          <div class="mod-num">Modul 6 · Klíčový</div>
+          <div class="mod-title">Killzones & Timing</div>
+          <div class="mod-desc">Asian, London, New York — kdy obchodovat a proč timing je v ICT stejně důležitý jako cena.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-intermediate">Střední</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m7',null)">
+          <div class="mod-icon">🎯</div>
+          <div class="mod-num">Modul 7 · Pokročilý</div>
+          <div class="mod-title">Optimální vstup (OTE)</div>
+          <div class="mod-desc">Fibonacci retracement podle ICT — OTE zóna 62–79%, sweet spot 70.5%, SL a TP.</div>
+          <div class="mod-lessons">3 témata · <span class="badge badge-intermediate">Střední</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m8',null)">
+          <div class="mod-icon">🔄</div>
+          <div class="mod-num">Modul 8 · Pokročilý</div>
+          <div class="mod-title">Power of 3 — AMD</div>
+          <div class="mod-desc">Accumulation → Manipulation (Judas Swing) → Distribution. Jak instituce pohybují trhem každý den.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-advanced">Pokročilý</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m9',null)">
+          <div class="mod-icon">🦄</div>
+          <div class="mod-num">Modul 9 · Pokročilý</div>
+          <div class="mod-title">Obchodní modely</div>
+          <div class="mod-desc">Silver Bullet, Unicorn Model, ICT 2022 Model — kompletní vstupní strategie krok za krokem.</div>
+          <div class="mod-lessons">3 modely · <span class="badge badge-advanced">Pokročilý</span></div>
+        </a>
+        <a class="module-card" onclick="showPage('m10',null)">
+          <div class="mod-icon">🛡️</div>
+          <div class="mod-num">Modul 10 · Praxe</div>
+          <div class="mod-title">Risk Management</div>
+          <div class="mod-desc">Jak nepřijít o účet. Risk/Reward, position sizing, denní limity a trade journal.</div>
+          <div class="mod-lessons">4 témata · <span class="badge badge-beginner">Začátečník</span></div>
+        </a>
+      </div>
+
+      <div style="padding: 0 40px 32px;">
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-text">
+            <strong>Pouze vzdělávací účely</strong>
+            <p>Tento program slouží výhradně ke vzdělání. Obchodování na finančních trzích nese vysoké riziko ztráty. Nikdy neriskujte peníze, které si nemůžete dovolit ztratit.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 1: Co je ICT ─── -->
+    <div id="page-m1" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 1 — Co je ICT strategie?</div>
+          <div class="topbar-breadcrumb">Základy · ~15 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-beginner">Začátečník</span>
+          <button class="btn btn-primary" onclick="showPage('m2',null)">Další modul →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 1 z 10</div>
+        <h1>Co je ICT strategie?</h1>
+        <p>ICT (Inner Circle Trader) je obchodní metodologie vytvořená Michaelem J. Huddlestonem. Naučí tě vidět trh očima institucí — bank, hedge fondů a centrálních bank.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">💡</div>
+          <div class="callout-text">
+            <strong>Základní myšlenka</strong>
+            <p>Trh nepohybuje nabídka a poptávka retail obchodníků — pohybují jím velké instituce, které manipulují cenou, aby získaly likviditu na vstup do pozic.</p>
+          </div>
+        </div>
+
+        <h2>Kdo je Michael Huddleston?</h2>
+        <p>Michael J. Huddleston, známý jako "ICT" (Inner Circle Trader), je americký trader a mentor. Svoji metodologii vyvíjel více než 20 let analýzou chování institucionálních hráčů na forexovém trhu. V roce 2016 začal své znalosti sdílet veřejně a dnes má miliony sledujících.</p>
+
+        <div class="card card-accent">
+          <h3>Klíčová filozofie ICT</h3>
+          <ul class="checklist">
+            <li>Trh je řízen algoritmem (IPDA — Interbank Price Delivery Algorithm)</li>
+            <li>Cena se pohybuje, aby "sbírala" likviditu (stop-lossy ostatních)</li>
+            <li>Retailoví obchodníci jsou záměrně manipulováni, aby vstupovali do špatných pozic</li>
+            <li>Timing (kdy) je stejně důležitý jako cena (kde)</li>
+            <li>Instituce zanechávají "stopy" v grafu — Order Blocks, FVG, Liquidity pools</li>
+          </ul>
+        </div>
+
+        <h2>Retail vs. Smart Money</h2>
+        <table>
+          <thead>
+            <tr><th>Retail obchodník</th><th>Smart Money (instituce)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Kupuje na breakoutech</td><td>Prodává do breakoutů</td></tr>
+            <tr><td>Dává stop-loss pod support</td><td>Pohybuje cenou pod support, aby SL triggeroval</td></tr>
+            <tr><td>Obchoduje trendové indikátory (MA, RSI)</td><td>Obchoduje price action a likviditu</td></tr>
+            <tr><td>Má strach z volatility</td><td>Volatilita je jejich nástroj</td></tr>
+            <tr><td>Obchoduje kdykoli</td><td>Obchoduje ve specifických časových oknech</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Co budeš po tomto kurzu umět?</h2>
+        <div class="concept-grid">
+          <div class="concept-card">
+            <div class="icon">📊</div>
+            <div class="name">Číst strukturu trhu</div>
+            <div class="desc">BOS, CHoCH, trend</div>
+          </div>
+          <div class="concept-card">
+            <div class="icon">💧</div>
+            <div class="name">Najít likviditu</div>
+            <div class="desc">Kde instituce loví</div>
+          </div>
+          <div class="concept-card">
+            <div class="icon">🧱</div>
+            <div class="name">Order Bloky</div>
+            <div class="desc">Institucionální zóny</div>
+          </div>
+          <div class="concept-card">
+            <div class="icon">⚡</div>
+            <div class="name">Fair Value Gaps</div>
+            <div class="desc">Nerovnováhy ceny</div>
+          </div>
+          <div class="concept-card">
+            <div class="icon">⏰</div>
+            <div class="name">Timing vstupů</div>
+            <div class="desc">Killzones, Sessions</div>
+          </div>
+          <div class="concept-card">
+            <div class="icon">🎯</div>
+            <div class="name">OTE vstup</div>
+            <div class="desc">Fibonacci 62–79%</div>
+          </div>
+        </div>
+
+        <h2>IPDA — Algoritmus bankovního trhu</h2>
+        <p>ICT věří, že za pohybem ceny stojí algoritmus zvaný <strong>IPDA (Interbank Price Delivery Algorithm)</strong>. Tento algoritmus:</p>
+
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Identifikuje likviditu</h4>
+              <p>Hledá clustery stop-lossů nad swing highs a pod swing lows — místa, kde se "hromadí" objednávky retail obchodníků.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Pohybuje cenou k likviditě</h4>
+              <p>Cena se pohybuje, aby tuto likviditu "sesbírala" — trigger je stop-loss a pending objednávky retail traderů.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Obrátí směr</h4>
+              <p>Poté, co sesbíral likviditu, se trh obrátí — instituce vstoupily do pozic a nyní pohybují trhem ve svůj prospěch.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Vyrovná nerovnováhy</h4>
+              <p>Cena se vrací do Fair Value Gaps (nerovnováh) a rebalancuje trh, než pokračuje v trendu.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🔑</div>
+          <div class="callout-text">
+            <strong>Klíčový poznatek</strong>
+            <p>ICT obchodník neobchoduje <em>s trendem</em>, ale <em>s institucemi</em>. Vstupuje poté, co instituce "sesbíraly" likviditu a mají otevřenou pozici — a jede s nimi.</p>
+          </div>
+        </div>
+
+        <h2>Na jakých trzích ICT funguje?</h2>
+        <table>
+          <thead><tr><th>Trh</th><th>Vhodnost</th><th>Poznámka</th></tr></thead>
+          <tbody>
+            <tr><td>Forex (EUR/USD, GBP/USD, NAS/USD)</td><td><span class="tag tag-green">Vynikající</span></td><td>ICT původně pro forex</td></tr>
+            <tr><td>Index futures (NQ, ES, MES)</td><td><span class="tag tag-green">Vynikající</span></td><td>ICT 2022 mentorship</td></tr>
+            <tr><td>Gold (XAUUSD)</td><td><span class="tag tag-green">Výborný</span></td><td>Velmi populární</td></tr>
+            <tr><td>Kryptoměny (BTC, ETH)</td><td><span class="tag tag-yellow">Středně</span></td><td>Méně regulovaný trh</td></tr>
+            <tr><td>Akcie</td><td><span class="tag tag-yellow">Méně vhodné</span></td><td>Omezená likvidita u menších</td></tr>
+          </tbody>
+        </table>
+
+        <!-- QUIZ 1 -->
+        <div class="quiz-container" id="quiz-m1">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj své znalosti</h3>
+            <span class="quiz-counter" id="qcount-m1">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m1-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('home',null)">← Domů</button>
+        <button class="btn btn-primary" onclick="showPage('m2',null)">Modul 2: Struktura trhu →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 2: Struktura trhu ─── -->
+    <div id="page-m2" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 2 — Struktura trhu</div>
+          <div class="topbar-breadcrumb">Základy · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-beginner">Začátečník</span>
+          <button class="btn btn-primary" onclick="showPage('m3',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 2 z 10</div>
+        <h1>Struktura trhu</h1>
+        <p>Než začneš hledat Order Bloky a FVG, musíš umět číst strukturu trhu. Je to základ všeho.</p>
+
+        <h2>Swing High & Swing Low</h2>
+        <p>Trh se pohybuje v <strong>vlnách</strong> — střídá pohyb nahoru a dolů. Vrcholy těchto vln jsou <strong>Swing High</strong> a dna jsou <strong>Swing Low</strong>.</p>
+
+        <div class="card card-green">
+          <h3>Bullish trend (vzestupný)</h3>
+          <p>Trend je vzestupný, pokud tvoří <strong>Higher Highs (HH)</strong> a <strong>Higher Lows (HL)</strong> — každý vrchol je výš než předchozí, každé dno je výš než předchozí.</p>
+        </div>
+        <div class="card card-red">
+          <h3>Bearish trend (sestupný)</h3>
+          <p>Trend je sestupný, pokud tvoří <strong>Lower Highs (LH)</strong> a <strong>Lower Lows (LL)</strong> — každý vrchol je níže, každé dno je níže.</p>
+        </div>
+
+        <h2>Interaktivní graf — Struktura trhu</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Struktura trhu — BOS, CHoCH</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-ms" style="width:100%; height:320px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#00c896"></div>Bullish svíčky</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#e84040"></div>Bearish svíčky</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div>BOS (Break of Structure)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0b90b"></div>CHoCH (Change of Character)</div>
+          </div>
+        </div>
+
+        <h2>BOS — Break of Structure</h2>
+        <div class="callout callout-info">
+          <div class="callout-icon">📊</div>
+          <div class="callout-text">
+            <strong>Break of Structure (BOS)</strong>
+            <p>Cena probije předchozí Swing High (v bullish trendu) nebo Swing Low (v bearish trendu). Potvrzuje pokračování trendu.</p>
+          </div>
+        </div>
+
+        <p><strong>Příklad bullish BOS:</strong> Cena dělá HH → HL → prolomí předchozí HH = BOS → trend pokračuje nahoru.</p>
+        <p><strong>Příklad bearish BOS:</strong> Cena dělá LH → LL → prolomí předchozí LL = BOS → trend pokračuje dolů.</p>
+
+        <h2>CHoCH — Change of Character</h2>
+        <div class="callout callout-warning">
+          <div class="callout-icon">🔄</div>
+          <div class="callout-text">
+            <strong>Change of Character (CHoCH)</strong>
+            <p>Cena prolomí strukturu v <em>protisměru</em> trendu. Je to <strong>první signál</strong> možné změny trendu. V bullish trendu = prolomení posledního Higher Low dolů.</p>
+          </div>
+        </div>
+
+        <table>
+          <thead><tr><th>Koncept</th><th>Co to je</th><th>Co signalizuje</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="tag tag-green">BOS</span></td>
+              <td>Prolomení předchozího Swing High/Low ve směru trendu</td>
+              <td>Pokračování trendu</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-yellow">CHoCH</span></td>
+              <td>Prolomení předchozího HL (v bullu) nebo LH (v medvědu)</td>
+              <td>Možná změna trendu — hledáme short/long</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-blue">MSS</span></td>
+              <td>Market Structure Shift — potvrzení CHoCH novým HH/LL v opačném směru</td>
+              <td>Potvrzená změna trendu</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Premium vs. Discount zóny</h2>
+        <p>ICT trh rozděluje na dvě části pomocí 50% hladiny (equilibrium):</p>
+
+        <div class="card">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div>
+              <h4>🔴 Premium zóna</h4>
+              <p>Cena je NAD 50% hladinou. Zde je ideální <strong>prodávat</strong> (hledat shorty). Cena je "drahá".</p>
+              <span class="price-zone zone-premium">Premium — prodej</span>
+            </div>
+            <div>
+              <h4>🟢 Discount zóna</h4>
+              <p>Cena je POD 50% hladinou. Zde je ideální <strong>kupovat</strong> (hledat longy). Cena je "levná".</p>
+              <span class="price-zone zone-discount">Discount — nákup</span>
+            </div>
+          </div>
+          <hr class="section-divider">
+          <p>⚖️ <strong>Equilibrium (EQ)</strong> = přesná 50% hladina mezi swing high a swing low. Cena "váhá" kolem EQ před rozhodnutím.</p>
+        </div>
+
+        <h2>Praktický postup — jak číst strukturu</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Začni na vyšším timeframu (HTF)</h4>
+              <p>Otevři denní nebo 4H graf. Identifikuj hlavní Swing Highs a Swing Lows za posledních 20–30 svíček.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Urči trend</h4>
+              <p>Dělá trh HH+HL (bullish) nebo LH+LL (bearish)? Nebo je v range (konsolidaci)?</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Označ Premium/Discount</h4>
+              <p>Najdi swing high a swing low aktuálního pohybu. Střed = 50% hladina = Equilibrium.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Hledej CHoCH/BOS na LTF</h4>
+              <p>Přepni na 15min nebo 5min graf. Čekej na CHoCH, který potvrdí směr HTF trendu.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUIZ M2 -->
+        <div class="quiz-container" id="quiz-m2">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m2">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m2-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m1',null)">← Modul 1</button>
+        <button class="btn btn-primary" onclick="showPage('m3',null)">Modul 3: Likvidita →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 3: Likvidita ─── -->
+    <div id="page-m3" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 3 — Likvidita</div>
+          <div class="topbar-breadcrumb">Základy · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-beginner">Začátečník</span>
+          <button class="btn btn-primary" onclick="showPage('m4',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 3 z 10</div>
+        <h1>Likvidita</h1>
+        <p>Likvidita je <strong>jádro celé ICT metodologie</strong>. Bez pochopení likvidity nemůžeš pochopit, proč se trh pohybuje tam, kde se pohybuje.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">💡</div>
+          <div class="callout-text">
+            <strong>Co je likvidita v ICT?</strong>
+            <p>Likvidita jsou nahromaděné objednávky (stop-lossy, pending orders) retailových obchodníků. Instituce tuto likviditu potřebují, aby mohly vstoupit do velkých pozic bez pohybu ceny — proto s ní záměrně manipulují.</p>
+          </div>
+        </div>
+
+        <h2>Buy-side vs. Sell-side likvidita</h2>
+        <div class="card" style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+          <div>
+            <h4 style="color:var(--green)">🟢 Buy-side likvidita (BSL)</h4>
+            <p>Nachází se <strong>NAD</strong> swing highs, equal highs a klíčovými rezistencemi.</p>
+            <p>Proč? Retail shorteři dávají stop-loss nad resistance → cluster buy objednávek nad highs = <em>buy-side liquidity</em>.</p>
+            <p>Instituce <strong>pohybují cenou NAHORU</strong>, aby tuto likviditu "sesbíraly".</p>
+          </div>
+          <div>
+            <h4 style="color:var(--red)">🔴 Sell-side likvidita (SSL)</h4>
+            <p>Nachází se <strong>POD</strong> swing lows, equal lows a klíčovými supporty.</p>
+            <p>Proč? Retail longeři dávají stop-loss pod support → cluster sell objednávek pod lows = <em>sell-side liquidity</em>.</p>
+            <p>Instituce <strong>pohybují cenou DOLŮ</strong>, aby tuto likviditu "sesbíraly".</p>
+          </div>
+        </div>
+
+        <h2>Interaktivní graf — Liquidity Sweep</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Sell-side Liquidity Sweep → Reversal</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-liq" style="width:100%; height:320px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#e84040"></div>Stop hunt (sweep) pod equal lows</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0b90b"></div>Sell-side liquidity</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#00c896"></div>Reversal po sweep</div>
+          </div>
+        </div>
+
+        <h2>Equal Highs & Equal Lows</h2>
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-text">
+            <strong>Klíčová úroveň likvidity</strong>
+            <p>Pokud cena dvakrát nebo vícekrát "dotýká" stejné úrovně bez proražení, je tam obrovské množství stop-lossů. Cena si to <em>nevyhnutelně</em> jednoho dne vezme — tzv. "liquidity grab" nebo "stop hunt".</p>
+          </div>
+        </div>
+
+        <h2>Typy likvidity</h2>
+        <table>
+          <thead><tr><th>Typ</th><th>Kde se nachází</th><th>Co se stane</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Equal Highs</strong></td>
+              <td>Nad dvěma nebo více shodnými maximy</td>
+              <td>Sweep nahoru → obrátka dolů</td>
+            </tr>
+            <tr>
+              <td><strong>Equal Lows</strong></td>
+              <td>Pod dvěma nebo více shodnými minimy</td>
+              <td>Sweep dolů → obrátka nahoru</td>
+            </tr>
+            <tr>
+              <td><strong>Swing High/Low pool</strong></td>
+              <td>Nad/pod klíčovým swing bodem</td>
+              <td>Liquidity grab + reversal nebo BOS</td>
+            </tr>
+            <tr>
+              <td><strong>Old High/Low</strong></td>
+              <td>Předchozí denní/týdenní high a low</td>
+              <td>Silná magnetická úroveň</td>
+            </tr>
+            <tr>
+              <td><strong>Round numbers</strong></td>
+              <td>Kulaté čísla (1.2000, 2000.00)</td>
+              <td>Psychologická likvidita</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Liquidity Sweep — Postup</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Identifikuj liquidity pool</h4>
+              <p>Najdi equal highs/lows, swing highs/lows kde je viditelná "bariéra" s více dotecky.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Čekej na přiblížení ceny</h4>
+              <p>Cena se pohybuje k úrovni likvidity — zatím nijak nejednáš.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Sweep — probití úrovně</h4>
+              <p>Cena PROBIJE úroveň (i jen špičkou svíčky), triggernuje stop-lossy. Klíčové: probití musí být následováno rychlým návratem.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Reversal + CHoCH</h4>
+              <p>Poté, co sweep proběhl, hledáš CHoCH na nižším timeframu → vstup do obchodu v opačném směru.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-success">
+          <div class="callout-icon">✅</div>
+          <div class="callout-text">
+            <strong>Zlaté pravidlo</strong>
+            <p>Cena se pohybuje od likvidity k likviditě. Pokaždé, když vidíš silný pohyb, ptej se: "Jakou likviditu teď bere?"</p>
+          </div>
+        </div>
+
+        <!-- QUIZ M3 -->
+        <div class="quiz-container" id="quiz-m3">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m3">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m3-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m2',null)">← Modul 2</button>
+        <button class="btn btn-primary" onclick="showPage('m4',null)">Modul 4: Order Bloky →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 4: Order Bloky ─── -->
+    <div id="page-m4" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 4 — Order Bloky</div>
+          <div class="topbar-breadcrumb">Klíčové koncepty · ~25 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-intermediate">Střední</span>
+          <button class="btn btn-primary" onclick="showPage('m5',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 4 z 10</div>
+        <h1>Order Bloky</h1>
+        <p>Order Block (OB) je zóna, kde instituce <strong>vstoupily do velkých pozic</strong>. Cena se zde má tendenci vracet a respektovat tuto zónu jako support/resistance.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🧱</div>
+          <div class="callout-text">
+            <strong>Definice Order Bloku</strong>
+            <p>Order Block je <strong>poslední protisměrná svíčka před impulsivním pohybem</strong>. U Bullish OB je to poslední bearish svíčka před silným pohybem nahoru. U Bearish OB je to poslední bullish svíčka před silným pohybem dolů.</p>
+          </div>
+        </div>
+
+        <h2>Interaktivní graf — Bullish Order Block</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Bullish Order Block — identifikace a vstup</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-ob" style="width:100%; height:340px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(0,200,150,0.4)"></div>Bullish Order Block zóna</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0b90b"></div>Impulzivní pohyb od OB</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div>Pullback do OB (vstup)</div>
+          </div>
+        </div>
+
+        <h2>Bullish Order Block</h2>
+        <div class="card card-green">
+          <h3>Jak identifikovat Bullish OB</h3>
+          <ul class="checklist">
+            <li>Najdi silný pohyb (impulz) <strong>nahoru</strong></li>
+            <li>Jdi zpět na začátek tohoto pohybu</li>
+            <li>Poslední <strong>bearish (červená)</strong> svíčka před impulzem = Bullish OB</li>
+            <li>OB zóna = od low po high této svíčky (nebo jen od close po high)</li>
+            <li>Čekej, až se cena vrátí do této zóny → vstup long</li>
+          </ul>
+        </div>
+
+        <h2>Bearish Order Block</h2>
+        <div class="card card-red">
+          <h3>Jak identifikovat Bearish OB</h3>
+          <ul class="checklist">
+            <li>Najdi silný pohyb <strong>dolů</strong></li>
+            <li>Jdi zpět na začátek tohoto pohybu</li>
+            <li>Poslední <strong>bullish (zelená)</strong> svíčka před impulzem = Bearish OB</li>
+            <li>OB zóna = od low po high této svíčky</li>
+            <li>Čekej, až se cena vrátí do této zóny → vstup short</li>
+          </ul>
+        </div>
+
+        <h2>Pravidla platného Order Bloku</h2>
+        <table>
+          <thead><tr><th>Kritérium</th><th>Platný OB</th><th>Neplatný OB</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Impulz po OB</td>
+              <td>Silný, min. 3× velikost OB svíčky</td>
+              <td>Slabý, podobný ostatním svíčkám</td>
+            </tr>
+            <tr>
+              <td>FVG po OB</td>
+              <td>Přítomen Fair Value Gap = silnější OB</td>
+              <td>Žádný FVG — méně spolehlivé</td>
+            </tr>
+            <tr>
+              <td>Liquidity sweep před OB</td>
+              <td>OB formoval po sweep likvidity</td>
+              <td>OB bez předchozího sweep</td>
+            </tr>
+            <tr>
+              <td>Mitigation (využití)</td>
+              <td>OB ještě NEBYL navštíven zpět</td>
+              <td>OB již byl "mitigován" (cena se vrátila)</td>
+            </tr>
+            <tr>
+              <td>HTF kontext</td>
+              <td>OB ve směru HTF trendu</td>
+              <td>OB proti HTF trendu</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Breaker Block</h2>
+        <div class="callout callout-warning">
+          <div class="callout-icon">💥</div>
+          <div class="callout-text">
+            <strong>Breaker Block — co to je?</strong>
+            <p>Když cena <strong>probije order block</strong> (nerespektuje ho a jde dál), původní Bullish OB se mění na <strong>Bearish Breaker Block</strong> a naopak. Cena se k němu vrátí znovu — tentokrát jako k rezistenci.</p>
+          </div>
+        </div>
+
+        <div class="card card-accent">
+          <h3>Bullish OB → Bearish Breaker</h3>
+          <ul class="checklist">
+            <li>Bullish OB byl identifikován a cena se vrátila</li>
+            <li>Cena PROBILA skrz bullish OB dolů = OB "prasknul"</li>
+            <li>Původní bullish OB se stává Bearish Breaker Block</li>
+            <li>Při retrace zpět k Breakeru hledáš short vstup</li>
+          </ul>
+        </div>
+
+        <h2>Mitigation Block</h2>
+        <p>Mitigation Block vzniká, když institucím "zbyde" nevyplněná část jejich objednávky v OB. Cena se vrací, aby tuto zbývající část "zmitogovala" (naplnila objednávky).</p>
+
+        <!-- QUIZ M4 -->
+        <div class="quiz-container" id="quiz-m4">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m4">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m4-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m3',null)">← Modul 3</button>
+        <button class="btn btn-primary" onclick="showPage('m5',null)">Modul 5: Fair Value Gap →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 5: FVG ─── -->
+    <div id="page-m5" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 5 — Fair Value Gap (FVG)</div>
+          <div class="topbar-breadcrumb">Klíčové koncepty · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-intermediate">Střední</span>
+          <button class="btn btn-primary" onclick="showPage('m6',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 5 z 10</div>
+        <h1>Fair Value Gap (FVG)</h1>
+        <p>Fair Value Gap je <strong>nerovnováha v ceně</strong> — místo, kde se trh pohyboval příliš rychle a nezanechal žádnou "obchodní aktivitu". Trh se tam zákonitě vrátí.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">⚡</div>
+          <div class="callout-text">
+            <strong>Definice FVG</strong>
+            <p>FVG je 3-svíčkový vzor, kde svíčka číslo 2 je tak velká (impulsivní), že <strong>knot svíčky 1 a knot svíčky 3 se nepřekrývají</strong>. Mezera mezi nimi = Fair Value Gap.</p>
+          </div>
+        </div>
+
+        <h2>Interaktivní graf — Fair Value Gap</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Bullish FVG — vznik a fillování</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-fvg" style="width:100%; height:340px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(0,200,150,0.3)"></div>Bullish FVG zóna</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0b90b;opacity:0.7"></div>50% FVG (equilibrium)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div>Retrace do FVG (vstup)</div>
+          </div>
+        </div>
+
+        <h2>Jak identifikovat FVG</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Najdi 3 po sobě jdoucí svíčky</h4>
+              <p>Hledej místo, kde druhá svíčka je výrazně větší než okolní svíčky (impulz).</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Zkontroluj překrytí knotů</h4>
+              <p><strong>Bullish FVG:</strong> High svíčky 1 je NÍŽE než Low svíčky 3 → mezera = FVG.<br>
+              <strong>Bearish FVG:</strong> Low svíčky 1 je VÝŠE než High svíčky 3 → mezera = FVG.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Označ zónu FVG</h4>
+              <p>FVG zóna = od High svíčky 1 do Low svíčky 3 (bullish FVG). Označ 50% — to je ideální vstupní bod.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Čekej na retrace</h4>
+              <p>Cena se vrátí do FVG. Ideálně vstupuješ, když cena dosáhne 50% FVG a začíná se obracet.</p>
+            </div>
+          </div>
+        </div>
+
+        <h2>FVG vs. Imbalance vs. Liquidity Void</h2>
+        <table>
+          <thead><tr><th>Pojem</th><th>Popis</th><th>Síla</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>FVG</strong></td>
+              <td>Klasická 3-svíčková nerovnováha, knoty se nepřekrývají</td>
+              <td><span class="tag tag-green">Vysoká</span></td>
+            </tr>
+            <tr>
+              <td><strong>Imbalance</strong></td>
+              <td>Obecnější pojem — cena se pohybovala příliš rychle</td>
+              <td><span class="tag tag-yellow">Střední</span></td>
+            </tr>
+            <tr>
+              <td><strong>Liquidity Void</strong></td>
+              <td>Velká FVG přes mnoho svíček — "díra" v ceně</td>
+              <td><span class="tag tag-blue">Silný magnet</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Inverted FVG (IFVG)</h2>
+        <div class="card card-accent">
+          <h3>Co je Inverted FVG?</h3>
+          <p>Když cena <strong>projde skrz FVG</strong> (vyplní ho a pokračuje dál), tento FVG se "invertuje". Původní podpora se stává rezistencí a naopak. IFVG je pak silná zóna pro reversal.</p>
+        </div>
+
+        <h2>Kombinace OB + FVG = nejsilnější setup</h2>
+        <div class="callout callout-success">
+          <div class="callout-icon">🌟</div>
+          <div class="callout-text">
+            <strong>High-probability zóna</strong>
+            <p>Když se <strong>Order Block překrývá s Fair Value Gap</strong>, vzniká jedna z nejsilnějších ICT zón. Instituce zde mají nevyplněné objednávky (OB) A nerovnováhu (FVG) — dvojí důvod k reakci ceny.</p>
+          </div>
+        </div>
+
+        <!-- QUIZ M5 -->
+        <div class="quiz-container" id="quiz-m5">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m5">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m5-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m4',null)">← Modul 4</button>
+        <button class="btn btn-primary" onclick="showPage('m6',null)">Modul 6: Killzones →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 6: Killzones ─── -->
+    <div id="page-m6" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 6 — Killzones & Timing</div>
+          <div class="topbar-breadcrumb">Klíčové koncepty · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-intermediate">Střední</span>
+          <button class="btn btn-primary" onclick="showPage('m7',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 6 z 10</div>
+        <h1>Killzones &amp; Timing</h1>
+        <p>V ICT je <strong>timing stejně důležitý jako cena</strong>. Správný setup ve špatný čas = nevstupuješ. Špatný setup ve správný čas = stále nevstupuješ.</p>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⏰</div>
+          <div class="callout-text">
+            <strong>Klíčový princip</strong>
+            <p>ICT modely fungují <strong>POUZE</strong> v časových oknech s vysokou institucionální aktivitou — Killzones. Mimo tato okna se trhem pohybuje algoritmus způsoby, které jsou pro retail tradery nepředvídatelné.</p>
+          </div>
+        </div>
+
+        <h2>Přehled sessions (časy v CET/CEST)</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Denní časová osa — Sessions & Killzones</span>
+            <span class="chart-pair">Časy v SEČ (UTC+1) / SELČ (UTC+2)</span>
+          </div>
+          <canvas id="chart-sessions" style="width:100%; height:180px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(155,89,182,0.5)"></div>Asian session (21:00–06:00)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(74,158,255,0.5)"></div>London session & Killzone</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(240,185,11,0.5)"></div>New York session & Killzone</div>
+          </div>
+        </div>
+
+        <h2>Asian Session — Accumulation</h2>
+        <div class="card card-purple">
+          <h3>🌙 Asian Session</h3>
+          <table style="margin:0">
+            <tbody>
+              <tr><td style="width:120px; color:var(--text2)">Čas (SEČ)</td><td>21:00 – 06:00</td></tr>
+              <tr><td style="color:var(--text2)">Fáze AMD</td><td>Accumulation — Konsolidace, range</td></tr>
+              <tr><td style="color:var(--text2)">Volatilita</td><td>Nízká — dělá se "high" a "low" pro London</td></tr>
+              <tr><td style="color:var(--text2)">Co hledáme</td><td>Definice Asian High (AH) a Asian Low (AL)</td></tr>
+              <tr><td style="color:var(--text2)">Akce</td><td>Většinou NEOBCHODUJEME — jen sledujeme range</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>London Killzone</h2>
+        <div class="card card-blue">
+          <h3>🇬🇧 London Killzone</h3>
+          <table style="margin:0">
+            <tbody>
+              <tr><td style="width:120px; color:var(--text2)">Čas (SEČ)</td><td>02:00 – 05:00 (letní: 03:00 – 06:00)</td></tr>
+              <tr><td style="color:var(--text2)">Fáze AMD</td><td>Manipulation — Judas Swing, false breakout</td></tr>
+              <tr><td style="color:var(--text2)">Volatilita</td><td>Střední až vysoká</td></tr>
+              <tr><td style="color:var(--text2)">Co hledáme</td><td>Sweep Asian High/Low, CHoCH, Order Block</td></tr>
+              <tr><td style="color:var(--text2)">Vstup</td><td>Po sweep + CHoCH na 5min nebo 1min grafu</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>New York Killzone</h2>
+        <div class="card card-accent">
+          <h3>🗽 New York Killzone</h3>
+          <table style="margin:0">
+            <tbody>
+              <tr><td style="width:120px; color:var(--text2)">Čas (SEČ)</td><td>13:00 – 16:00 (letní: 14:00 – 17:00)</td></tr>
+              <tr><td style="color:var(--text2)">Fáze AMD</td><td>Distribution — hlavní pohyb dne</td></tr>
+              <tr><td style="color:var(--text2)">Volatilita</td><td>Velmi vysoká — NYSE open</td></tr>
+              <tr><td style="color:var(--text2)">Co hledáme</td><td>Pokračování London trendu nebo reversal</td></tr>
+              <tr><td style="color:var(--text2)">Vstup</td><td>OTE retracement, FVG, Order Block</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Silver Bullet — Specifické okno</h2>
+        <div class="callout callout-success">
+          <div class="callout-icon">🥈</div>
+          <div class="callout-text">
+            <strong>ICT Silver Bullet</strong>
+            <p>Specifické 1hodinové okno (10:00–11:00 NY čas = 16:00–17:00 SEČ letní). ICT označuje toto okno za vysoce pravděpodobné pro FVG setup. Hledáš: <strong>FVG, který vznikl v tomto okně</strong> → vstup při retrace do FVG.</p>
+          </div>
+        </div>
+
+        <h2>ICT Macros</h2>
+        <p>Macros jsou 20minutová okna s obzvláště vysokou institucionální aktivitou uvnitř killzones:</p>
+        <table>
+          <thead><tr><th>Macro</th><th>Čas (NY)</th><th>Čas (SEČ letní)</th></tr></thead>
+          <tbody>
+            <tr><td>London Open Macro</td><td>02:33 – 03:00</td><td>08:33 – 09:00</td></tr>
+            <tr><td>New York Open Macro</td><td>08:50 – 09:10</td><td>14:50 – 15:10</td></tr>
+            <tr><td>NY AM Macro 1</td><td>09:50 – 10:10</td><td>15:50 – 16:10</td></tr>
+            <tr><td>NY AM Macro 2 (Silver Bullet)</td><td>10:50 – 11:10</td><td>16:50 – 17:10</td></tr>
+            <tr><td>NY Lunch Macro</td><td>11:50 – 12:10</td><td>17:50 – 18:10</td></tr>
+          </tbody>
+        </table>
+
+        <h2>New York Midnight Open</h2>
+        <div class="card card-accent">
+          <h3>🕛 NY Midnight Open (00:00 NY čas)</h3>
+          <p>ICT používá <strong>půlnoc newyorského času</strong> (06:00 SEČ) jako klíčový referenční bod. Tento bod:</p>
+          <ul class="checklist">
+            <li>Definuje "nový den" pro ICT algorithmus</li>
+            <li>Cena se k tomuto bodu během dne často vrací</li>
+            <li>Je referenčním bodem pro denní bias (směr dne)</li>
+          </ul>
+        </div>
+
+        <!-- QUIZ M6 -->
+        <div class="quiz-container" id="quiz-m6">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m6">Otázka 1 / 3</span>
+          </div>
+          <div id="quiz-m6-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m5',null)">← Modul 5</button>
+        <button class="btn btn-primary" onclick="showPage('m7',null)">Modul 7: OTE →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 7: OTE ─── -->
+    <div id="page-m7" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 7 — Optimální vstup (OTE)</div>
+          <div class="topbar-breadcrumb">Pokročilé · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-intermediate">Střední</span>
+          <button class="btn btn-primary" onclick="showPage('m8',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 7 z 10</div>
+        <h1>OTE — Optimal Trade Entry</h1>
+        <p>OTE je Fibonacci retracement zóna, do které se cena vrací po impulzivním pohybu. Slouží k přesnému načasování vstupu s minimálním stop-lossem a maximálním R:R.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-text">
+            <strong>OTE zóna = 62% – 79% Fibonacci retracement</strong>
+            <p>Sweet spot je <strong>70.5%</strong> — matematický střed OTE zóny. Zde instituce doplňují nebo otevírají pozice s nejmenší expozicí.</p>
+          </div>
+        </div>
+
+        <h2>Interaktivní graf — OTE Setup</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">OTE — Retracement do 62–79% zóny</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-ote" style="width:100%; height:340px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(0,200,150,0.3)"></div>OTE zóna (62–79%)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0b90b"></div>70.5% Sweet Spot</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(74,158,255,0.3)"></div>50% Equilibrium</div>
+          </div>
+        </div>
+
+        <h2>Fibonacci nastavení pro ICT</h2>
+        <table>
+          <thead><tr><th>Úroveň</th><th>Název</th><th>Účel</th></tr></thead>
+          <tbody>
+            <tr><td><strong>0</strong></td><td>Swing Low (anchor)</td><td>Počátek měření</td></tr>
+            <tr><td><strong>0.5</strong></td><td>Equilibrium (EQ)</td><td>50% — hranice premium/discount</td></tr>
+            <tr><td><strong>0.62</strong></td><td>OTE Start</td><td>Začátek vstupní zóny</td></tr>
+            <tr><td style="background:rgba(240,185,11,0.08)"><strong>0.705</strong></td><td style="background:rgba(240,185,11,0.08)">Sweet Spot ⭐</td><td style="background:rgba(240,185,11,0.08)">Ideální vstupní bod</td></tr>
+            <tr><td><strong>0.79</strong></td><td>OTE End</td><td>Konec vstupní zóny</td></tr>
+            <tr><td><strong>1.0</strong></td><td>Swing High (anchor)</td><td>Stop-loss úroveň</td></tr>
+            <tr><td><strong>-0.27</strong></td><td>TP1</td><td>První target (standardní)</td></tr>
+            <tr><td><strong>-0.62</strong></td><td>TP2</td><td>Druhý target (agresivní)</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Jak nakreslit OTE — postup</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Identifikuj swing low a swing high</h4>
+              <p>U bullish OTE: swing low = kotva 0, swing high = kotva 1. U bearish OTE je to naopak.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Nakresli Fibonacci retracement</h4>
+              <p>V TradingView: Fibonacci → přetáhni od swing low (0) na swing high (1). Nastav úrovně 0.5, 0.62, 0.705, 0.79.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Čekej na pullback do OTE zóny</h4>
+              <p>Cena musí retracovat do 62–79% zóny. Zároveň musí být <strong>v rámci Killzone</strong> (London nebo NY).</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Potvrzení vstupu</h4>
+              <p>V OTE zóně hledáš: CHoCH na nižším timeframu, Order Block, FVG → vstup. Stop-loss TĚSNĚ pod/nad swing low/high (úroveň 1.0).</p>
+            </div>
+          </div>
+        </div>
+
+        <h2>Risk:Reward při OTE</h2>
+        <div class="card card-green">
+          <h3>Proč OTE dává skvělé R:R?</h3>
+          <p>Protože vstupuješ hluboko v retracementu (blízko swing low), tvůj stop-loss je malý. Přitom target (swing high a výše) je daleko. Typicky dosáhneš:</p>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:12px;">
+            <div class="stat-box"><div class="stat-num" style="font-size:20px">1:3</div><div class="stat-lbl">Minimální R:R</div></div>
+            <div class="stat-box"><div class="stat-num" style="font-size:20px">1:5</div><div class="stat-lbl">Běžné R:R</div></div>
+            <div class="stat-box"><div class="stat-num" style="font-size:20px">1:10+</div><div class="stat-lbl">Při šikovném TP</div></div>
+          </div>
+        </div>
+
+        <!-- QUIZ M7 -->
+        <div class="quiz-container" id="quiz-m7">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m7">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m7-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m6',null)">← Modul 6</button>
+        <button class="btn btn-primary" onclick="showPage('m8',null)">Modul 8: Power of 3 →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 8: Power of 3 AMD ─── -->
+    <div id="page-m8" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 8 — Power of 3 (AMD)</div>
+          <div class="topbar-breadcrumb">Pokročilé · ~20 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-advanced">Pokročilý</span>
+          <button class="btn btn-primary" onclick="showPage('m9',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 8 z 10</div>
+        <h1>Power of 3 — AMD</h1>
+        <p>Power of 3 (PO3) je denní struktura, která popisuje, jak instituce pohybují trhem každý obchodní den. Skládá se ze tří fází: <strong>Accumulation → Manipulation → Distribution</strong>.</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🔄</div>
+          <div class="callout-text">
+            <strong>AMD = Denní "skript" trhu</strong>
+            <p>Každý den instituce provádějí stejný vzor: nejdřív konsolidují (shromažďují pozice), pak manipulují (falešný pohyb aby vylosovaly retail), pak jdou v pravém směru (distribution).</p>
+          </div>
+        </div>
+
+        <h2>Interaktivní graf — Power of 3</h2>
+        <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Power of 3 — AMD denní vzor</span>
+            <span class="chart-pair">Edukativní příklad</span>
+          </div>
+          <canvas id="chart-amd" style="width:100%; height:340px;"></canvas>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(155,89,182,0.4)"></div>Accumulation (Asian range)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(232,64,64,0.4)"></div>Manipulation (Judas Swing)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(0,200,150,0.4)"></div>Distribution (skutečný pohyb)</div>
+          </div>
+        </div>
+
+        <h2>Fáze 1: Accumulation</h2>
+        <div class="card card-purple">
+          <h3>Accumulation — Asian Session</h3>
+          <ul class="checklist">
+            <li>Odehrává se hlavně v Asian session (21:00–06:00 SEČ)</li>
+            <li>Trh je v <strong>úzkém rangi</strong> — konsolidace</li>
+            <li>Instituce tiše budují pozice, aniž by pohybovaly cenou</li>
+            <li>Retail vidí "žádný trend" a čeká nebo obchoduje range oba směry</li>
+            <li>Asian High (AH) a Asian Low (AL) jsou klíčové referenční body</li>
+          </ul>
+        </div>
+
+        <h2>Fáze 2: Manipulation — Judas Swing</h2>
+        <div class="card card-red">
+          <h3>Manipulation — False move</h3>
+          <ul class="checklist">
+            <li>Probíhá na začátku London session nebo při NY open</li>
+            <li>Cena udělá <strong>falešný pohyb</strong> (Judas Swing) v <em>opačném</em> směru než je skutečný záměr</li>
+            <li>Prorazí Asian High nebo Asian Low → triggernuje stop-lossy a false breakout obchodníky</li>
+            <li>Retail vidí "breakout" a vstoupí do špatné strany</li>
+            <li>Hned poté se cena obrátí (CHoCH) a jde v pravém směru</li>
+          </ul>
+          <div class="callout callout-danger" style="margin-top:12px; margin-bottom:0">
+            <div class="callout-icon">⚠️</div>
+            <div class="callout-text">
+              <strong>Judas Swing — záludná past</strong>
+              <p>Judas Swing je záměrná manipulace. Pokud vidíš ranní breakout nad Asian High při bearish denním biasu — nejde o skutečný breakout, ale o past!</p>
+            </div>
+          </div>
+        </div>
+
+        <h2>Fáze 3: Distribution</h2>
+        <div class="card card-green">
+          <h3>Distribution — pravý pohyb dne</h3>
+          <ul class="checklist">
+            <li>Po Judas Swing se cena obrátí a jde ve <strong>skutečném směru</strong></li>
+            <li>Toto je hlavní pohyb dne — silný, impulsivní</li>
+            <li>Probíhá během London a NY session</li>
+            <li>ICT trader vstupuje po CHoCH, který ukončuje Manipulation</li>
+            <li>Target = denní high/low, předchozí liquidity pool</li>
+          </ul>
+        </div>
+
+        <h2>Denní bias — Jak určit směr dne</h2>
+        <p>Před každým dnem musíš mít <strong>bias</strong> — předpoklad, kam trh pravděpodobně půjde. Opíráš se o:</p>
+        <table>
+          <thead><tr><th>Zdroj biasu</th><th>Popis</th></tr></thead>
+          <tbody>
+            <tr><td>HTF struktura</td><td>Jaký je trend na denním/4H grafu? Bullish = hledáš longs</td></tr>
+            <tr><td>Předchozí den High/Low</td><td>Kde je likvidita? Nad PDH nebo pod PDL?</td></tr>
+            <tr><td>NY Midnight Open</td><td>Je cena nad nebo pod půlnočním otevřením?</td></tr>
+            <tr><td>Weekly bias</td><td>Hledá trh týdenní high nebo low?</td></tr>
+          </tbody>
+        </table>
+
+        <!-- QUIZ M8 -->
+        <div class="quiz-container" id="quiz-m8">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m8">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m8-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m7',null)">← Modul 7</button>
+        <button class="btn btn-primary" onclick="showPage('m9',null)">Modul 9: Obchodní modely →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 9: Obchodní modely ─── -->
+    <div id="page-m9" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 9 — Obchodní modely</div>
+          <div class="topbar-breadcrumb">Pokročilé · ~25 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-advanced">Pokročilý</span>
+          <button class="btn btn-primary" onclick="showPage('m10',null)">Další →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 9 z 10</div>
+        <h1>Obchodní modely</h1>
+        <p>ICT nabízí několik konkrétních modelů, které kombinují koncepty z předchozích modulů do kompletních vstupních strategií.</p>
+
+        <h2>Model 1: ICT 2022 Mentorship Model</h2>
+        <div class="card card-accent">
+          <h3>Kompletní intraday model</h3>
+          <p>Základní ICT model pro indexové futures (NQ, ES) a forex. Kombinuje AMD, killzones, OB a FVG.</p>
+        </div>
+
+        <div class="steps">
+          <div class="step"><div class="step-num">1</div><div class="step-body">
+            <h4>HTF Bias (Denní/4H)</h4>
+            <p>Urči denní bias — bullish nebo bearish. Zkontroluj PDH/PDL (Previous Day High/Low), weekly high/low, kde je likvidita.</p>
+          </div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-body">
+            <h4>Asian Range (21:00–06:00 SEČ)</h4>
+            <p>Označ Asian High a Asian Low. Toto je range, ze kterého London provede Judas Swing.</p>
+          </div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-body">
+            <h4>London Killzone — Judas Swing</h4>
+            <p>London (02:00–05:00 NY) provede sweep Asian High nebo Asian Low. Čekáš na CHoCH po sweepu.</p>
+          </div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-body">
+            <h4>Vstup na LTF (5min / 1min)</h4>
+            <p>Po CHoCH hledáš na 5min/1min OB nebo FVG ve směru biasu. Vstup v OTE zóně (62–79%) s SL za swing.</p>
+          </div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-body">
+            <h4>Target — Liquidity Pool</h4>
+            <p>TP1 = PDH nebo PDL. TP2 = weekly high/low nebo větší FVG. Parciální výběr zisků pro snížení rizika.</p>
+          </div></div>
+        </div>
+
+        <h2>Model 2: Silver Bullet</h2>
+        <div class="card card-blue">
+          <h3>🥈 Silver Bullet — FVG model</h3>
+          <p>Nejjednodušší ICT model. Funguje ve třech specifických 1hodinových oknech.</p>
+          <table style="margin:8px 0 0">
+            <tbody>
+              <tr><td style="color:var(--text2); width:130px">Okna</td><td>03:00–04:00 / 10:00–11:00 / 14:00–15:00 NY (v SEČ letní: +6h)</td></tr>
+              <tr><td style="color:var(--text2)">Setup</td><td>FVG, který vznikl v tomto okně</td></tr>
+              <tr><td style="color:var(--text2)">Vstup</td><td>Při retrace do FVG (ideálně 50% FVG)</td></tr>
+              <tr><td style="color:var(--text2)">SL</td><td>Pod/nad FVG (pod low svíčky 1 u bullish)</td></tr>
+              <tr><td style="color:var(--text2)">TP</td><td>Předchozí swing high/low nebo liquidity pool</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="steps">
+          <div class="step"><div class="step-num">1</div><div class="step-body">
+            <h4>Čekej na Silver Bullet okno</h4>
+            <p>Vstoupíš do grafu přesně při začátku okna (10:00 NY čas) — žádné obchody předtím.</p>
+          </div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-body">
+            <h4>Identifikuj FVG v okně</h4>
+            <p>Na 1min nebo 5min grafu sleduj vznik FVG. Musí být ve směru HTF biasu (denní/4H).</p>
+          </div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-body">
+            <h4>Vstup do FVG</h4>
+            <p>Nastav limit order na 50% FVG nebo na low svíčky 1 (bullish FVG). SL pod celý FVG.</p>
+          </div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-body">
+            <h4>Uzavři do konce okna</h4>
+            <p>Pokud obchod nenaplní cíl do 11:00 NY, Silver Bullet okno skončilo — zvažuj výstup.</p>
+          </div></div>
+        </div>
+
+        <h2>Model 3: Unicorn Model</h2>
+        <div class="card card-green">
+          <h3>🦄 Unicorn Model — OB + FVG overlap</h3>
+          <p>Nejsilnější ICT setup — Order Block a Fair Value Gap se překrývají na stejném místě.</p>
+          <ul class="checklist">
+            <li>Identifikuj impulzivní pohyb s OB na začátku</li>
+            <li>Ve stejném OB nebo těsně nad/pod ním musí být FVG</li>
+            <li>Překryv OB+FVG = Unicorn zóna</li>
+            <li>Vstup při retrace do Unicorn zóny</li>
+            <li>SL pod celou zónu (pod OB low), TP = další liquidity pool</li>
+          </ul>
+        </div>
+
+        <h2>Checklist před každým obchodem</h2>
+        <div class="card">
+          <h3>Pre-trade checklist</h3>
+          <ul class="checklist">
+            <li>Mám jasný HTF bias (bullish / bearish)?</li>
+            <li>Jsem v Killzone (London nebo NY)?</li>
+            <li>Proběhl Judas Swing / liquidity sweep?</li>
+            <li>Vidím CHoCH ve směru mého biasu?</li>
+            <li>Je vstupní zóna (OB, FVG, OTE) ve směru HTF?</li>
+            <li>Je R:R minimálně 1:3?</li>
+            <li>Mám definovaný SL a TP?</li>
+            <li>Rizkuji maximálně 1–2% účtu?</li>
+          </ul>
+        </div>
+
+        <!-- QUIZ M9 -->
+        <div class="quiz-container" id="quiz-m9">
+          <div class="quiz-header">
+            <h3>🎯 Otestuj se</h3>
+            <span class="quiz-counter" id="qcount-m9">Otázka 1 / 3</span>
+          </div>
+          <div id="quiz-m9-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m8',null)">← Modul 8</button>
+        <button class="btn btn-primary" onclick="showPage('m10',null)">Modul 10: Risk Management →</button>
+      </div>
+    </div>
+
+    <!-- ─── MODUL 10: Risk Management ─── -->
+    <div id="page-m10" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Modul 10 — Risk Management</div>
+          <div class="topbar-breadcrumb">Praxe · ~15 minut</div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge badge-beginner">Začátečník</span>
+          <button class="btn btn-success" onclick="showPage('glossary',null)">Přejít na Slovník →</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <div class="hero-label">Modul 10 z 10</div>
+        <h1>Risk Management</h1>
+        <p>ICT strategie ti dá výhodu — ale bez disciplinovaného risk managementu i nejlepší strategie tě přivede k bankrotu. Risk management = základní podmínka přežití.</p>
+
+        <div class="callout callout-danger">
+          <div class="callout-icon">🛑</div>
+          <div class="callout-text">
+            <strong>Zlaté pravidlo č. 1</strong>
+            <p>Nikdy neriskuj více než <strong>1–2% kapitálu</strong> na jeden obchod. S tímto pravidlem musíš prohrát 50+ obchodů za sebou, aby ses dostal na -50% — prakticky nemožné při konzistentní strategii.</p>
+          </div>
+        </div>
+
+        <h2>Position Sizing — Výpočet velikosti pozice</h2>
+        <div class="card card-accent">
+          <h3>Vzorec pro position sizing</h3>
+          <div style="background:var(--bg3); padding:16px; border-radius:8px; font-family:monospace; font-size:14px; margin-bottom:12px;">
+            <div style="color:var(--text2); margin-bottom:4px">Riziko v penězích = Kapitál × Risk%</div>
+            <div style="color:var(--text2); margin-bottom:4px">SL vzdálenost (pips/body) = Entry - Stop Loss</div>
+            <div style="color:var(--accent)">Velikost pozice = Riziko v penězích ÷ (SL vzdálenost × Hodnota pipu)</div>
+          </div>
+          <p><strong>Příklad:</strong> Účet 10 000 USD, risk 1% = 100 USD. SL vzdálenost = 20 pips, hodnota pipu = 1 USD → velikost pozice = 5 mini lots.</p>
+        </div>
+
+        <h2>Risk:Reward (R:R) Ratio</h2>
+        <table>
+          <thead><tr><th>R:R</th><th>Win rate potřebný pro break-even</th><th>ICT hodnocení</th></tr></thead>
+          <tbody>
+            <tr><td>1:1</td><td>50%</td><td><span class="tag tag-red">Nedostatečné</span></td></tr>
+            <tr><td>1:2</td><td>33%</td><td><span class="tag tag-yellow">Minimální</span></td></tr>
+            <tr><td>1:3</td><td>25%</td><td><span class="tag tag-green">Dobrý</span></td></tr>
+            <tr><td>1:5</td><td>17%</td><td><span class="tag tag-green">Výborný</span></td></tr>
+            <tr><td>1:10+</td><td>9%</td><td><span class="tag tag-blue">Excelentní</span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout callout-success">
+          <div class="callout-icon">💡</div>
+          <div class="callout-text">
+            <strong>ICT filozofie win rate</strong>
+            <p>ICT říká, že stačí <strong>30–40% win rate</strong>, pokud dodržuješ R:R minimálně 1:3. Znamená to, že i když prohraješ 6 ze 10 obchodů, jsi stále v zisku!</p>
+          </div>
+        </div>
+
+        <h2>Denní a týdenní limity</h2>
+        <div class="card">
+          <h3>Pravidla pro ochranu kapitálu</h3>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div>
+              <h4>Denní limity</h4>
+              <ul class="checklist">
+                <li>Max. ztráta za den: 3–5% účtu</li>
+                <li>Po 2 ztrátách za sebou: stop obchodování</li>
+                <li>Max. 3 obchody denně</li>
+                <li>Pokud 1. obchod je profit — volitelně 2. obchod</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Týdenní limity</h4>
+              <ul class="checklist">
+                <li>Max. ztráta za týden: 10% účtu</li>
+                <li>Pokud dosáhneš limitu: stop do pondělí</li>
+                <li>Revize po špatném týdnu před pokračováním</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h2>Trade Journal — Zápisník obchodníka</h2>
+        <p>Každý profesionální trader vede zápisník. Bez zápisníku se neučíš ze svých chyb.</p>
+        <table>
+          <thead><tr><th>Co zapisovat</th><th>Proč</th></tr></thead>
+          <tbody>
+            <tr><td>Datum, čas, trh, směr</td><td>Identifikace vzorů v čase a trhu</td></tr>
+            <tr><td>Screenshot před a po</td><td>Vizuální zpětná vazba</td></tr>
+            <tr><td>Tvůj bias a proč</td><td>Testování rozhodovacího procesu</td></tr>
+            <tr><td>Vstup, SL, TP</td><td>Analýza R:R</td></tr>
+            <tr><td>Emoce (0–10)</td><td>Identifikace psychologických chyb</td></tr>
+            <tr><td>Co se povedlo / nepovedlo</td><td>Zlepšování edge</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Nejčastější chyby ICT začátečníků</h2>
+        <div class="card card-red">
+          <h3>Vyhni se těmto chybám</h3>
+          <ul class="checklist">
+            <li style="align-items:flex-start">
+              <span style="color:var(--red)">✗</span>
+              <span><strong>Obchodování mimo Killzones</strong> — 80% ztrát začátečníků</span>
+            </li>
+            <li style="align-items:flex-start">
+              <span style="color:var(--red)">✗</span>
+              <span><strong>Vstup bez HTF biasu</strong> — každý obchod musí mít kontext</span>
+            </li>
+            <li style="align-items:flex-start">
+              <span style="color:var(--red)">✗</span>
+              <span><strong>Přeobchodování</strong> — méně je více, čekej na A-setup</span>
+            </li>
+            <li style="align-items:flex-start">
+              <span style="color:var(--red)">✗</span>
+              <span><strong>Posunování SL</strong> — stop-loss je stop-loss, nikdy ho neposunuj ve ztrátu</span>
+            </li>
+            <li style="align-items:flex-start">
+              <span style="color:var(--red)">✗</span>
+              <span><strong>Příliš mnoho konceptů najednou</strong> — nejdřív master 1 model, pak další</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="callout callout-success">
+          <div class="callout-icon">🎓</div>
+          <div class="callout-text">
+            <strong>Gratuluji — dokončil/a jsi ICT kurz!</strong>
+            <p>Prošel/prošla jsi všechna 4 témata. Nyní čte Slovník pojmů a Cheat Sheet pro rychlý přehled. Pak začni demo obchodovat — minimálně 3 měsíce před živým účtem!</p>
+          </div>
+        </div>
+
+        <!-- QUIZ M10 -->
+        <div class="quiz-container" id="quiz-m10">
+          <div class="quiz-header">
+            <h3>🎯 Závěrečný test</h3>
+            <span class="quiz-counter" id="qcount-m10">Otázka 1 / 4</span>
+          </div>
+          <div id="quiz-m10-body"></div>
+        </div>
+      </div>
+      <div class="lesson-nav-bar">
+        <button class="btn btn-secondary" onclick="showPage('m9',null)">← Modul 9</button>
+        <button class="btn btn-success" onclick="showPage('glossary',null)">Slovník pojmů →</button>
+      </div>
+    </div>
+
+    <!-- ─── SLOVNÍK ─── -->
+    <div id="page-glossary" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Slovník ICT pojmů</div>
+          <div class="topbar-breadcrumb">Reference · A–Z</div>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <h1>Slovník ICT pojmů</h1>
+        <p>Kompletní přehled všech ICT termínů s definicemi v češtině.</p>
+        <input type="text" class="glossary-search" id="glossary-search" placeholder="Hledat pojem... (např. FVG, Order Block, CHoCH)" oninput="filterGlossary(this.value)">
+        <div id="glossary-list"></div>
+      </div>
+    </div>
+
+    <!-- ─── CHEAT SHEET ─── -->
+    <div id="page-cheatsheet" class="page">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">ICT Cheat Sheet</div>
+          <div class="topbar-breadcrumb">Rychlá reference</div>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" onclick="window.print()">🖨️ Vytisknout</button>
+        </div>
+      </div>
+      <div class="lesson-body">
+        <h1>ICT Cheat Sheet</h1>
+        <p>Rychlý přehled před každým obchodním dnem.</p>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div class="card card-accent">
+            <h3>⏰ Killzones (SEČ letní)</h3>
+            <ul class="checklist">
+              <li>Asian: 21:00 – 06:00 (range)</li>
+              <li>London KZ: 03:00 – 06:00</li>
+              <li>NY KZ: 14:00 – 17:00</li>
+              <li>Silver Bullet: 16:00 – 17:00</li>
+            </ul>
+          </div>
+          <div class="card card-green">
+            <h3>📊 Bias checklist</h3>
+            <ul class="checklist">
+              <li>HTF trend (denní/4H)?</li>
+              <li>Nad nebo pod PDH/PDL?</li>
+              <li>Nad nebo pod Midnight Open?</li>
+              <li>Kde je likvidita?</li>
+            </ul>
+          </div>
+          <div class="card card-blue">
+            <h3>🔄 AMD denní vzor</h3>
+            <ul class="checklist">
+              <li>Asian = Accumulation (range)</li>
+              <li>London = Manipulation (Judas)</li>
+              <li>NY = Distribution (pravý pohyb)</li>
+            </ul>
+          </div>
+          <div class="card card-purple">
+            <h3>🎯 OTE Fibonacci</h3>
+            <ul class="checklist">
+              <li>0.62 = OTE start</li>
+              <li>0.705 = Sweet Spot ⭐</li>
+              <li>0.79 = OTE end</li>
+              <li>-0.27 = TP1 cíl</li>
+            </ul>
+          </div>
+          <div class="card card-accent">
+            <h3>🧱 Order Block pravidla</h3>
+            <ul class="checklist">
+              <li>Bullish OB = poslední bearish svíčka před impulzem nahoru</li>
+              <li>Bearish OB = poslední bullish svíčka před impulzem dolů</li>
+              <li>Musí být nemitigovaný (nevyplněný)</li>
+              <li>Kombinuj s FVG pro silnější setup</li>
+            </ul>
+          </div>
+          <div class="card card-red">
+            <h3>🛡️ Risk pravidla</h3>
+            <ul class="checklist">
+              <li>Max. 1–2% risk/obchod</li>
+              <li>Min. 1:3 R:R</li>
+              <li>Max. 3 obchody/den</li>
+              <li>Stop po 2 ztrátách za sebou</li>
+            </ul>
+          </div>
+        </div>
+
+        <h2>ICT Abreviace — rychlý přehled</h2>
+        <table>
+          <thead><tr><th>Zkratka</th><th>Anglicky</th><th>Česky</th></tr></thead>
+          <tbody>
+            <tr><td>OB</td><td>Order Block</td><td>Institucionální zóna vstupu</td></tr>
+            <tr><td>FVG</td><td>Fair Value Gap</td><td>Nerovnováha ceny</td></tr>
+            <tr><td>BOS</td><td>Break of Structure</td><td>Prolomení struktury (pokračování)</td></tr>
+            <tr><td>CHoCH</td><td>Change of Character</td><td>Změna charakteru trhu</td></tr>
+            <tr><td>MSS</td><td>Market Structure Shift</td><td>Posun tržní struktury</td></tr>
+            <tr><td>OTE</td><td>Optimal Trade Entry</td><td>Optimální vstupní bod (Fib 62–79%)</td></tr>
+            <tr><td>AMD</td><td>Accumulation, Manipulation, Distribution</td><td>Power of 3 — denní vzor</td></tr>
+            <tr><td>BSL</td><td>Buy-Side Liquidity</td><td>Likvidita nad highs (stop-lossy shortů)</td></tr>
+            <tr><td>SSL</td><td>Sell-Side Liquidity</td><td>Likvidita pod lows (stop-lossy longů)</td></tr>
+            <tr><td>EQ</td><td>Equilibrium</td><td>50% hladina, rovnováha</td></tr>
+            <tr><td>PDH/PDL</td><td>Previous Day High/Low</td><td>Včerejší high/low</td></tr>
+            <tr><td>PO3</td><td>Power of Three</td><td>AMD denní vzor</td></tr>
+            <tr><td>IRL</td><td>Internal Range Liquidity</td><td>Likvidita uvnitř rangi</td></tr>
+            <tr><td>ERL</td><td>External Range Liquidity</td><td>Likvidita mimo range (swing highs/lows)</td></tr>
+            <tr><td>IPDA</td><td>Interbank Price Delivery Algorithm</td><td>Mezibankovní cenový algoritmus</td></tr>
+            <tr><td>SMC</td><td>Smart Money Concepts</td><td>Koncepty chytrých peněz</td></tr>
+            <tr><td>SMT</td><td>Smart Money Trap / Divergence</td><td>Divergence korelovaných párů</td></tr>
+            <tr><td>HH/HL</td><td>Higher High / Higher Low</td><td>Vyšší maximum / vyšší minimum (bull)</td></tr>
+            <tr><td>LH/LL</td><td>Lower High / Lower Low</td><td>Nižší maximum / nižší minimum (bear)</td></tr>
+            <tr><td>IFVG</td><td>Inverted Fair Value Gap</td><td>Invertovaný FVG (z podpory na rezistenci)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- end main-content -->
+</div><!-- end app -->
+
+<script src="js/chart-engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
