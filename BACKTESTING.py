@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.96"
+VERSION = "1.5.97"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -8992,6 +8992,100 @@ def _make_tabs_draggable(notebook):
     notebook.bind('<ButtonRelease-1>', _release, add=True)
     notebook.bind('<B1-Motion>', _motion, add=True)
 
+def open_mobile_server_window():
+    """Spustí lokální HTTP server pro mobilní PWA aplikaci."""
+    import socket, threading, http.server, webbrowser
+
+    mobile_dir = os.path.join(_APP_DIR, 'mobile_app')
+    if not os.path.isdir(mobile_dir):
+        messagebox.showerror("Mobilní app", f"Složka 'mobile_app' nenalezena:\n{mobile_dir}")
+        return
+
+    # Zjisti lokální IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80)); ip = s.getsockname()[0]; s.close()
+    except: ip = '127.0.0.1'
+
+    PORT = 8765
+    url  = f'http://{ip}:{PORT}'
+
+    # ── Okno ──────────────────────────────────────────────────────────────────
+    win = tk.Toplevel(root)
+    win.title("📱 Mobilní app"); win.geometry("420x380")
+    win.configure(bg=DT_BG); win.resizable(False, False)
+    win.lift(); win.focus_set()
+
+    tk.Label(win, text="📱  Mobilní aplikace", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI',14,'bold')).pack(pady=(24,6))
+    tk.Label(win, text="Zapni server, připoj telefon na stejnou WiFi\na otevři níže uvedenou adresu v Chrome.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI',9), justify='center').pack(pady=(0,20))
+
+    url_lbl = tk.Label(win, text=url, bg='#1e293b', fg='#60a5fa',
+                       font=('Consolas',14,'bold'), pady=14, padx=20,
+                       relief='flat', cursor='hand2')
+    url_lbl.pack(padx=30, fill='x')
+    url_lbl.bind('<Button-1>', lambda e: webbrowser.open(url))
+
+    tk.Label(win, text="↑ Klikni pro otevření v prohlížeči na PC",
+             bg=DT_BG, fg='#475569', font=('Segoe UI',8)).pack(pady=(4,0))
+
+    # Stavový label
+    status_var = tk.StringVar(value="⏹  Server neběží")
+    tk.Label(win, textvariable=status_var, bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI',10)).pack(pady=16)
+
+    _server = {'obj': None, 'thread': None}
+
+    def start_server():
+        if _server['obj']: return
+        try:
+            os.chdir(mobile_dir)
+            handler = http.server.SimpleHTTPRequestHandler
+            handler.log_message = lambda *a: None   # tiché logy
+            srv = http.server.HTTPServer(('0.0.0.0', PORT), handler)
+            _server['obj'] = srv
+            _server['thread'] = threading.Thread(target=srv.serve_forever, daemon=True)
+            _server['thread'].start()
+            status_var.set(f"▶  Server běží  —  {url}")
+            btn_start.config(state='disabled')
+            btn_stop.config(state='normal')
+        except OSError as e:
+            messagebox.showerror("Server", f"Port {PORT} je obsazený.\n{e}")
+
+    def stop_server():
+        if _server['obj']:
+            _server['obj'].shutdown()
+            _server['obj'] = None
+        status_var.set("⏹  Server zastaven")
+        btn_start.config(state='normal')
+        btn_stop.config(state='disabled')
+
+    def on_close():
+        stop_server()
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", on_close)
+
+    btns = tk.Frame(win, bg=DT_BG)
+    btns.pack(pady=8)
+    btn_start = tk.Button(btns, text="▶  Spustit server", command=start_server,
+                          bg='#15803d', fg='white', font=('Segoe UI',10,'bold'),
+                          relief='flat', padx=20, pady=8, cursor='hand2')
+    btn_start.pack(side='left', padx=6)
+    btn_stop = tk.Button(btns, text="⏹  Zastavit", command=stop_server, state='disabled',
+                         bg='#b91c1c', fg='white', font=('Segoe UI',10,'bold'),
+                         relief='flat', padx=20, pady=8, cursor='hand2')
+    btn_stop.pack(side='left', padx=6)
+
+    tk.Label(win, text="ℹ  Na Android: otevři URL v Chrome → menu ⋮ → Přidat na plochu",
+             bg=DT_BG, fg='#475569', font=('Segoe UI',8), wraplength=360,
+             justify='center').pack(pady=(16,0))
+
+    # Automaticky spustit
+    start_server()
+
+
 def open_settings_window(initial_tab=0):
     """Centrální nastavení — motiv, aktualizace, páry, scoring, sloupce, složka projektu."""
     sw = tk.Toplevel(root)
@@ -10464,6 +10558,11 @@ def show_intro_screen():
     tk.Button(bottom_bar, text="📄  Faktury",
               command=_open_invoices_window,
               bg='#1d4ed8', fg='white', font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+
+    tk.Button(bottom_bar, text="📱  Mobilní app",
+              command=open_mobile_server_window,
+              bg='#0f766e', fg='white', font=('Segoe UI', 9, 'bold'),
               padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
 
     tk.Button(bottom_bar, text="📂  Importovat projekt ze složky",
