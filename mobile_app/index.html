@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>SMC Journal</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══ HEADER ═══ -->
+  <div class="app-header">
+    <div>
+      <div id="new-back" class="back-btn" style="display:none" onclick="navigate('home')">
+        ← Zpět
+      </div>
+      <div id="new-header-title" style="display:none;font-size:17px;font-weight:700;"></div>
+    </div>
+    <h1 id="header-title">📈 SMC Journal</h1>
+    <div id="home-date" style="font-size:11px;color:var(--sub);text-align:right"></div>
+  </div>
+
+  <!-- ═══ SCREEN: HOME ═══ -->
+  <div class="screen active" id="screen-home">
+
+    <div class="card">
+      <div class="card-title">Dnešní přehled</div>
+      <div class="stat-row" id="home-stats"></div>
+    </div>
+
+    <button class="fab" onclick="navigate('new')">
+      <span class="ficon">➕</span>
+      Nový obchod
+    </button>
+
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Poslední obchody</span>
+        <span onclick="navigate('list')" style="color:var(--accent);font-size:12px;cursor:pointer">Vše →</span>
+      </div>
+      <div id="recent-list" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button class="fab" style="background:var(--surface);color:var(--sub);flex:1;font-size:13px;padding:12px"
+              onclick="exportTrades()">
+        📤 Export JSON
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ═══ SCREEN: NEW TRADE ═══ -->
+  <div class="screen" id="screen-new">
+    <!-- Rendered dynamically by app.js -->
+  </div>
+
+  <!-- ═══ SCREEN: LIST ═══ -->
+  <div class="screen" id="screen-list">
+
+    <div class="filter-bar" id="list-filters"></div>
+
+    <div id="trade-list" style="display:flex;flex-direction:column;gap:10px"></div>
+
+  </div>
+
+  <!-- ═══ BOTTOM NAV ═══ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-screen="home" onclick="navigate('home')">
+      <span class="icon">🏠</span>
+      Domů
+    </button>
+    <button class="nav-btn" data-screen="new" onclick="navigate('new')">
+      <span class="icon">➕</span>
+      Nový
+    </button>
+    <button class="nav-btn" data-screen="list" onclick="navigate('list')">
+      <span class="icon">📋</span>
+      Historie
+    </button>
+  </nav>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Header switcher (skrývá/zobrazuje elementy dle screen) -->
+  <script>
+    const _origNavigate = window.navigate;
+    // Patch navigate to update header
+    const _navOrig = typeof navigate !== 'undefined' ? navigate : null;
+  </script>
+
+</div>
+
+<script src="app.js"></script>
+
+<script>
+  // Header patch — spustí se po načtení app.js
+  const _baseNav = navigate;
+  window.navigate = function(screen, opts) {
+    const titleEl  = document.getElementById('header-title');
+    const backEl   = document.getElementById('new-back');
+    const newTitle = document.getElementById('new-header-title');
+    const dateEl   = document.getElementById('home-date');
+
+    if (screen === 'home') {
+      titleEl.style.display  = '';
+      backEl.style.display   = 'none';
+      newTitle.style.display = 'none';
+      dateEl.style.display   = '';
+    } else if (screen === 'new') {
+      titleEl.style.display  = 'none';
+      backEl.style.display   = 'flex';
+      newTitle.style.display = '';
+      dateEl.style.display   = 'none';
+    } else {
+      titleEl.style.display  = '';
+      titleEl.textContent    = screen === 'list' ? '📋 Historie' : '📈 SMC Journal';
+      backEl.style.display   = 'none';
+      newTitle.style.display = 'none';
+      dateEl.style.display   = 'none';
+    }
+
+    _baseNav(screen, opts);
+
+    if (screen === 'home') titleEl.textContent = '📈 SMC Journal';
+  };
+</script>
+
+</body>
+</html>
