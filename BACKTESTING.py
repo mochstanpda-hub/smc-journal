@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.97"
+VERSION = "1.5.98"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.98 | YT Downloader — nová záložka 📥 pro stahování YouTube videí (yt-dlp); MP4/MP3, výběr kvality, titulky, podpora playlistů, náhled info videa, progress bar, log
 1.5.50 | OCR čas zavření — fallback skenuje spodních 20 % obrazu i celý obrázek i když byl otevírací čas nalezen; parse_all_dt přidán formát ISO + unicode apostrofy + formát 2
 1.5.49 | OCR — kritická oprava _parse_price: dec[:2] → dec[:5]; forex ceny (1.18225) se správně parsují na 5 desetinných míst místo zkrácení na 2 (1.18)
 1.5.48 | OCR — detekce žlutého labelu (aktuální tržní cena EURUSD 1.17926) jako samostatná třída 'yellow'; žlutý band se přeskakuje a nevstupuje do přiřazení Entry/SL/TP; opraveny 3-band a 2-band případy pro Buy i Sell
@@ -4307,6 +4308,360 @@ def setup_ict_tab(parent):
         tk.Label(card, text=desc, bg=CARD, fg='#94a3b8',
                  font=('Segoe UI',8)).pack(anchor='w', pady=(2,0))
         card.bind('<Double-Button-1>', lambda e: _open())
+
+
+# ==============================================================================
+# YT DOWNLOADER TAB
+# ==============================================================================
+
+def _yt_get_ffmpeg():
+    """Najde ffmpeg: imageio_ffmpeg → None (yt-dlp použije PATH)."""
+    try:
+        import imageio_ffmpeg, shutil
+        src = imageio_ffmpeg.get_ffmpeg_exe()
+        if os.path.exists(src):
+            if os.path.basename(src).lower() in ("ffmpeg.exe", "ffmpeg"):
+                return os.path.dirname(src)
+            target = os.path.join(_APP_DIR, "ffmpeg.exe")
+            if not os.path.exists(target):
+                shutil.copy2(src, target)
+            return _APP_DIR
+    except Exception:
+        pass
+    # zkus YTDownloader dist složku
+    candidate = r"C:\YTDownloader\dist\YTDownloader\ffmpeg.exe"
+    if os.path.exists(candidate):
+        return os.path.dirname(candidate)
+    return None
+
+
+def setup_yt_tab(parent):
+    """Záložka YT Downloader — yt-dlp frontend."""
+    import threading
+
+    BG    = DT_BG
+    CARD  = DT_PANEL
+    SURF  = DT_SURFACE
+    TEXT  = DT_TEXT
+    SUB   = DT_SUBTEXT
+    RED   = '#e94560'
+    CYAN  = '#53c1de'
+    GREEN = '#4caf50'
+    WARN  = '#ff9800'
+
+    outer = tk.Frame(parent, bg=BG)
+    outer.pack(fill='both', expand=True)
+
+    # ── Hlavička ─────────────────────────────────────────────────────────────
+    hdr = tk.Frame(outer, bg='#0f3460', pady=18)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="▶  YT Downloader", bg='#0f3460', fg=RED,
+             font=('Segoe UI', 20, 'bold')).pack(side='left', padx=24)
+    tk.Label(hdr, text="powered by yt-dlp", bg='#0f3460', fg='#555577',
+             font=('Segoe UI', 9)).pack(side='right', padx=20)
+
+    # ── Kontrola yt-dlp ──────────────────────────────────────────────────────
+    try:
+        import yt_dlp as _yt_check  # noqa: F401
+        _yt_available = True
+    except ImportError:
+        _yt_available = False
+
+    body = tk.Frame(outer, bg=BG, padx=28, pady=18)
+    body.pack(fill='both', expand=True)
+
+    if not _yt_available:
+        err = tk.Frame(body, bg=CARD, padx=24, pady=24)
+        err.pack(fill='x')
+        tk.Label(err, text="⚠  Knihovna yt-dlp není nainstalována",
+                 bg=CARD, fg='#f87171', font=('Segoe UI', 12, 'bold')).pack()
+        tk.Label(err,
+                 text="Spusť v příkazovém řádku:\n\npip install yt-dlp\n\nPak restartuj program.",
+                 bg=CARD, fg=SUB, font=('Segoe UI', 10),
+                 justify='center').pack(pady=(10, 0))
+        return
+
+    # ── URL ──────────────────────────────────────────────────────────────────
+    def _sec(par, label):
+        f = tk.Frame(par, bg=BG)
+        f.pack(fill='x', pady=(0, 3))
+        tk.Label(f, text=label, bg=BG, fg=CYAN,
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        tk.Frame(f, bg=SURF, height=1).pack(side='left', fill='x', expand=True, padx=(8, 0), pady=6)
+
+    def _btn(par, text, cmd, color=SURF):
+        return tk.Button(par, text=text, command=cmd,
+                         bg=color, fg=TEXT, relief='flat',
+                         font=('Segoe UI', 9), cursor='hand2',
+                         activebackground=RED, activeforeground='white',
+                         padx=10, pady=6)
+
+    _sec(body, "URL videa nebo playlistu")
+    url_frame = tk.Frame(body, bg=BG)
+    url_frame.pack(fill='x', pady=(4, 8))
+
+    url_var = tk.StringVar()
+    _fetch_job = [None]
+    _running   = [False]
+
+    url_entry = tk.Entry(url_frame, textvariable=url_var, bg=CARD, fg=TEXT,
+                         insertbackground=TEXT, relief='flat',
+                         font=('Segoe UI', 10), bd=0)
+    url_entry.pack(side='left', fill='x', expand=True, ipady=8, ipadx=8)
+    url_entry.bind('<FocusIn>',  lambda e: url_entry.config(highlightthickness=2, highlightbackground=CYAN))
+    url_entry.bind('<FocusOut>', lambda e: url_entry.config(highlightthickness=0))
+
+    def _clear_url():
+        url_var.set('')
+        _reset_info()
+
+    def _paste_url():
+        try:
+            url_var.set(parent.clipboard_get().strip())
+        except Exception:
+            pass
+
+    _btn(url_frame, '✕', _clear_url).pack(side='left', padx=(6, 0))
+    _btn(url_frame, '📋 Vlož', _paste_url).pack(side='left', padx=(4, 0))
+
+    # ── Info panel ───────────────────────────────────────────────────────────
+    info_frame = tk.Frame(body, bg=CARD, pady=8, padx=14)
+    info_frame.pack(fill='x', pady=(0, 14))
+    title_var  = tk.StringVar(value='— vložte URL videa —')
+    dur_var    = tk.StringVar(value='')
+    chan_var   = tk.StringVar(value='')
+    istat_var  = tk.StringVar(value='')
+    tk.Label(info_frame, textvariable=title_var, bg=CARD, fg=TEXT,
+             font=('Segoe UI', 10, 'bold'),
+             anchor='w', wraplength=680, justify='left').pack(fill='x')
+    mr = tk.Frame(info_frame, bg=CARD)
+    mr.pack(fill='x', pady=(3, 0))
+    tk.Label(mr, textvariable=chan_var,  bg=CARD, fg=CYAN, font=('Segoe UI', 9), anchor='w').pack(side='left')
+    tk.Label(mr, textvariable=dur_var,   bg=CARD, fg=SUB,  font=('Segoe UI', 9), anchor='w').pack(side='left', padx=(14, 0))
+    tk.Label(info_frame, textvariable=istat_var, bg=CARD, fg=SUB, font=('Segoe UI', 8), anchor='w').pack(fill='x')
+
+    def _reset_info():
+        title_var.set('— vložte URL videa —')
+        dur_var.set(''); chan_var.set(''); istat_var.set('')
+
+    def _fetch_info_thread(url):
+        try:
+            import yt_dlp
+            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'skip_download': True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+            title = info.get('title', 'Neznámý titulek')
+            secs  = info.get('duration')
+            dur   = ''
+            if secs:
+                secs = int(secs)
+                h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+                dur = f"⏱ {h}:{m:02d}:{s:02d}" if h else f"⏱ {m}:{s:02d}"
+            ch    = info.get('channel') or info.get('uploader') or ''
+            cnt   = info.get('playlist_count')
+            if cnt: dur += f'  •  {cnt} videí'
+            parent.after(0, title_var.set, title)
+            parent.after(0, dur_var.set,   dur)
+            parent.after(0, chan_var.set,   f'📺 {ch}' if ch else '')
+            parent.after(0, istat_var.set, '')
+        except Exception as ex:
+            parent.after(0, title_var.set,  'Nepodařilo se načíst informace.')
+            parent.after(0, istat_var.set, str(ex)[:120])
+
+    def _on_url_change(*_):
+        url = url_var.get().strip()
+        if _fetch_job[0]:
+            parent.after_cancel(_fetch_job[0])
+        if not url or not url.startswith('http'):
+            _reset_info(); return
+        _fetch_job[0] = parent.after(800, lambda: threading.Thread(
+            target=_fetch_info_thread, args=(url,), daemon=True).start())
+
+    url_var.trace_add('write', _on_url_change)
+
+    # ── Typ + Kvalita ─────────────────────────────────────────────────────────
+    row1 = tk.Frame(body, bg=BG)
+    row1.pack(fill='x', pady=(0, 12))
+
+    left = tk.Frame(row1, bg=BG)
+    left.pack(side='left', fill='x', expand=True, padx=(0, 14))
+    _sec(left, "Typ stahování")
+    mode_var = tk.StringVar(value='video')
+
+    def _toggle_quality(*_):
+        quality_combo.config(state='disabled' if mode_var.get() == 'audio' else 'readonly')
+
+    for label, val in [("🎬  Video (MP4)", 'video'), ("🎵  Pouze audio (MP3)", 'audio')]:
+        tk.Radiobutton(left, text=label, variable=mode_var, value=val,
+                       bg=BG, fg=TEXT, selectcolor=SURF,
+                       activebackground=BG, activeforeground=CYAN,
+                       font=('Segoe UI', 10), command=_toggle_quality).pack(anchor='w', pady=2)
+
+    right = tk.Frame(row1, bg=BG)
+    right.pack(side='left', fill='x', expand=True)
+    _sec(right, "Kvalita videa")
+    quality_var = tk.StringVar(value='Nejlepší')
+    quality_combo = ttk.Combobox(right, textvariable=quality_var,
+                                  values=['Nejlepší', '1080p', '720p', '480p', '360p'],
+                                  state='readonly', font=('Segoe UI', 10), width=16)
+    quality_combo.pack(anchor='w', pady=(4, 0))
+
+    # ── Titulky + Playlist ────────────────────────────────────────────────────
+    row2 = tk.Frame(body, bg=BG)
+    row2.pack(fill='x', pady=(0, 12))
+    subs_var     = tk.BooleanVar(value=False)
+    playlist_var = tk.BooleanVar(value=False)
+    for text, var in [("📝  Titulky (CS/EN)", subs_var), ("📋  Celý playlist", playlist_var)]:
+        tk.Checkbutton(row2, text=text, variable=var,
+                       bg=BG, fg=TEXT, selectcolor=SURF,
+                       activebackground=BG, activeforeground=CYAN,
+                       font=('Segoe UI', 10)).pack(side='left', padx=(0, 28))
+
+    # ── Složka ────────────────────────────────────────────────────────────────
+    _sec(body, "Výstupní složka")
+    dir_frame = tk.Frame(body, bg=BG)
+    dir_frame.pack(fill='x', pady=(4, 14))
+    dir_var = tk.StringVar(value=os.path.expanduser('~/Downloads'))
+    dir_entry = tk.Entry(dir_frame, textvariable=dir_var, bg=CARD, fg=TEXT,
+                         insertbackground=TEXT, relief='flat',
+                         font=('Segoe UI', 10), bd=0)
+    dir_entry.pack(side='left', fill='x', expand=True, ipady=8, ipadx=8)
+
+    def _browse():
+        d = filedialog.askdirectory(initialdir=dir_var.get())
+        if d: dir_var.set(d)
+
+    _btn(dir_frame, '📁 Procházet', _browse).pack(side='left', padx=(6, 0))
+
+    # ── Download tlačítko ─────────────────────────────────────────────────────
+    dl_btn = tk.Button(body, text='⬇   STÁHNOUT',
+                       font=('Segoe UI', 13, 'bold'),
+                       bg=RED, fg='white', relief='flat',
+                       activebackground='#c73652', activeforeground='white',
+                       cursor='hand2', pady=10)
+    dl_btn.pack(fill='x', pady=(0, 12))
+
+    # ── Progress bar ──────────────────────────────────────────────────────────
+    progress_var = tk.DoubleVar()
+    pbar = ttk.Progressbar(body, variable=progress_var, maximum=100)
+    pbar.pack(fill='x', pady=(0, 4))
+    status_var = tk.StringVar(value='Připraven ke stahování.')
+    tk.Label(body, textvariable=status_var, bg=BG, fg=SUB,
+             font=('Segoe UI', 9), anchor='w').pack(fill='x')
+
+    # ── Log ───────────────────────────────────────────────────────────────────
+    _sec(body, "Log")
+    log_frame = tk.Frame(body, bg=CARD)
+    log_frame.pack(fill='both', expand=True, pady=(4, 0))
+    log_txt = tk.Text(log_frame, bg=CARD, fg=SUB,
+                      insertbackground=TEXT, relief='flat',
+                      font=('Consolas', 9), state='disabled',
+                      wrap='word', height=7)
+    sb = tk.Scrollbar(log_frame, command=log_txt.yview, bg=SURF, troughcolor=CARD, relief='flat')
+    log_txt.configure(yscrollcommand=sb.set)
+    log_txt.pack(side='left', fill='both', expand=True, padx=8, pady=6)
+    sb.pack(side='right', fill='y')
+    log_txt.tag_configure('ok',  foreground=GREEN)
+    log_txt.tag_configure('err', foreground=RED)
+    log_txt.tag_configure('warn', foreground=WARN)
+    log_txt.tag_configure('dim', foreground=SUB)
+    log_txt.tag_configure('def', foreground=TEXT)
+
+    def _log(msg, tag='def'):
+        def _w():
+            log_txt.config(state='normal')
+            log_txt.insert('end', msg + '\n', tag)
+            log_txt.see('end')
+            log_txt.config(state='disabled')
+        parent.after(0, _w)
+
+    def _set_status(msg):
+        parent.after(0, status_var.set, msg)
+
+    # ── Download thread ───────────────────────────────────────────────────────
+    def _download_thread(url):
+        import yt_dlp
+
+        out_dir  = dir_var.get()
+        os.makedirs(out_dir, exist_ok=True)
+        mode     = mode_var.get()
+        quality  = quality_var.get()
+        subs     = subs_var.get()
+        playlist = playlist_var.get()
+        qmap = {'Nejlepší': None, '1080p': 1080, '720p': 720, '480p': 480, '360p': 360}
+        q = qmap.get(quality)
+
+        def _hook(d):
+            if d['status'] == 'downloading':
+                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                done  = d.get('downloaded_bytes', 0)
+                if total:
+                    pct = done / total * 100
+                    parent.after(0, progress_var.set, pct)
+                    _set_status(f"Stahuji… {pct:.1f}%  —  {d.get('_speed_str','').strip()}  ETA {d.get('_eta_str','').strip()}")
+                fn = d.get('filename', '')
+                if fn: _log(os.path.basename(fn), 'dim')
+            elif d['status'] == 'finished':
+                _log(f"✓ Zpracování: {os.path.basename(d.get('filename',''))}", 'ok')
+
+        ffmpeg_dir = _yt_get_ffmpeg()
+        opts = {
+            'outtmpl':        os.path.join(out_dir, '%(title)s.%(ext)s'),
+            'progress_hooks': [_hook],
+            'noplaylist':     not playlist,
+            'quiet':          True,
+            'no_warnings':    False,
+            'ignoreerrors':   False,
+            **({'ffmpeg_location': ffmpeg_dir} if ffmpeg_dir else {}),
+        }
+
+        if mode == 'audio':
+            opts['format'] = 'bestaudio/best'
+            opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+        else:
+            if q:
+                opts['format'] = (f'bestvideo[height<={q}][ext=mp4]+bestaudio[ext=m4a]'
+                                  f'/bestvideo[height<={q}]+bestaudio/best[height<={q}]')
+            else:
+                opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            opts['merge_output_format'] = 'mp4'
+
+        if subs:
+            opts['writesubtitles']    = True
+            opts['writeautomaticsub'] = True
+            opts['subtitleslangs']    = ['cs', 'en']
+
+        _log(f"Stahuji: {url}", 'def')
+        _set_status('Stahování probíhá…')
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ret = ydl.download([url])
+            if ret == 0:
+                parent.after(0, progress_var.set, 100)
+                _log('✓ Hotovo!', 'ok')
+                _set_status('Hotovo!')
+                parent.after(0, lambda: messagebox.showinfo('Hotovo', f'Video staženo do:\n{out_dir}'))
+            else:
+                _log('✗ Stažení selhalo (chyba yt-dlp).', 'err')
+                _set_status('Chyba při stahování.')
+        except Exception as ex:
+            _log(f'✗ Chyba: {ex}', 'err')
+            _set_status('Chyba při stahování.')
+        finally:
+            _running[0] = False
+            parent.after(0, dl_btn.config, {'state': 'normal', 'text': '⬇   STÁHNOUT'})
+
+    def _start_download():
+        if _running[0]: return
+        url = url_var.get().strip()
+        if not url:
+            messagebox.showwarning('Chybí URL', 'Zadej URL videa nebo playlistu.')
+            return
+        _running[0] = True
+        dl_btn.config(state='disabled', text='⏳  Stahuji…')
+        progress_var.set(0)
+        threading.Thread(target=_download_thread, args=(url,), daemon=True).start()
+
+    dl_btn.config(command=_start_download)
 
 
 def setup_rules_ui(parent):
@@ -10299,6 +10654,11 @@ def show_main_screen(p_name):
     tab_ict = ttk.Frame(nb)
     nb.add(tab_ict, text='  📚 ICT ACADEMY  ')
     setup_ict_tab(tab_ict)
+
+    # TAB YT DOWNLOADER
+    tab_yt = ttk.Frame(nb)
+    nb.add(tab_yt, text='  📥 YT DOWNLOADER  ')
+    setup_yt_tab(tab_yt)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
