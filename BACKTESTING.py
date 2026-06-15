@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.105"
+VERSION = "1.5.106"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -914,6 +914,11 @@ def _sync_post(token, trades, on_progress=None):
 
 def _sync_read_trades():
     import csv, hashlib
+
+    def _sf(val):
+        try:    return float(val) if val and str(val).strip() else None
+        except: return None
+
     trades = []
     for folder in [DIR_BACKTEST, DIR_REAL]:
         if not os.path.isdir(folder):
@@ -926,7 +931,6 @@ def _sync_read_trades():
             with open(csv_path, encoding='utf-8', newline='') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # stable deterministic ID so re-sync doesn't duplicate
                     uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
                     uid = hashlib.md5(uid_src.encode()).hexdigest()
                     datum = (row.get('cas_otevreni') or '')[:10] or None
@@ -941,10 +945,10 @@ def _sync_read_trades():
                         'datum':    datum,
                         'symbol':   row.get('symbol') or None,
                         'smer':     row.get('smer') or None,
-                        'vstup':    float(row['vstupni_hodnota']) if row.get('vstupni_hodnota') else None,
-                        'sl':       float(row['stoploss'])        if row.get('stoploss')        else None,
-                        'tp':       float(row['takeprofit'])      if row.get('takeprofit')      else None,
-                        'rrr':      float(row['rrr'])             if row.get('rrr')             else None,
+                        'vstup':    _sf(row.get('vstupni_hodnota')),
+                        'sl':       _sf(row.get('stoploss')),
+                        'tp':       _sf(row.get('takeprofit')),
+                        'rrr':      _sf(row.get('rrr')),
                         'vysledek': row.get('vysledek') or None,
                         'session':  row.get('session') or None,
                         'tags':     row.get('tags') or None,
