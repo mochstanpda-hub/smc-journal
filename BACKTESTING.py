@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.110"
+VERSION = "1.5.111"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4628,7 +4628,7 @@ def _yt_get_ffmpeg():
     return None
 
 
-def setup_ctrader_tab(parent):
+def setup_ctrader_tab(parent, main_nb):
     """Záložka cTrader — čekající obchody z FTMOGuard cBota."""
     import threading, urllib.request
 
@@ -4857,10 +4857,8 @@ def setup_ctrader_tab(parent):
         _prefill_form(trade)
 
     def _prefill_form(t):
-        global nb
         try:
-            # Přepnutí na záložku Zápis (index 0)
-            nb.select(0)
+            main_nb.select(0)
 
             def _set(widget, value):
                 if value is None: return
@@ -11275,7 +11273,7 @@ def show_main_screen(p_name):
     # TAB CTRADER
     tab_ct = ttk.Frame(nb)
     nb.add(tab_ct, text='  📡 cTRADER  ')
-    setup_ctrader_tab(tab_ct)
+    setup_ctrader_tab(tab_ct, nb)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
