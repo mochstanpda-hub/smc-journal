@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.109"
+VERSION = "1.5.110"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4645,11 +4645,15 @@ def setup_ctrader_tab(parent):
         ORANGE = '#f59e0b'
         BLUE   = '#3b82f6'
 
-        parent.configure(bg=BG)
     except Exception as _e:
         tk.Label(parent, text=f'❌ Chyba inicializace cTrader záložky:\n{_e}',
                  fg='red', font=('Segoe UI', 10)).pack(pady=40)
         return
+
+    # ttk.Frame nepodporuje bg — obalíme vším do tk.Frame
+    wrap = tk.Frame(parent, bg=BG)
+    wrap.pack(fill='both', expand=True)
+    parent = wrap
 
     # ── Header ────────────────────────────────────────────────────────────────
     hdr = tk.Frame(parent, bg=PANEL, pady=12)
