@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.101"
+VERSION = "1.5.102"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.102 | Verze zvýšena
 1.5.101 | Uživatelské účty — přihlašovací obrazovka po spuštění; každý profil má vlastní data (projekty, konzistence, XP, nastavení); volitelné heslo (PBKDF2-SHA256); navázání na existující data při registraci; badge s jménem v toolbaru; tlačítko Odhlásit se na intro obrazovce
 1.5.100 | Konzistence — oprava cyklování šedého stavu: modulo % 3 → % len(_states), neutrální políčko nyní správně funguje
 1.5.99 | Konzistence — třetí stav buňky ⚫ Neutrální (šedá, symbol —): kliknutím se cykluje prázdné → zelená → červená → šedá; šedé buňky se nezapočítávají do jmenovatele skóre (den, pravidlo, celkové %); ideální pro dny kdy aktivitu neplánuješ (středa = neběhám)
