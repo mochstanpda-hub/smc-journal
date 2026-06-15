@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.108"
+VERSION = "1.5.109"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4632,19 +4632,24 @@ def setup_ctrader_tab(parent):
     """Záložka cTrader — čekající obchody z FTMOGuard cBota."""
     import threading, urllib.request
 
-    CTRADER_API = WEB_API_URL   # https://tradeobd.fun/api
+    try:
+        CTRADER_API = WEB_API_URL
 
-    BG     = DT_BG
-    PANEL  = DT_PANEL
-    TEXT   = DT_TEXT
-    SUB    = DT_SUBTEXT
-    BORDER = DT_BORDER
-    GREEN  = '#22c55e'
-    RED    = '#ef4444'
-    ORANGE = '#f59e0b'
-    BLUE   = '#3b82f6'
+        BG     = DT_BG
+        PANEL  = DT_PANEL
+        TEXT   = DT_TEXT
+        SUB    = DT_SUBTEXT
+        SURF   = DT_SURFACE
+        GREEN  = '#22c55e'
+        RED    = '#ef4444'
+        ORANGE = '#f59e0b'
+        BLUE   = '#3b82f6'
 
-    parent.configure(bg=BG)
+        parent.configure(bg=BG)
+    except Exception as _e:
+        tk.Label(parent, text=f'❌ Chyba inicializace cTrader záložky:\n{_e}',
+                 fg='red', font=('Segoe UI', 10)).pack(pady=40)
+        return
 
     # ── Header ────────────────────────────────────────────────────────────────
     hdr = tk.Frame(parent, bg=PANEL, pady=12)
@@ -4668,16 +4673,14 @@ def setup_ctrader_tab(parent):
 
     tk.Label(login_frame, text='Uživatel', bg=PANEL, fg=SUB,
              font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', padx=(0, 6))
-    li_user = tk.Entry(login_frame, bg=DT_SURF if hasattr(tk, 'DT_SURF') else '#293548',
-                       fg=TEXT, insertbackground=TEXT, relief='flat',
-                       font=('Segoe UI', 10), width=14)
+    li_user = tk.Entry(login_frame, bg=SURF, fg=TEXT, insertbackground=TEXT,
+                       relief='flat', font=('Segoe UI', 10), width=14)
     li_user.grid(row=1, column=1, padx=(0, 12))
 
     tk.Label(login_frame, text='Heslo', bg=PANEL, fg=SUB,
              font=('Segoe UI', 9)).grid(row=1, column=2, sticky='w', padx=(0, 6))
-    li_pass = tk.Entry(login_frame, bg=DT_SURF if hasattr(tk, 'DT_SURF') else '#293548',
-                       fg=TEXT, insertbackground=TEXT, relief='flat',
-                       font=('Segoe UI', 10), width=14, show='•')
+    li_pass = tk.Entry(login_frame, bg=SURF, fg=TEXT, insertbackground=TEXT,
+                       relief='flat', font=('Segoe UI', 10), width=14, show='•')
     li_pass.grid(row=1, column=3, padx=(0, 12))
 
     li_btn = tk.Button(login_frame, text='Přihlásit', bg=BLUE, fg='white',
