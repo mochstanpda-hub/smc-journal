@@ -1016,12 +1016,13 @@ def open_sync_dialog():
 
     def _on_progress(done, total, ok, err):
         pct = done / total * 100
-        dlg.after(0, lambda: [
-            prog_var.set(pct),
-            count_var.set(f"{done} / {total}  ✓{ok}" + (f"  ✗{err}" if err else '')),
-            status_var.set(f"Nahrávám... {int(pct)} %"),
-            status_lbl.config(fg=DT_SUBTEXT),
-        ])
+        _d, _t, _ok, _err, _pct = done, total, ok, err, pct
+        def _upd():
+            prog_var.set(_pct)
+            count_var.set(f"{_d} / {_t}   ✓ {_ok}" + (f"   ✗ {_err}" if _err else ''))
+            status_var.set(f"Nahrávám...  {int(_pct)} %")
+            status_lbl.config(fg=DT_SUBTEXT)
+        dlg.after(0, _upd)
 
     def _do_sync():
         u = e_user.get().strip(); p = e_pass.get()
@@ -1035,31 +1036,41 @@ def open_sync_dialog():
             try:
                 token = _sync_login(u, p)
                 _sync_save_cfg({'username': u})
-                dlg.after(0, lambda: status_var.set("Čtu obchody z PC..."))
+                def _set_reading():
+                    status_var.set("Čtu obchody z PC...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _set_reading)
                 trades = _sync_read_trades()
                 if not trades:
-                    dlg.after(0, lambda: [
-                        status_var.set("Žádné obchody k nahrání."),
-                        status_lbl.config(fg=DT_SUBTEXT),
-                        sync_btn.config(state='normal', text="☁  Spustit sync"),
-                    ]); return
+                    def _no_trades():
+                        status_var.set("Žádné obchody k nahrání.")
+                        status_lbl.config(fg=DT_SUBTEXT)
+                        sync_btn.config(state='normal', text="☁  Spustit sync")
+                    dlg.after(0, _no_trades); return
+                _n = len(trades)
+                def _set_uploading():
+                    status_var.set(f"Připraveno {_n} obchodů, nahrávám...")
+                    count_var.set(f"0 / {_n}")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _set_uploading)
                 ok, err = _sync_post(token, trades, on_progress=_on_progress)
-                msg = f"✓ Hotovo!  Nahráno: {ok}"
-                if err: msg += f"   ❌ Chyb: {err}"
-                dlg.after(0, lambda: [
-                    status_var.set(msg),
-                    status_lbl.config(fg='#22c55e' if not err else '#f59e0b'),
-                    prog_var.set(100),
-                    sync_btn.config(state='normal', text="☁  Znovu"),
-                ])
+                _msg = f"✓ Hotovo!  Nahráno: {ok}" + (f"   ❌ Chyb: {err}" if err else '')
+                _fg  = '#22c55e' if not err else '#f59e0b'
+                def _done():
+                    status_var.set(_msg)
+                    status_lbl.config(fg=_fg)
+                    prog_var.set(100)
+                    count_var.set(f"{ok + err} / {ok + err}   ✓ {ok}" + (f"   ✗ {err}" if err else ''))
+                    sync_btn.config(state='normal', text="☁  Znovu")
+                dlg.after(0, _done)
             except Exception as ex:
-                dlg.after(0, lambda: [
-                    status_var.set(f"❌ Chyba: {ex}"),
-                    status_lbl.config(fg='#ef4444'),
-                    prog_var.set(0),
-                    count_var.set(''),
-                    sync_btn.config(state='normal', text="☁  Spustit sync"),
-                ])
+                _emsg = str(ex)
+                def _err_ui():
+                    status_var.set(f"❌ Chyba: {_emsg}")
+                    status_lbl.config(fg='#ef4444')
+                    prog_var.set(0); count_var.set('')
+                    sync_btn.config(state='normal', text="☁  Spustit sync")
+                dlg.after(0, _err_ui)
         threading.Thread(target=_thread, daemon=True).start()
 
     sync_btn.config(command=_do_sync)
