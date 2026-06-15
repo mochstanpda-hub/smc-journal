@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.99"
+VERSION = "1.5.100"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.100 | Konzistence — oprava cyklování šedého stavu: modulo % 3 → % len(_states), neutrální políčko nyní správně funguje
 1.5.99 | Konzistence — třetí stav buňky ⚫ Neutrální (šedá, symbol —): kliknutím se cykluje prázdné → zelená → červená → šedá; šedé buňky se nezapočítávají do jmenovatele skóre (den, pravidlo, celkové %); ideální pro dny kdy aktivitu neplánuješ (středa = neběhám)
 1.5.98 | YT Downloader — nová záložka 📥 pro stahování YouTube videí (yt-dlp); MP4/MP3, výběr kvality, titulky, podpora playlistů, náhled info videa, progress bar, log
 1.5.50 | OCR čas zavření — fallback skenuje spodních 20 % obrazu i celý obrázek i když byl otevírací čas nalezen; parse_all_dt přidán formát ISO + unicode apostrofy + formát 2
