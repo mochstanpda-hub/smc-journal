@@ -891,10 +891,11 @@ def _sync_login(username, password):
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())['access_token']
 
-def _sync_post(token, trades):
+def _sync_post(token, trades, on_progress=None):
     import urllib.request
     ok = err = 0
-    for t in trades:
+    total = len(trades)
+    for i, t in enumerate(trades, 1):
         body = json.dumps(t, ensure_ascii=False).encode('utf-8')
         req  = urllib.request.Request(
             WEB_API_URL + '/trades',
@@ -907,6 +908,8 @@ def _sync_post(token, trades):
                 ok += 1
         except Exception:
             err += 1
+        if on_progress:
+            on_progress(i, total, ok, err)
     return ok, err
 
 def _sync_read_trades():
@@ -955,15 +958,12 @@ def open_sync_dialog():
 
     dlg = tk.Toplevel(root)
     dlg.title("☁ Sync na tradeobd.fun")
-    dlg.geometry("420x340")
+    dlg.geometry("420x380")
     dlg.resizable(False, False)
     dlg.configure(bg=DT_BG)
     dlg.grab_set()
     dlg.transient(root)
 
-    def _lbl(parent, text, **kw):
-        return tk.Label(parent, text=text, bg=DT_BG, fg=DT_SUBTEXT,
-                        font=('Segoe UI', 9), **kw)
     def _entry(parent, show=None):
         e = tk.Entry(parent, bg=DT_PANEL, fg=DT_TEXT, insertbackground=DT_TEXT,
                      relief='flat', font=('Segoe UI', 11), show=show)
@@ -978,12 +978,28 @@ def open_sync_dialog():
     tk.Label(pad, text="Nahraje všechny obchody z PC na web.", bg=DT_BG, fg=DT_SUBTEXT,
              font=('Segoe UI', 9)).pack(anchor='w', pady=(0, 16))
 
-    _lbl(pad, "Web uživatelské jméno").pack(anchor='w')
+    tk.Label(pad, text="Web uživatelské jméno", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 9)).pack(anchor='w')
     e_user = _entry(pad); e_user.pack(fill='x', pady=(2, 10))
     e_user.insert(0, cfg.get('username', ''))
 
-    _lbl(pad, "Web heslo").pack(anchor='w')
+    tk.Label(pad, text="Web heslo", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 9)).pack(anchor='w')
     e_pass = _entry(pad, show='•'); e_pass.pack(fill='x', pady=(2, 16))
+
+    # ── Progress ──────────────────────────────────────────────────────────────
+    prog_frame = tk.Frame(pad, bg=DT_BG); prog_frame.pack(fill='x', pady=(0, 4))
+    prog_var = tk.DoubleVar(value=0)
+    pbar = ttk.Progressbar(prog_frame, variable=prog_var, maximum=100, length=364)
+    pbar.pack(fill='x')
+    _sty = ttk.Style(); _sty.configure('Sync.Horizontal.TProgressbar',
+                                        troughcolor=DT_PANEL, background='#3b82f6', thickness=8)
+    pbar.configure(style='Sync.Horizontal.TProgressbar')
+
+    # počítadlo X/Y nad barem
+    count_var = tk.StringVar(value='')
+    count_lbl = tk.Label(pad, textvariable=count_var, bg=DT_BG, fg=DT_SUBTEXT,
+                         font=('Segoe UI', 9)); count_lbl.pack(anchor='e', pady=(0, 8))
 
     status_var = tk.StringVar(value='')
     status_lbl = tk.Label(pad, textvariable=status_var, bg=DT_BG, fg='#22c55e',
@@ -998,12 +1014,22 @@ def open_sync_dialog():
               relief='flat', font=('Segoe UI', 10), padx=14, pady=8,
               command=dlg.destroy).pack(side='left')
 
+    def _on_progress(done, total, ok, err):
+        pct = done / total * 100
+        dlg.after(0, lambda: [
+            prog_var.set(pct),
+            count_var.set(f"{done} / {total}  ✓{ok}" + (f"  ✗{err}" if err else '')),
+            status_var.set(f"Nahrávám... {int(pct)} %"),
+            status_lbl.config(fg=DT_SUBTEXT),
+        ])
+
     def _do_sync():
         u = e_user.get().strip(); p = e_pass.get()
         if not u or not p:
             status_var.set("❌ Zadej jméno a heslo."); status_lbl.config(fg='#ef4444'); return
         sync_btn.config(state='disabled', text="⏳ Probíhá...")
-        status_var.set("Přihlašuji se..."); status_lbl.config(fg=DT_SUBTEXT)
+        prog_var.set(0); count_var.set(''); status_var.set("Přihlašuji se...")
+        status_lbl.config(fg=DT_SUBTEXT)
 
         def _thread():
             try:
@@ -1011,19 +1037,27 @@ def open_sync_dialog():
                 _sync_save_cfg({'username': u})
                 dlg.after(0, lambda: status_var.set("Čtu obchody z PC..."))
                 trades = _sync_read_trades()
-                dlg.after(0, lambda: status_var.set(f"Nahrávám {len(trades)} obchodů..."))
-                ok, err = _sync_post(token, trades)
-                msg = f"✓ Hotovo! Nahráno: {ok}"
-                if err: msg += f"  ❌ Chyb: {err}"
+                if not trades:
+                    dlg.after(0, lambda: [
+                        status_var.set("Žádné obchody k nahrání."),
+                        status_lbl.config(fg=DT_SUBTEXT),
+                        sync_btn.config(state='normal', text="☁  Spustit sync"),
+                    ]); return
+                ok, err = _sync_post(token, trades, on_progress=_on_progress)
+                msg = f"✓ Hotovo!  Nahráno: {ok}"
+                if err: msg += f"   ❌ Chyb: {err}"
                 dlg.after(0, lambda: [
                     status_var.set(msg),
                     status_lbl.config(fg='#22c55e' if not err else '#f59e0b'),
+                    prog_var.set(100),
                     sync_btn.config(state='normal', text="☁  Znovu"),
                 ])
             except Exception as ex:
                 dlg.after(0, lambda: [
                     status_var.set(f"❌ Chyba: {ex}"),
                     status_lbl.config(fg='#ef4444'),
+                    prog_var.set(0),
+                    count_var.set(''),
                     sync_btn.config(state='normal', text="☁  Spustit sync"),
                 ])
         threading.Thread(target=_thread, daemon=True).start()
