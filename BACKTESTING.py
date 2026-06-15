@@ -4116,7 +4116,7 @@ def setup_konzistence_tab(parent):
                         _states = ['', 'green', 'red', 'gray']
                         cur = data['weeks'][_wi]['data'].get(_rule, [''] * len(days))
                         while len(cur) < len(days): cur.append('')
-                        nxt = _states[(_states.index(cur[_ri]) + 1) % 3]
+                        nxt = _states[(_states.index(cur[_ri]) + 1) % len(_states)]
                         cur[_ri] = nxt
                         data['weeks'][_wi]['data'][_rule] = cur
                         save_konzistence(data)
