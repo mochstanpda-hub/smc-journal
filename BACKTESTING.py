@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.98"
+VERSION = "1.5.99"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.99 | Konzistence — třetí stav buňky ⚫ Neutrální (šedá, symbol —): kliknutím se cykluje prázdné → zelená → červená → šedá; šedé buňky se nezapočítávají do jmenovatele skóre (den, pravidlo, celkové %); ideální pro dny kdy aktivitu neplánuješ (středa = neběhám)
 1.5.98 | YT Downloader — nová záložka 📥 pro stahování YouTube videí (yt-dlp); MP4/MP3, výběr kvality, titulky, podpora playlistů, náhled info videa, progress bar, log
 1.5.50 | OCR čas zavření — fallback skenuje spodních 20 % obrazu i celý obrázek i když byl otevírací čas nalezen; parse_all_dt přidán formát ISO + unicode apostrofy + formát 2
 1.5.49 | OCR — kritická oprava _parse_price: dec[:2] → dec[:5]; forex ceny (1.18225) se správně parsují na 5 desetinných míst místo zkrácení na 2 (1.18)
@@ -3986,6 +3987,7 @@ def setup_konzistence_tab(parent):
     CLR_EMPTY     = '#2d3748'
     CLR_GREEN     = '#16a34a'
     CLR_RED       = '#dc2626'
+    CLR_GRAY      = '#475569'
     CLR_TXT_EMPTY = '#94a3b8'
     CLR_TXT_OK    = '#ffffff'
 
@@ -4000,7 +4002,7 @@ def setup_konzistence_tab(parent):
 
     tk.Label(left, text="📋  Pravidla", bg=DT_PANEL, fg=DT_TEXT,
              font=('Segoe UI',11,'bold')).pack(anchor='w', padx=14, pady=(14,6))
-    tk.Label(left, text="Klikni pro přepnutí týdenního záznamu:\n⬜ prázdné → 🟢 splněno → 🔴 nesplněno",
+    tk.Label(left, text="Klikni pro přepnutí týdenního záznamu:\n⬜ prázdné → 🟢 splněno → 🔴 nesplněno → ⚫ neutrální (nezapočítává se)",
              bg=DT_PANEL, fg=DT_SUBTEXT, font=('Segoe UI',8),
              wraplength=210, justify='left').pack(anchor='w', padx=14, pady=(0,10))
 
@@ -4103,15 +4105,15 @@ def setup_konzistence_tab(parent):
                     rule_days = day_data.setdefault(rule, [''] * len(days))
                     while len(rule_days) < len(days): rule_days.append('')
                     state = rule_days[ri]
-                    bg  = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_EMPTY
-                    txt_lbl = '✓' if state == 'green' else '✗' if state == 'red' else ''
+                    bg  = CLR_GREEN if state == 'green' else CLR_RED if state == 'red' else CLR_GRAY if state == 'gray' else CLR_EMPTY
+                    txt_lbl = '✓' if state == 'green' else '✗' if state == 'red' else '—' if state == 'gray' else ''
                     fg  = CLR_TXT_OK if state else CLR_TXT_EMPTY
                     btn = tk.Button(grid, text=txt_lbl, bg=bg, fg=fg,
                                     font=('Segoe UI',10,'bold'),
                                     width=4, height=1, relief='flat', cursor='hand2',
                                     activebackground=bg)
                     def _toggle(event=None, _wi=wi, _rule=rule, _ri=ri):
-                        _states = ['', 'green', 'red']
+                        _states = ['', 'green', 'red', 'gray']
                         cur = data['weeks'][_wi]['data'].get(_rule, [''] * len(days))
                         while len(cur) < len(days): cur.append('')
                         nxt = _states[(_states.index(cur[_ri]) + 1) % 3]
@@ -4126,8 +4128,11 @@ def setup_konzistence_tab(parent):
                     1 for r in rules
                     if ri < len(day_data.get(r, []))
                     and day_data.get(r, [''] * len(days))[ri] == 'green')
-                res_txt = f"{splneno}/{len(rules)}"
-                res_bg  = CLR_GREEN if splneno == len(rules) else CLR_RED if splneno == 0 else '#92400e'
+                den = sum(
+                    1 for r in rules
+                    if day_data.get(r, [''] * len(days))[ri] != 'gray')
+                res_txt = f"{splneno}/{den}" if den else "—"
+                res_bg  = CLR_GREEN if den and splneno == den else CLR_RED if splneno == 0 and den else '#92400e'
                 tk.Label(grid, text=res_txt, bg=res_bg, fg='white',
                          font=('Segoe UI',9,'bold'), anchor='center').grid(
                     row=ri+1, column=len(rules)+1, padx=1, pady=1, sticky='nsew')
@@ -4136,19 +4141,20 @@ def setup_konzistence_tab(parent):
             tk.Label(grid, text="Celkem:", bg='#1e293b', fg='#94a3b8',
                      font=('Segoe UI',8), width=8).grid(
                 row=len(days)+1, column=0, padx=1, pady=(4,1), sticky='nsew')
-            total_green = 0
+            total_green   = 0
+            total_counted = 0
             for ci, rule in enumerate(rules):
                 rd    = day_data.get(rule, [''] * len(days))
                 cnt   = sum(1 for s in rd if s == 'green')
-                total = len(days)
-                total_green += cnt
+                total = sum(1 for s in rd if s != 'gray')
+                total_green   += cnt
+                total_counted += total
                 pct = int(cnt / total * 100) if total else 0
                 sbg = CLR_GREEN if pct >= 80 else CLR_RED if pct < 50 else '#92400e'
                 tk.Label(grid, text=f"{cnt}/{total}", bg=sbg, fg='white',
                          font=('Segoe UI',9,'bold')).grid(
                     row=len(days)+1, column=ci+1, padx=1, pady=(4,1), sticky='nsew')
-            all_cells = len(rules) * len(days)
-            pct_total = int(total_green / all_cells * 100) if all_cells else 0
+            pct_total = int(total_green / total_counted * 100) if total_counted else 0
             tk.Label(grid, text=f"{pct_total}%", bg='#1e3a5f', fg='#60a5fa',
                      font=('Segoe UI',10,'bold')).grid(
                 row=len(days)+1, column=len(rules)+1, padx=1, pady=(4,1), sticky='nsew')
