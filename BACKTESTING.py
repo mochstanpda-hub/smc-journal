@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.107"
+VERSION = "1.5.108"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4660,6 +4660,33 @@ def setup_ctrader_tab(parent):
                           font=('Segoe UI', 9))
     status_lbl.pack(anchor='w', padx=20, pady=(8, 0))
 
+    # ── Mini login panel (zobrazen když chybí token) ───────────────────────────
+    login_frame = tk.Frame(parent, bg=PANEL, padx=20, pady=16)
+
+    tk.Label(login_frame, text='Přihlas se k tradeobd.fun:', bg=PANEL, fg=SUB,
+             font=('Segoe UI', 9)).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
+
+    tk.Label(login_frame, text='Uživatel', bg=PANEL, fg=SUB,
+             font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', padx=(0, 6))
+    li_user = tk.Entry(login_frame, bg=DT_SURF if hasattr(tk, 'DT_SURF') else '#293548',
+                       fg=TEXT, insertbackground=TEXT, relief='flat',
+                       font=('Segoe UI', 10), width=14)
+    li_user.grid(row=1, column=1, padx=(0, 12))
+
+    tk.Label(login_frame, text='Heslo', bg=PANEL, fg=SUB,
+             font=('Segoe UI', 9)).grid(row=1, column=2, sticky='w', padx=(0, 6))
+    li_pass = tk.Entry(login_frame, bg=DT_SURF if hasattr(tk, 'DT_SURF') else '#293548',
+                       fg=TEXT, insertbackground=TEXT, relief='flat',
+                       font=('Segoe UI', 10), width=14, show='•')
+    li_pass.grid(row=1, column=3, padx=(0, 12))
+
+    li_btn = tk.Button(login_frame, text='Přihlásit', bg=BLUE, fg='white',
+                       relief='flat', font=('Segoe UI', 9, 'bold'), padx=10, pady=4)
+    li_btn.grid(row=1, column=4)
+
+    cfg_pre = _sync_load_cfg()
+    li_user.insert(0, cfg_pre.get('username', ''))
+
     # ── Treeview ──────────────────────────────────────────────────────────────
     cols = ('symbol', 'smer', 'datum', 'vysledek', 'rrr', 'zisk', 'session', 'delka')
     hdrs = ('Symbol', 'Směr', 'Datum', 'Výsledek', 'RRR', 'Zisk', 'Session', 'Délka')
@@ -4702,9 +4729,37 @@ def setup_ctrader_tab(parent):
 
     _pending = []   # cache stažených obchodů
 
-    def _get_token():
-        cfg = _sync_load_cfg()
-        return cfg.get('token', '')
+    def _show_login(show):
+        if show:
+            login_frame.pack(fill='x', padx=16, pady=(4, 8))
+        else:
+            login_frame.pack_forget()
+
+    def _do_login():
+        u = li_user.get().strip()
+        p = li_pass.get()
+        if not u or not p:
+            status_var.set('❌ Zadej jméno a heslo.'); status_lbl.config(fg=RED); return
+        li_btn.config(state='disabled', text='...')
+        def _t():
+            try:
+                token = _sync_login(u, p)
+                _sync_save_cfg({'username': u, 'token': token})
+                parent.after(0, lambda: [
+                    li_btn.config(state='normal', text='Přihlásit'),
+                    _show_login(False),
+                    _fetch(),
+                ])
+            except Exception as ex:
+                parent.after(0, lambda: [
+                    status_var.set(f'❌ Chyba přihlášení: {ex}'),
+                    status_lbl.config(fg=RED),
+                    li_btn.config(state='normal', text='Přihlásit'),
+                ])
+        threading.Thread(target=_t, daemon=True).start()
+
+    li_btn.config(command=_do_login)
+    li_pass.bind('<Return>', lambda e: _do_login())
 
     def _fetch():
         status_var.set('Stahuji obchody...')
@@ -4716,8 +4771,12 @@ def setup_ctrader_tab(parent):
                 cfg = _sync_load_cfg()
                 token = cfg.get('token', '')
                 if not token:
-                    parent.after(0, lambda: status_var.set('❌ Nejsi přihlášen — spusť Sync a zadej heslo.'))
-                    parent.after(0, lambda: refresh_btn.config(state='normal'))
+                    parent.after(0, lambda: [
+                        status_var.set('Přihlas se pro zobrazení obchodů.'),
+                        status_lbl.config(fg=SUB),
+                        _show_login(True),
+                        refresh_btn.config(state='normal'),
+                    ])
                     return
                 req = urllib.request.Request(
                     CTRADER_API + '/ctrader/pending',
@@ -4727,7 +4786,21 @@ def setup_ctrader_tab(parent):
                     data = json.loads(r.read())
                 _pending.clear()
                 _pending.extend(data)
-                parent.after(0, lambda: _render(data))
+                parent.after(0, lambda: [_show_login(False), _render(data)])
+            except urllib.error.HTTPError as ex:
+                if ex.code == 401:
+                    parent.after(0, lambda: [
+                        status_var.set('Token vypršel — přihlas se znovu.'),
+                        status_lbl.config(fg=ORANGE),
+                        _show_login(True),
+                        refresh_btn.config(state='normal'),
+                    ])
+                else:
+                    parent.after(0, lambda: [
+                        status_var.set(f'❌ HTTP chyba {ex.code}'),
+                        status_lbl.config(fg=RED),
+                        refresh_btn.config(state='normal'),
+                    ])
             except Exception as ex:
                 parent.after(0, lambda: [
                     status_var.set(f'❌ Chyba: {ex}'),
