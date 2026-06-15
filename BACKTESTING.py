@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.111"
+VERSION = "1.5.112"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -891,6 +891,42 @@ def _sync_login(username, password):
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())['access_token']
 
+def _sync_api_post(token, path, body):
+    import urllib.request
+    data = json.dumps(body, ensure_ascii=False).encode('utf-8')
+    req  = urllib.request.Request(
+        WEB_API_URL + path, data=data,
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+        method='POST')
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+def _sync_konzistence(token):
+    try:
+        if not os.path.exists(KONZISTENCE_FILE):
+            return
+        with open(KONZISTENCE_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        _sync_api_post(token, '/konzistence/sync', {
+            'rules': data.get('rules', []),
+            'weeks': data.get('weeks', []),
+        })
+    except Exception:
+        pass
+
+def _sync_xp(token):
+    try:
+        if not os.path.exists(XP_FILE):
+            return
+        with open(XP_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        _sync_api_post(token, '/xp/sync', {
+            'total_xp': data.get('total_xp', 0),
+            'history':  data.get('history', []),
+        })
+    except Exception:
+        pass
+
 def _sync_post(token, trades, on_progress=None):
     import urllib.request
     ok = err = 0
@@ -1058,13 +1094,32 @@ def open_sync_dialog():
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _set_uploading)
                 ok, err = _sync_post(token, trades, on_progress=_on_progress)
-                _msg = f"✓ Hotovo!  Nahráno: {ok}" + (f"   ❌ Chyb: {err}" if err else '')
+
+                # ── Konzistence ───────────────────────────────────────────────
+                def _ui_konz():
+                    status_var.set("Nahrávám konzistenci...")
+                    count_var.set('')
+                    prog_var.set(0)
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_konz)
+                _sync_konzistence(token)
+                dlg.after(0, lambda: prog_var.set(50))
+
+                # ── XP ────────────────────────────────────────────────────────
+                def _ui_xp():
+                    status_var.set("Nahrávám XP...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_xp)
+                _sync_xp(token)
+                dlg.after(0, lambda: prog_var.set(100))
+
+                _msg = f"✓ Hotovo!  Obchody: {ok}  Konzistence: ✓  XP: ✓" + (f"   ❌ Chyb: {err}" if err else '')
                 _fg  = '#22c55e' if not err else '#f59e0b'
                 def _done():
                     status_var.set(_msg)
                     status_lbl.config(fg=_fg)
                     prog_var.set(100)
-                    count_var.set(f"{ok + err} / {ok + err}   ✓ {ok}" + (f"   ✗ {err}" if err else ''))
+                    count_var.set('')
                     sync_btn.config(state='normal', text="☁  Znovu")
                 dlg.after(0, _done)
             except Exception as ex:
