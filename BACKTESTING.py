@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.106"
+VERSION = "1.5.107"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1039,7 +1039,7 @@ def open_sync_dialog():
         def _thread():
             try:
                 token = _sync_login(u, p)
-                _sync_save_cfg({'username': u})
+                _sync_save_cfg({'username': u, 'token': token})
                 def _set_reading():
                     status_var.set("Čtu obchody z PC...")
                     status_lbl.config(fg=DT_SUBTEXT)
@@ -4626,6 +4626,238 @@ def _yt_get_ffmpeg():
     if os.path.exists(candidate):
         return os.path.dirname(candidate)
     return None
+
+
+def setup_ctrader_tab(parent):
+    """Záložka cTrader — čekající obchody z FTMOGuard cBota."""
+    import threading, urllib.request
+
+    CTRADER_API = WEB_API_URL   # https://tradeobd.fun/api
+
+    BG     = DT_BG
+    PANEL  = DT_PANEL
+    TEXT   = DT_TEXT
+    SUB    = DT_SUBTEXT
+    BORDER = DT_BORDER
+    GREEN  = '#22c55e'
+    RED    = '#ef4444'
+    ORANGE = '#f59e0b'
+    BLUE   = '#3b82f6'
+
+    parent.configure(bg=BG)
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    hdr = tk.Frame(parent, bg=PANEL, pady=12)
+    hdr.pack(fill='x', padx=0)
+    tk.Label(hdr, text='📡  cTrader — čekající obchody', bg=PANEL, fg=TEXT,
+             font=('Segoe UI', 14, 'bold')).pack(side='left', padx=20)
+    refresh_btn = tk.Button(hdr, text='🔄  Obnovit', bg=DT_BTN, fg=SUB,
+                            relief='flat', font=('Segoe UI', 9), padx=10, pady=4)
+    refresh_btn.pack(side='right', padx=16)
+
+    status_var = tk.StringVar(value='')
+    status_lbl = tk.Label(parent, textvariable=status_var, bg=BG, fg=SUB,
+                          font=('Segoe UI', 9))
+    status_lbl.pack(anchor='w', padx=20, pady=(8, 0))
+
+    # ── Treeview ──────────────────────────────────────────────────────────────
+    cols = ('symbol', 'smer', 'datum', 'vysledek', 'rrr', 'zisk', 'session', 'delka')
+    hdrs = ('Symbol', 'Směr', 'Datum', 'Výsledek', 'RRR', 'Zisk', 'Session', 'Délka')
+
+    tree_frame = tk.Frame(parent, bg=BG)
+    tree_frame.pack(fill='both', expand=True, padx=16, pady=12)
+
+    vsb = ttk.Scrollbar(tree_frame, orient='vertical')
+    tree = ttk.Treeview(tree_frame, columns=cols, show='headings',
+                        height=12, yscrollcommand=vsb.set, selectmode='browse')
+    vsb.configure(command=tree.yview)
+    vsb.pack(side='right', fill='y')
+    tree.pack(side='left', fill='both', expand=True)
+
+    col_w = {'symbol': 90, 'smer': 60, 'datum': 120, 'vysledek': 80,
+              'rrr': 60, 'zisk': 80, 'session': 70, 'delka': 80}
+    for c, h in zip(cols, hdrs):
+        tree.heading(c, text=h)
+        tree.column(c, width=col_w.get(c, 80), anchor='center')
+
+    tree.tag_configure('win',  background='#14532d', foreground=GREEN)
+    tree.tag_configure('loss', background='#450a0a', foreground=RED)
+    tree.tag_configure('be',   background='#431407', foreground=ORANGE)
+
+    # ── Akce tlačítka ─────────────────────────────────────────────────────────
+    btn_frame = tk.Frame(parent, bg=BG)
+    btn_frame.pack(fill='x', padx=16, pady=(0, 12))
+
+    import_btn = tk.Button(btn_frame, text='📝  Předvyplnit formulář Zápis',
+                           bg=BLUE, fg='white', relief='flat',
+                           font=('Segoe UI', 10, 'bold'), padx=14, pady=8,
+                           state='disabled')
+    import_btn.pack(side='left', padx=(0, 10))
+
+    done_btn = tk.Button(btn_frame, text='✓  Označit jako zpracovaný',
+                         bg=DT_BTN, fg=SUB, relief='flat',
+                         font=('Segoe UI', 9), padx=10, pady=8,
+                         state='disabled')
+    done_btn.pack(side='left')
+
+    _pending = []   # cache stažených obchodů
+
+    def _get_token():
+        cfg = _sync_load_cfg()
+        return cfg.get('token', '')
+
+    def _fetch():
+        status_var.set('Stahuji obchody...')
+        status_lbl.config(fg=SUB)
+        refresh_btn.config(state='disabled')
+
+        def _thread():
+            try:
+                cfg = _sync_load_cfg()
+                token = cfg.get('token', '')
+                if not token:
+                    parent.after(0, lambda: status_var.set('❌ Nejsi přihlášen — spusť Sync a zadej heslo.'))
+                    parent.after(0, lambda: refresh_btn.config(state='normal'))
+                    return
+                req = urllib.request.Request(
+                    CTRADER_API + '/ctrader/pending',
+                    headers={'Authorization': 'Bearer ' + token}
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = json.loads(r.read())
+                _pending.clear()
+                _pending.extend(data)
+                parent.after(0, lambda: _render(data))
+            except Exception as ex:
+                parent.after(0, lambda: [
+                    status_var.set(f'❌ Chyba: {ex}'),
+                    status_lbl.config(fg=RED),
+                    refresh_btn.config(state='normal'),
+                ])
+        threading.Thread(target=_thread, daemon=True).start()
+
+    def _render(data):
+        tree.delete(*tree.get_children())
+        for t in data:
+            vysl   = t.get('vysledek') or '—'
+            tag    = 'win' if vysl == 'Win' else 'loss' if vysl == 'Loss' else 'be'
+            zisk   = t.get('zisk_mena')
+            zisk_s = f"{'+' if zisk and zisk>0 else ''}{zisk:.2f}" if zisk is not None else '—'
+            datum  = (t.get('cas_zavreni') or t.get('cas_otevreni') or '')[:16]
+            tree.insert('', 'end', iid=t['id'], tags=(tag,), values=(
+                t.get('symbol') or '—',
+                t.get('smer') or '—',
+                datum,
+                vysl,
+                t.get('rrr') or '—',
+                zisk_s,
+                t.get('session') or '—',
+                t.get('delka_obchodu') or '—',
+            ))
+        cnt = len(data)
+        status_var.set(f'✓ {cnt} čekající{"ch" if cnt != 1 else ""} obchod{"ů" if cnt != 1 else ""}')
+        status_lbl.config(fg=GREEN if cnt else SUB)
+        refresh_btn.config(state='normal')
+
+    def _on_select(event):
+        sel = tree.selection()
+        state = 'normal' if sel else 'disabled'
+        import_btn.config(state=state)
+        done_btn.config(state=state)
+
+    tree.bind('<<TreeviewSelect>>', _on_select)
+    tree.bind('<Double-1>', lambda e: _import_selected())
+
+    def _import_selected():
+        sel = tree.selection()
+        if not sel: return
+        tid = sel[0]
+        trade = next((t for t in _pending if t['id'] == tid), None)
+        if not trade: return
+        _prefill_form(trade)
+
+    def _prefill_form(t):
+        global nb
+        try:
+            # Přepnutí na záložku Zápis (index 0)
+            nb.select(0)
+
+            def _set(widget, value):
+                if value is None: return
+                try:
+                    widget.delete(0, tk.END)
+                    widget.insert(0, str(value))
+                except Exception:
+                    try:
+                        widget.set(str(value))
+                    except Exception:
+                        pass
+
+            datum_str = (t.get('cas_otevreni') or '')[:10]
+            _set(cas_otevreni_entry,     t.get('cas_otevreni', '')[:16])
+            _set(cas_zavreni_entry,      t.get('cas_zavreni', '')[:16])
+            _set(vstupni_hodnota_entry,  t.get('vstupni_hodnota'))
+            _set(stoploss_entry,         t.get('stoploss'))
+            _set(takeprofit_entry,       t.get('takeprofit'))
+            _set(rrr_entry,              t.get('rrr'))
+            _set(zisk_mena_entry,        t.get('zisk_mena'))
+            _set(delka_obchodu_entry,    t.get('delka_obchodu'))
+            _set(tags_entry,             t.get('tags') or 'cTrader')
+            _set(poznamka_entry,         t.get('poznamka') or '')
+
+            try: symbol_combo.set(t.get('symbol') or '')
+            except Exception: pass
+            try:
+                smer_val = t.get('smer') or ''
+                smer_var.set('Buy' if 'buy' in smer_val.lower() else 'Sell' if 'sell' in smer_val.lower() else smer_val)
+            except Exception: pass
+            try: vysledek_combo.set(t.get('vysledek') or '')
+            except Exception: pass
+            try: session_combo.set(t.get('session') or '')
+            except Exception: pass
+            try:
+                wd = t.get('den_tydne') or ''
+                den_tydne_entry.delete(0, tk.END)
+                den_tydne_entry.insert(0, wd)
+            except Exception: pass
+
+            update_calculated_fields()
+            calculate_auto_score()
+
+            status_var.set(f"✓ Předvyplněno: {t.get('symbol')} {t.get('vysledek')} — doplň Důvod a ulož.")
+            status_lbl.config(fg=BLUE)
+        except Exception as ex:
+            status_var.set(f'❌ Chyba předvyplnění: {ex}')
+            status_lbl.config(fg=RED)
+
+    def _mark_done():
+        sel = tree.selection()
+        if not sel: return
+        tid = sel[0]
+        cfg = _sync_load_cfg()
+        token = cfg.get('token', '')
+        if not token:
+            status_var.set('❌ Nejsi přihlášen.'); return
+
+        def _thread():
+            try:
+                req = urllib.request.Request(
+                    CTRADER_API + '/ctrader/trade/' + tid,
+                    headers={'Authorization': 'Bearer ' + token},
+                    method='DELETE'
+                )
+                with urllib.request.urlopen(req, timeout=10): pass
+                parent.after(0, _fetch)
+            except Exception as ex:
+                parent.after(0, lambda: status_var.set(f'❌ Chyba: {ex}'))
+        threading.Thread(target=_thread, daemon=True).start()
+
+    import_btn.config(command=_import_selected)
+    done_btn.config(command=_mark_done)
+    refresh_btn.config(command=_fetch)
+
+    # Auto-fetch při otevření záložky
+    parent.after(500, _fetch)
 
 
 def setup_yt_tab(parent):
@@ -10959,6 +11191,11 @@ def show_main_screen(p_name):
     tab_yt = ttk.Frame(nb)
     nb.add(tab_yt, text='  📥 YT DOWNLOADER  ')
     setup_yt_tab(tab_yt)
+
+    # TAB CTRADER
+    tab_ct = ttk.Frame(nb)
+    nb.add(tab_ct, text='  📡 cTRADER  ')
+    setup_ctrader_tab(tab_ct)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
