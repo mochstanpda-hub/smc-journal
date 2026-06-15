@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.100"
+VERSION = "1.5.101"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.101 | Uživatelské účty — přihlašovací obrazovka po spuštění; každý profil má vlastní data (projekty, konzistence, XP, nastavení); volitelné heslo (PBKDF2-SHA256); navázání na existující data při registraci; badge s jménem v toolbaru; tlačítko Odhlásit se na intro obrazovce
 1.5.100 | Konzistence — oprava cyklování šedého stavu: modulo % 3 → % len(_states), neutrální políčko nyní správně funguje
 1.5.99 | Konzistence — třetí stav buňky ⚫ Neutrální (šedá, symbol —): kliknutím se cykluje prázdné → zelená → červená → šedá; šedé buňky se nezapočítávají do jmenovatele skóre (den, pravidlo, celkové %); ideální pro dny kdy aktivitu neplánuješ (středa = neběhám)
 1.5.98 | YT Downloader — nová záložka 📥 pro stahování YouTube videí (yt-dlp); MP4/MP3, výběr kvality, titulky, podpora playlistů, náhled info videa, progress bar, log
@@ -805,12 +806,84 @@ FIREBASE_CONFIG_FILE = os.path.join(_APP_DIR, 'firebase_config.json')
 # Soubor s vlastními cestami projektů (globální, mimo projekt)
 PROJECT_PATHS_FILE = os.path.join(_APP_DIR, 'project_paths.json')
 
+# ── USER SYSTEM ───────────────────────────────────────────────────────────────
+USERS_FILE   = os.path.join(_APP_DIR, 'users.json')
+current_user = None   # {'username':str, 'hash':str, 'salt':str, 'home':str}
+
 # ── DEBUG LOG ────────────────────────────────────────────────────────────────
 # Centrální debug soubor — vždy v adresáři programu (C:\SMC\debug_log.txt)
 # Max velikost: 2 MB → pak se automaticky otočí (přejmenuje na debug_log.bak)
 DEBUG_LOG_FILE    = os.path.join(_APP_DIR, 'debug_log.txt')
 DEBUG_LOG_MAX_MB  = 2
 _DEBUG_ENABLED    = True   # nastavit na False pro vypnutí bez nutnosti restartu
+
+# ==============================================================================
+# USER SYSTEM — přihlašování, per-user cesty, hesla
+# ==============================================================================
+import hashlib as _hashlib
+import base64  as _base64
+
+def _apply_user_paths(home):
+    """Přesměruje všechny globální datové cesty do domovského adresáře uživatele."""
+    global BASE_DIR, DIR_BACKTEST, DIR_REAL, DIR_JOURNAL, DIR_BACKUPS
+    global KONZISTENCE_FILE, XP_FILE, XP_CONFIG_FILE, FIREBASE_CONFIG_FILE
+    global SETUPS_FILE, INVOICES_DIR, INVOICE_DETAILS_FILE, INVOICE_RECIPIENTS_FILE
+    global GLOBAL_SETTINGS_FILE, PROJECT_PATHS_FILE, APP_TITLE_FILE
+    global _SETTINGS_DIR, THEME_FILE, LAST_VERSION_FILE
+
+    BASE_DIR                = os.path.join(home, 'projects')
+    DIR_BACKTEST            = os.path.join(BASE_DIR, 'BACKTEST')
+    DIR_REAL                = os.path.join(BASE_DIR, 'REAL')
+    DIR_JOURNAL             = os.path.join(BASE_DIR, 'JOURNAL')
+    DIR_BACKUPS             = os.path.join(home, 'backups')
+    KONZISTENCE_FILE        = os.path.join(home, 'konzistence.json')
+    XP_FILE                 = os.path.join(home, 'xp_data.json')
+    XP_CONFIG_FILE          = os.path.join(home, 'xp_config.json')
+    FIREBASE_CONFIG_FILE    = os.path.join(home, 'firebase_config.json')
+    SETUPS_FILE             = os.path.join(home, 'setups_config.json')
+    INVOICES_DIR            = os.path.join(home, 'invoices')
+    INVOICE_DETAILS_FILE    = os.path.join(home, 'invoice_details.json')
+    INVOICE_RECIPIENTS_FILE = os.path.join(home, 'invoice_recipients.json')
+    GLOBAL_SETTINGS_FILE    = os.path.join(home, 'global_settings.json')
+    PROJECT_PATHS_FILE      = os.path.join(home, 'project_paths.json')
+    APP_TITLE_FILE          = os.path.join(home, 'projects', 'app_title.txt')
+    _SETTINGS_DIR           = os.path.join(home, 'projects')
+    THEME_FILE              = os.path.join(home, 'projects', 'theme.txt')
+    LAST_VERSION_FILE       = os.path.join(home, 'projects', 'last_version.txt')
+
+    for d in [BASE_DIR, DIR_BACKTEST, DIR_REAL, DIR_JOURNAL,
+              DIR_BACKUPS, INVOICES_DIR]:
+        try: os.makedirs(d, exist_ok=True)
+        except: pass
+
+
+def _hash_pw(password, salt=None):
+    if salt is None:
+        salt = _base64.b64encode(os.urandom(16)).decode()
+    h = _hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode(), 100_000)
+    return _base64.b64encode(h).decode(), salt
+
+
+def _verify_pw(password, stored_hash, salt):
+    return _hash_pw(password, salt)[0] == stored_hash
+
+
+def load_users():
+    try:
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f).get('users', [])
+    except: pass
+    return []
+
+
+def save_users(users):
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'users': users}, f, ensure_ascii=False, indent=2)
+    except Exception as ex:
+        messagebox.showerror("Chyba", f"Nepodařilo se uložit uživatele:\n{ex}")
+
 
 def _dbg_log(section: str, message: str, level: str = 'INFO'):
     """
@@ -10105,6 +10178,10 @@ def show_main_screen(p_name):
     tk.Button(hb, text="⚙  NASTAVENÍ", command=open_settings_window,
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
+    if current_user:
+        tk.Label(hb, text=f"👤  {current_user['username']}",
+                 bg=DT_PANEL, fg=DT_SUBTEXT,
+                 font=('Segoe UI', 9)).pack(side='right', padx=(0, 12), pady=10)
     tk.Button(hb, text="🔄  UPDATE", command=lambda: check_for_updates(silent=False),
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
@@ -10848,6 +10925,257 @@ def import_project_from_folder():
         messagebox.showinfo("Hotovo", f"Projekt '{name}' importován jako {mode}.")
         show_intro_screen()
 
+def show_register_screen(on_done=None):
+    """Dialog pro vytvoření nového uživatelského profilu."""
+    dlg = tk.Toplevel(root)
+    dlg.title("Nový uživatelský profil")
+    dlg.geometry("480x510")
+    dlg.configure(bg=DT_PANEL)
+    dlg.resizable(False, False)
+    dlg.grab_set(); dlg.transient(root)
+    dlg.update_idletasks()
+    dx = root.winfo_x() + (root.winfo_width()  - 480) // 2
+    dy = root.winfo_y() + (root.winfo_height() - 510) // 2
+    dlg.geometry(f"480x510+{dx}+{dy}")
+
+    BG = DT_PANEL; TEXT = DT_TEXT; SUB = DT_SUBTEXT; ACC = DT_ACCENT; ENT = DT_ENTRY
+
+    tk.Label(dlg, text="👤  Nový uživatelský profil", bg=BG, fg=TEXT,
+             font=('Segoe UI', 15, 'bold')).pack(pady=(24, 4))
+    tk.Label(dlg, text="Každý uživatel má vlastní projekty, konzistenci a nastavení.",
+             bg=BG, fg=SUB, font=('Segoe UI', 9)).pack()
+
+    form = tk.Frame(dlg, bg=BG, padx=30)
+    form.pack(fill='x', pady=(16, 0))
+
+    def _lbl(txt):
+        tk.Label(form, text=txt, bg=BG, fg=SUB,
+                 font=('Segoe UI', 9, 'bold'), anchor='w').pack(fill='x', pady=(10, 2))
+
+    def _ent(var, show=None):
+        kw = {'show': show} if show else {}
+        e = tk.Entry(form, textvariable=var, bg=ENT, fg=TEXT,
+                     insertbackground=TEXT, relief='flat',
+                     font=('Segoe UI', 11), bd=0, **kw)
+        e.pack(fill='x', ipady=9, ipadx=8)
+        return e
+
+    _lbl("Uživatelské jméno")
+    name_var = tk.StringVar(); name_ent = _ent(name_var)
+
+    _lbl("Heslo  (nepovinné — nech prázdné pokud sdílíte jen jeden počítač)")
+    pw_var = tk.StringVar(); _ent(pw_var, show='●')
+
+    _lbl("Potvrdit heslo")
+    pw2_var = tk.StringVar(); _ent(pw2_var, show='●')
+
+    # Data sekce
+    tk.Frame(dlg, bg='#334155', height=1).pack(fill='x', padx=30, pady=(18, 0))
+    df = tk.Frame(dlg, bg=BG, padx=30, pady=12)
+    df.pack(fill='x')
+    tk.Label(df, text="Odkud pocházejí tvoje data?", bg=BG, fg=TEXT,
+             font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 8))
+
+    data_mode = tk.StringVar(value='existing')
+    has_existing = (os.path.exists(os.path.join(_APP_DIR, 'projects')) or
+                    os.path.exists(os.path.join(_APP_DIR, 'konzistence.json')))
+
+    rb1 = tk.Radiobutton(df, text="Navázat na existující data (moje dosavadní data jsou zde)",
+                          variable=data_mode, value='existing',
+                          bg=BG, fg=TEXT, selectcolor=DT_SURFACE,
+                          activebackground=BG, font=('Segoe UI', 10))
+    rb1.pack(anchor='w')
+    tk.Label(df, text=f"    → {_APP_DIR}", bg=BG, fg=SUB,
+             font=('Consolas', 8)).pack(anchor='w', pady=(2, 8))
+
+    rb2 = tk.Radiobutton(df, text="Nový prázdný profil (začínám od nuly)",
+                          variable=data_mode, value='new',
+                          bg=BG, fg=TEXT, selectcolor=DT_SURFACE,
+                          activebackground=BG, font=('Segoe UI', 10))
+    rb2.pack(anchor='w')
+    tk.Label(df, text=f"    → {os.path.join(_APP_DIR, 'userdata', '<jméno>')}",
+             bg=BG, fg=SUB, font=('Consolas', 8)).pack(anchor='w', pady=(2, 0))
+
+    if not has_existing:
+        data_mode.set('new')
+        rb1.config(state='disabled')
+
+    err_var = tk.StringVar()
+    tk.Label(dlg, textvariable=err_var, bg=BG, fg='#ef4444',
+             font=('Segoe UI', 9)).pack(pady=(6, 0))
+
+    def _submit():
+        name = name_var.get().strip()
+        pw   = pw_var.get()
+        pw2  = pw2_var.get()
+
+        if not name:
+            err_var.set("Zadej uživatelské jméno."); return
+        if len(name) < 2:
+            err_var.set("Jméno musí mít alespoň 2 znaky."); return
+        if pw != pw2:
+            err_var.set("Hesla se neshodují."); return
+
+        users = load_users()
+        if any(u['username'].lower() == name.lower() for u in users):
+            err_var.set(f"Uživatel '{name}' již existuje."); return
+
+        home = _APP_DIR if data_mode.get() == 'existing' else os.path.join(_APP_DIR, 'userdata', name.lower())
+        h, s = (_hash_pw(pw) if pw else ('', ''))
+
+        user = {'username': name, 'hash': h, 'salt': s,
+                'home': home, 'created': datetime.now().strftime('%Y-%m-%d')}
+        users.append(user)
+        save_users(users)
+        dlg.destroy()
+        if on_done:
+            on_done(user)
+
+    name_ent.focus_set()
+    tk.Button(dlg, text="✓  Vytvořit profil a přihlásit se", command=_submit,
+              bg=ACC, fg='white', relief='flat', cursor='hand2',
+              font=('Segoe UI', 12, 'bold'), pady=10).pack(fill='x', padx=30, pady=(14, 0))
+
+
+def show_login_screen():
+    """Přihlašovací obrazovka — zobrazí se po každém spuštění programu."""
+    global current_user
+    for w in root.winfo_children(): w.destroy()
+
+    BG = DT_BG; CARD = DT_PANEL; SURF = DT_SURFACE
+    TEXT = DT_TEXT; SUB = DT_SUBTEXT; ACC = DT_ACCENT
+
+    main = tk.Frame(root, bg=BG)
+    main.pack(fill='both', expand=True)
+
+    tk.Label(main, text="SMC Journal PRO", bg=BG, fg=TEXT,
+             font=('Segoe UI', 28, 'bold')).pack(pady=(56, 4))
+    tk.Label(main, text="Vyber svůj profil", bg=BG, fg=SUB,
+             font=('Segoe UI', 12)).pack(pady=(0, 44))
+
+    cards_wrap = tk.Frame(main, bg=BG)
+    cards_wrap.pack()
+
+    users = load_users()
+
+    def _login_user(user):
+        global current_user
+        current_user = user
+        _apply_user_paths(user['home'])
+        show_intro_screen()
+
+    def _ask_password(user):
+        dlg = tk.Toplevel(root)
+        dlg.title("Přihlášení")
+        dlg.geometry("340x220")
+        dlg.configure(bg=CARD)
+        dlg.resizable(False, False)
+        dlg.grab_set(); dlg.transient(root)
+        dlg.update_idletasks()
+        dx = root.winfo_x() + (root.winfo_width()  - 340) // 2
+        dy = root.winfo_y() + (root.winfo_height() - 220) // 2
+        dlg.geometry(f"340x220+{dx}+{dy}")
+
+        initials = ''.join(p[0].upper() for p in user['username'].split()[:2]) or user['username'][0].upper()
+        tk.Label(dlg, text=initials, bg=ACC, fg='white',
+                 font=('Segoe UI', 20, 'bold'), width=4, pady=8).pack(pady=(20, 0))
+        tk.Label(dlg, text=user['username'], bg=CARD, fg=TEXT,
+                 font=('Segoe UI', 12, 'bold')).pack(pady=(6, 0))
+
+        pw_var = tk.StringVar()
+        ent = tk.Entry(dlg, textvariable=pw_var, show='●',
+                       bg=DT_ENTRY, fg=TEXT, insertbackground=TEXT,
+                       relief='flat', font=('Segoe UI', 13), bd=0)
+        ent.pack(fill='x', padx=24, pady=(12, 4), ipady=9)
+        ent.focus_set()
+
+        err_var = tk.StringVar()
+        tk.Label(dlg, textvariable=err_var, bg=CARD, fg='#ef4444',
+                 font=('Segoe UI', 9)).pack()
+
+        def _check(e=None):
+            if _verify_pw(pw_var.get(), user['hash'], user['salt']):
+                dlg.destroy(); _login_user(user)
+            else:
+                err_var.set("Špatné heslo, zkus znovu.")
+                pw_var.set('')
+
+        ent.bind('<Return>', _check)
+        tk.Button(dlg, text="Přihlásit se →", command=_check,
+                  bg=ACC, fg='white', relief='flat', cursor='hand2',
+                  font=('Segoe UI', 11, 'bold'), pady=9).pack(fill='x', padx=24, pady=(4, 0))
+
+    def _do_login(user):
+        if user.get('hash'):
+            _ask_password(user)
+        else:
+            _login_user(user)
+
+    AVATAR_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#ef4444']
+
+    for i, user in enumerate(users):
+        av_col = AVATAR_COLORS[i % len(AVATAR_COLORS)]
+        initials = ''.join(p[0].upper() for p in user['username'].split()[:2]) or user['username'][0].upper()
+
+        card = tk.Frame(cards_wrap, bg=CARD, padx=34, pady=26, cursor='hand2')
+        card.pack(side='left', padx=18, pady=20)
+
+        av = tk.Label(card, text=initials, bg=av_col, fg='white',
+                      font=('Segoe UI', 28, 'bold'), width=3, height=1, pady=10)
+        av.pack()
+        nm = tk.Label(card, text=user['username'], bg=CARD, fg=TEXT,
+                      font=('Segoe UI', 12, 'bold'))
+        nm.pack(pady=(10, 0))
+        lock_lbl = tk.Label(card, text="🔒 heslo" if user.get('hash') else "  ",
+                             bg=CARD, fg=SUB, font=('Segoe UI', 8))
+        lock_lbl.pack()
+
+        def _make_click(u=user):
+            def _click(e=None): _do_login(u)
+            return _click
+
+        clk = _make_click(user)
+        for w in [card, av, nm, lock_lbl]:
+            w.bind('<Button-1>', clk)
+
+        def _on(e, c=card, surf=SURF, bg=CARD):
+            c.config(bg=surf)
+            for ch in c.winfo_children():
+                try:
+                    if ch.cget('bg') == bg: ch.config(bg=surf)
+                except: pass
+        def _off(e, c=card, bg=CARD, surf=SURF):
+            c.config(bg=bg)
+            for ch in c.winfo_children():
+                try:
+                    if ch.cget('bg') == surf and ch.cget('fg') != 'white': ch.config(bg=bg)
+                except: pass
+        card.bind('<Enter>', _on); card.bind('<Leave>', _off)
+        for ch in card.winfo_children():
+            ch.bind('<Enter>', lambda e, c=card: _on(e, c))
+            ch.bind('<Leave>', lambda e, c=card: _off(e, c))
+
+    # "+ Přidat uživatele" karta
+    add_card = tk.Frame(cards_wrap, bg=SURF, padx=34, pady=26, cursor='hand2')
+    add_card.pack(side='left', padx=18, pady=20)
+    plus_lbl = tk.Label(add_card, text="+", bg=SURF, fg=SUB,
+                         font=('Segoe UI', 32, 'bold'), width=3, height=1, pady=10)
+    plus_lbl.pack()
+    add_lbl = tk.Label(add_card, text="Přidat profil", bg=SURF, fg=SUB,
+                        font=('Segoe UI', 11, 'bold'))
+    add_lbl.pack(pady=(10, 0))
+    tk.Label(add_card, text="  ", bg=SURF, fg=SURF, font=('Segoe UI', 8)).pack()
+
+    def _add_user(e=None):
+        show_register_screen(on_done=_login_user)
+
+    for w in [add_card, plus_lbl, add_lbl]:
+        w.bind('<Button-1>', _add_user)
+
+    tk.Label(main, text=f"v{VERSION}", bg=BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 9)).pack(side='bottom', anchor='e', padx=18, pady=8)
+
+
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
@@ -10936,6 +11264,14 @@ def show_intro_screen():
               command=import_project_from_folder,
               bg=DT_ACCENT, fg="#ffffff", font=('Segoe UI', 9, 'bold'),
               padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 20))
+
+    if current_user:
+        tk.Label(bottom_bar, text=f"👤  {current_user['username']}",
+                 bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9)).pack(side='left', padx=(0, 6))
+        tk.Button(bottom_bar, text="Odhlásit se",
+                  command=show_login_screen,
+                  bg=DT_BTN, fg=DT_SUBTEXT, font=('Segoe UI', 9),
+                  padx=10, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 20))
 
     theme_bar = tk.Frame(bottom_bar, bg=DT_BG)
     theme_bar.pack(side='left')
@@ -11033,7 +11369,7 @@ if __name__ == "__main__":
         apply_dark_theme(root)
         root.protocol("WM_DELETE_WINDOW", on_close)
         root.withdraw()  # Skryj main window dokud splash neskončí
-        root.after(100, lambda: show_splash(lambda: [root.deiconify(), show_intro_screen()]))
+        root.after(100, lambda: show_splash(lambda: [root.deiconify(), show_login_screen()]))
         # Tiše zkontroluj aktualizace 4 sekundy po startu — na hlavním threadu (ne v background threadu!)
         root.after(4000, lambda: check_for_updates(startup=True))
         root.mainloop()
