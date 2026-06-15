@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.102"
+VERSION = "1.5.103"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -867,6 +867,169 @@ def _hash_pw(password, salt=None):
 
 def _verify_pw(password, stored_hash, salt):
     return _hash_pw(password, salt)[0] == stored_hash
+
+
+# ── Web sync ──────────────────────────────────────────────────────────────────
+WEB_API_URL      = "https://tradeobd.fun/api"
+SYNC_CONFIG_FILE = os.path.join(_APP_DIR, 'sync_config.json')
+
+def _sync_load_cfg():
+    try:
+        with open(SYNC_CONFIG_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _sync_save_cfg(cfg):
+    with open(SYNC_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f)
+
+def _sync_login(username, password):
+    import urllib.request, urllib.parse
+    data = urllib.parse.urlencode({'username': username, 'password': password}).encode()
+    req  = urllib.request.Request(WEB_API_URL + '/auth/token', data=data)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())['access_token']
+
+def _sync_post(token, trades):
+    import urllib.request
+    ok = err = 0
+    for t in trades:
+        body = json.dumps(t, ensure_ascii=False).encode('utf-8')
+        req  = urllib.request.Request(
+            WEB_API_URL + '/trades',
+            data=body,
+            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                ok += 1
+        except Exception:
+            err += 1
+    return ok, err
+
+def _sync_read_trades():
+    import csv, hashlib
+    trades = []
+    for folder in [DIR_BACKTEST, DIR_REAL]:
+        if not os.path.isdir(folder):
+            continue
+        for proj in os.listdir(folder):
+            csv_path = os.path.join(folder, proj, 'trades.csv')
+            if not os.path.isfile(csv_path):
+                continue
+            src = 'BACKTEST' if folder == DIR_BACKTEST else 'REAL'
+            with open(csv_path, encoding='utf-8', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # stable deterministic ID so re-sync doesn't duplicate
+                    uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
+                    uid = hashlib.md5(uid_src.encode()).hexdigest()
+                    datum = (row.get('cas_otevreni') or '')[:10] or None
+                    pozn  = row.get('poznamka') or ''
+                    duvod = row.get('duvod') or ''
+                    if duvod and pozn:
+                        pozn = duvod + ' | ' + pozn
+                    elif duvod:
+                        pozn = duvod
+                    trades.append({
+                        'id':       uid,
+                        'datum':    datum,
+                        'symbol':   row.get('symbol') or None,
+                        'smer':     row.get('smer') or None,
+                        'vstup':    float(row['vstupni_hodnota']) if row.get('vstupni_hodnota') else None,
+                        'sl':       float(row['stoploss'])        if row.get('stoploss')        else None,
+                        'tp':       float(row['takeprofit'])      if row.get('takeprofit')      else None,
+                        'rrr':      float(row['rrr'])             if row.get('rrr')             else None,
+                        'vysledek': row.get('vysledek') or None,
+                        'session':  row.get('session') or None,
+                        'tags':     row.get('tags') or None,
+                        'poznamka': pozn or None,
+                    })
+    return trades
+
+def open_sync_dialog():
+    import threading
+    cfg = _sync_load_cfg()
+
+    dlg = tk.Toplevel(root)
+    dlg.title("☁ Sync na tradeobd.fun")
+    dlg.geometry("420x340")
+    dlg.resizable(False, False)
+    dlg.configure(bg=DT_BG)
+    dlg.grab_set()
+    dlg.transient(root)
+
+    def _lbl(parent, text, **kw):
+        return tk.Label(parent, text=text, bg=DT_BG, fg=DT_SUBTEXT,
+                        font=('Segoe UI', 9), **kw)
+    def _entry(parent, show=None):
+        e = tk.Entry(parent, bg=DT_PANEL, fg=DT_TEXT, insertbackground=DT_TEXT,
+                     relief='flat', font=('Segoe UI', 11), show=show)
+        e.configure(highlightthickness=1, highlightbackground=DT_BORDER,
+                    highlightcolor='#3b82f6')
+        return e
+
+    pad = tk.Frame(dlg, bg=DT_BG, padx=28, pady=20); pad.pack(fill='both', expand=True)
+
+    tk.Label(pad, text="☁  Sync na tradeobd.fun", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 4))
+    tk.Label(pad, text="Nahraje všechny obchody z PC na web.", bg=DT_BG, fg=DT_SUBTEXT,
+             font=('Segoe UI', 9)).pack(anchor='w', pady=(0, 16))
+
+    _lbl(pad, "Web uživatelské jméno").pack(anchor='w')
+    e_user = _entry(pad); e_user.pack(fill='x', pady=(2, 10))
+    e_user.insert(0, cfg.get('username', ''))
+
+    _lbl(pad, "Web heslo").pack(anchor='w')
+    e_pass = _entry(pad, show='•'); e_pass.pack(fill='x', pady=(2, 16))
+
+    status_var = tk.StringVar(value='')
+    status_lbl = tk.Label(pad, textvariable=status_var, bg=DT_BG, fg='#22c55e',
+                          font=('Segoe UI', 9), wraplength=360, justify='left')
+    status_lbl.pack(anchor='w', pady=(0, 12))
+
+    btn_frame = tk.Frame(pad, bg=DT_BG); btn_frame.pack(fill='x')
+    sync_btn = tk.Button(btn_frame, text="☁  Spustit sync", bg='#3b82f6', fg='white',
+                         relief='flat', font=('Segoe UI', 10, 'bold'), padx=14, pady=8)
+    sync_btn.pack(side='left', padx=(0, 8))
+    tk.Button(btn_frame, text="Zavřít", bg=DT_BTN, fg=DT_SUBTEXT,
+              relief='flat', font=('Segoe UI', 10), padx=14, pady=8,
+              command=dlg.destroy).pack(side='left')
+
+    def _do_sync():
+        u = e_user.get().strip(); p = e_pass.get()
+        if not u or not p:
+            status_var.set("❌ Zadej jméno a heslo."); status_lbl.config(fg='#ef4444'); return
+        sync_btn.config(state='disabled', text="⏳ Probíhá...")
+        status_var.set("Přihlašuji se..."); status_lbl.config(fg=DT_SUBTEXT)
+
+        def _thread():
+            try:
+                token = _sync_login(u, p)
+                _sync_save_cfg({'username': u})
+                dlg.after(0, lambda: status_var.set("Čtu obchody z PC..."))
+                trades = _sync_read_trades()
+                dlg.after(0, lambda: status_var.set(f"Nahrávám {len(trades)} obchodů..."))
+                ok, err = _sync_post(token, trades)
+                msg = f"✓ Hotovo! Nahráno: {ok}"
+                if err: msg += f"  ❌ Chyb: {err}"
+                dlg.after(0, lambda: [
+                    status_var.set(msg),
+                    status_lbl.config(fg='#22c55e' if not err else '#f59e0b'),
+                    sync_btn.config(state='normal', text="☁  Znovu"),
+                ])
+            except Exception as ex:
+                dlg.after(0, lambda: [
+                    status_var.set(f"❌ Chyba: {ex}"),
+                    status_lbl.config(fg='#ef4444'),
+                    sync_btn.config(state='normal', text="☁  Spustit sync"),
+                ])
+        threading.Thread(target=_thread, daemon=True).start()
+
+    sync_btn.config(command=_do_sync)
+    e_pass.bind('<Return>', lambda e: _do_sync())
 
 
 def load_users():
@@ -10183,6 +10346,9 @@ def show_main_screen(p_name):
         tk.Label(hb, text=f"👤  {current_user['username']}",
                  bg=DT_PANEL, fg=DT_SUBTEXT,
                  font=('Segoe UI', 9)).pack(side='right', padx=(0, 12), pady=10)
+    tk.Button(hb, text="☁  SYNC", command=open_sync_dialog,
+              bg='#1e3a5f', fg='#93c5fd',
+              font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="🔄  UPDATE", command=lambda: check_for_updates(silent=False),
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
@@ -10930,14 +11096,14 @@ def show_register_screen(on_done=None):
     """Dialog pro vytvoření nového uživatelského profilu."""
     dlg = tk.Toplevel(root)
     dlg.title("Nový uživatelský profil")
-    dlg.geometry("480x510")
+    dlg.geometry("480x600")
     dlg.configure(bg=DT_PANEL)
-    dlg.resizable(False, False)
+    dlg.resizable(False, True)
     dlg.grab_set(); dlg.transient(root)
     dlg.update_idletasks()
     dx = root.winfo_x() + (root.winfo_width()  - 480) // 2
-    dy = root.winfo_y() + (root.winfo_height() - 510) // 2
-    dlg.geometry(f"480x510+{dx}+{dy}")
+    dy = root.winfo_y() + (root.winfo_height() - 600) // 2
+    dlg.geometry(f"480x600+{dx}+{dy}")
 
     BG = DT_PANEL; TEXT = DT_TEXT; SUB = DT_SUBTEXT; ACC = DT_ACCENT; ENT = DT_ENTRY
 
