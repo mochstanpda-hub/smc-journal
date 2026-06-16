@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.127"
+VERSION = "1.5.128"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1048,17 +1048,25 @@ def _sync_post(token, trades, on_progress=None):
             if on_progress: on_progress(i, total, ok, err, skipped)
             continue
         if tid in server_map:
-            # Obchod existuje — zkontroluj jestli chybí project
-            if server_map[tid] is None and t.get('project'):
-                proj_updates.append({'id': tid, 'project': t['project']})
+            # Obchod existuje — pošli aktualizaci (PUT) aby PC verze přepsala server
+            body = json.dumps(t, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                WEB_API_URL + f'/trades/{tid}',
+                data=body,
+                headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+                method='PUT',
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10):
+                    ok += 1
+            except Exception:
+                err += 1
             # Nahraj foto pokud server ho nemá a lokálně existuje
             if img_path and tid not in server_photos:
                 _sync_upload_photo(token, tid, img_path)
-            skipped += 1
             if on_progress:
                 on_progress(i, total, ok, err, skipped)
             continue
-        img_path = t.pop('_img_path', None)  # odstraní z dict před odesláním
         body = json.dumps(t, ensure_ascii=False).encode('utf-8')
         req  = urllib.request.Request(
             WEB_API_URL + '/trades',
