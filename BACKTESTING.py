@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.118"
+VERSION = "1.5.119"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -904,6 +904,45 @@ def _sync_api_post(token, path, body):
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
+def _sync_get_server_photos(token):
+    """Vrátí set ID obchodů které už mají foto na serveru."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            WEB_API_URL + '/trades',
+            headers={'Authorization': 'Bearer ' + token})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            trades = json.loads(r.read())
+        return {t['id'] for t in trades if t.get('photo_path')}
+    except Exception:
+        return set()
+
+def _sync_upload_photo(token, trade_id, img_path):
+    """Nahraje obrázek jako foto obchodu na server. Tiše ignoruje chyby."""
+    import urllib.request, urllib.parse, mimetypes
+    try:
+        mime = mimetypes.guess_type(img_path)[0] or 'image/jpeg'
+        boundary = '----SyncBoundary7x9z'
+        filename = os.path.basename(img_path)
+        with open(img_path, 'rb') as f:
+            data = f.read()
+        body = (
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f'Content-Type: {mime}\r\n\r\n'
+        ).encode() + data + f'\r\n--{boundary}--\r\n'.encode()
+        req = urllib.request.Request(
+            WEB_API_URL + f'/trades/{trade_id}/photo',
+            data=body,
+            headers={
+                'Content-Type': f'multipart/form-data; boundary={boundary}',
+                'Authorization': 'Bearer ' + token,
+            },
+            method='POST')
+        urllib.request.urlopen(req, timeout=15).close()
+    except Exception:
+        pass
+
 def _sync_ensure_project(token, name, proj_type='real'):
     """Vytvoří projekt na serveru pokud neexistuje. Volá se při každém syncu."""
     try:
@@ -965,16 +1004,24 @@ def _sync_post(token, trades, on_progress=None):
     total = len(trades)
     proj_updates = []  # trades to update project field
 
+    # Zjisti které obchody na serveru nemají foto (pro upload)
+    server_photos = _sync_get_server_photos(token)
+
     for i, t in enumerate(trades, 1):
         tid = t.get('id')
+        img_path = t.pop('_img_path', None)
         if tid in server_map:
             # Obchod existuje — zkontroluj jestli chybí project
             if server_map[tid] is None and t.get('project'):
                 proj_updates.append({'id': tid, 'project': t['project']})
+            # Nahraj foto pokud server ho nemá a lokálně existuje
+            if img_path and tid not in server_photos:
+                _sync_upload_photo(token, tid, img_path)
             skipped += 1
             if on_progress:
                 on_progress(i, total, ok, err, skipped)
             continue
+        img_path = t.pop('_img_path', None)  # odstraní z dict před odesláním
         body = json.dumps(t, ensure_ascii=False).encode('utf-8')
         req  = urllib.request.Request(
             WEB_API_URL + '/trades',
@@ -985,6 +1032,9 @@ def _sync_post(token, trades, on_progress=None):
         try:
             with urllib.request.urlopen(req, timeout=10):
                 ok += 1
+            # Nahraje screenshot pokud existuje
+            if img_path:
+                _sync_upload_photo(token, t['id'], img_path)
         except Exception:
             err += 1
         if on_progress:
@@ -1108,20 +1158,31 @@ def _sync_read_trades():
                         pozn = duvod + ' | ' + pozn
                     elif duvod:
                         pozn = duvod
+                    images_dir = os.path.join(folder, proj, 'images')
+                    obrazky    = row.get('obrazky', '') or ''
+                    first_img  = None
+                    for img_name in obrazky.split(';'):
+                        img_name = img_name.strip()
+                        if img_name:
+                            candidate = os.path.join(images_dir, img_name)
+                            if os.path.isfile(candidate):
+                                first_img = candidate
+                                break
                     trades.append({
-                        'id':       uid,
-                        'datum':    datum,
-                        'symbol':   row.get('symbol') or None,
-                        'smer':     row.get('smer') or None,
-                        'vstup':    _sf(row.get('vstupni_hodnota')),
-                        'sl':       _sf(row.get('stoploss')),
-                        'tp':       _sf(row.get('takeprofit')),
-                        'rrr':      _sf(row.get('rrr')),
-                        'vysledek': row.get('vysledek') or None,
-                        'session':  row.get('session') or None,
-                        'tags':     row.get('tags') or None,
-                        'poznamka': pozn or None,
-                        'project':  f"{src}/{proj}",
+                        'id':        uid,
+                        'datum':     datum,
+                        'symbol':    row.get('symbol') or None,
+                        'smer':      row.get('smer') or None,
+                        'vstup':     _sf(row.get('vstupni_hodnota')),
+                        'sl':        _sf(row.get('stoploss')),
+                        'tp':        _sf(row.get('takeprofit')),
+                        'rrr':       _sf(row.get('rrr')),
+                        'vysledek':  row.get('vysledek') or None,
+                        'session':   row.get('session') or None,
+                        'tags':      row.get('tags') or None,
+                        'poznamka':  pozn or None,
+                        'project':   f"{src}/{proj}",
+                        '_img_path': first_img,  # lokální cesta k prvnímu obrázku (neposílá se do API)
                     })
     return trades
 
