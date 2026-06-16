@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.123"
+VERSION = "1.5.125"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -950,6 +950,24 @@ def _sync_ensure_project(token, name, proj_type='real'):
     except Exception:
         pass
 
+def _sync_accounts(token):
+    """Nahraje seznam názvů účtů na server, aby je bylo možné vybrat na webu."""
+    import urllib.request
+    try:
+        accounts = load_accounts()
+        names = [a.get('nazev', '').strip() for a in accounts if a.get('nazev', '').strip()]
+        if not names:
+            return
+        body = json.dumps({'accounts': names}, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            WEB_API_URL + '/accounts/sync', data=body,
+            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+            method='POST')
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception:
+        pass
+
+
 def _sync_konzistence(token):
     try:
         if not os.path.exists(KONZISTENCE_FILE):
@@ -1180,21 +1198,27 @@ def _sync_read_trades():
                                 first_img = candidate
                                 break
                     trades.append({
-                        'id':        uid,
-                        'datum':     datum,
-                        'symbol':    row.get('symbol') or None,
-                        'smer':      row.get('smer') or None,
-                        'vstup':     _sf(row.get('vstupni_hodnota')),
-                        'sl':        _sf(row.get('stoploss')),
-                        'tp':        _sf(row.get('takeprofit')),
-                        'rrr':       _sf(row.get('rrr')),
-                        'vysledek':  row.get('vysledek') or None,
-                        'session':   row.get('session') or None,
-                        'tags':      row.get('tags') or None,
-                        'poznamka':  pozn or None,
-                        'project':   f"{src}/{proj}",
-                        '_img_path': first_img,  # lokální cesta k prvnímu obrázku (neposílá se do API)
-                        '_web_id':   row.get('web_id', '') or '',  # UUID ze serveru, nepošle se do API
+                        'id':             uid,
+                        'datum':          datum,
+                        'cas_zavreni':    (row.get('cas_zavreni') or '')[:16] or None,
+                        'symbol':         row.get('symbol') or None,
+                        'smer':           row.get('smer') or None,
+                        'vstup':          _sf(row.get('vstupni_hodnota')),
+                        'sl':             _sf(row.get('stoploss')),
+                        'tp':             _sf(row.get('takeprofit')),
+                        'rrr':            _sf(row.get('rrr')),
+                        'vysledek':       row.get('vysledek') or None,
+                        'session':        row.get('session') or None,
+                        'tags':           row.get('tags') or None,
+                        'poznamka':       pozn or None,
+                        'timeframe_graf': row.get('timeframe_graf') or None,
+                        'timeframe_vstup':row.get('timeframe_vstup') or None,
+                        'duvod':          row.get('duvod') or None,
+                        'zisk_mena':      row.get('zisk_mena') or None,
+                        'ucet':           row.get('ucet') or None,
+                        'project':        f"{src}/{proj}",
+                        '_img_path':      first_img,
+                        '_web_id':        row.get('web_id', '') or '',
                     })
     return trades
 
@@ -1212,8 +1236,13 @@ def _sync_pull(token):
         srv = {t['id']: t for t in server_trades}
 
         updated_total = 0
-        SRV_TO_CSV = {'poznamka': 'poznamka', 'tags': 'tags',
-                      'vysledek': 'vysledek', 'session': 'session', 'rrr': 'rrr'}
+        SRV_TO_CSV = {
+            'poznamka': 'poznamka', 'tags': 'tags', 'vysledek': 'vysledek',
+            'session': 'session', 'rrr': 'rrr',
+            'timeframe_graf': 'timeframe_graf', 'timeframe_vstup': 'timeframe_vstup',
+            'duvod': 'duvod', 'zisk_mena': 'zisk_mena', 'ucet': 'ucet',
+            'cas_zavreni': 'cas_zavreni',
+        }
 
         # ── Fáze 1: aktualizace existujících lokálních řádků + mazání web-smazaných ─
         local_ids = set()    # MD5 hashes lokálních obchodů
@@ -1251,7 +1280,7 @@ def _sync_pull(token):
                             if csv_col not in fieldnames:
                                 continue
                             srv_val = st.get(srv_field)
-                            srv_str = str(srv_val) if srv_val is not None else ''
+                            srv_str = str(srv_val).replace('T', ' ') if srv_val is not None else ''
                             if row.get(csv_col, '') != srv_str:
                                 row[csv_col] = srv_str
                                 changed = True
@@ -1284,20 +1313,28 @@ def _sync_pull(token):
             def _fs(val):
                 return str(val) if val is not None and val != '' else ''
 
+            def _dt(val):
+                """Normalizuje datetime ze serveru: 'YYYY-MM-DDTHH:MM' → 'YYYY-MM-DD HH:MM'"""
+                return (val or '').replace('T', ' ').strip()
+
             new_row = {
-                'ucet': '', 'cas_otevreni': st.get('datum') or '',
-                'cas_zavreni': '', 'symbol': st.get('symbol') or '',
+                'ucet': st.get('ucet') or '',
+                'cas_otevreni': _dt(st.get('datum')) or '',
+                'cas_zavreni': _dt(st.get('cas_zavreni')) or '',
+                'symbol': st.get('symbol') or '',
                 'smer': st.get('smer') or '',
                 'vstupni_hodnota': _fs(st.get('vstup')),
                 'stoploss': _fs(st.get('sl')), 'takeprofit': _fs(st.get('tp')),
                 'rrr': _fs(st.get('rrr')), 'pips': '', 'session': st.get('session') or '',
-                'timeframe_graf': '', 'timeframe_vstup': '', 'fibo': '',
-                'duvod': '', 'poznamka': st.get('poznamka') or '',
+                'timeframe_graf': st.get('timeframe_graf') or '',
+                'timeframe_vstup': st.get('timeframe_vstup') or '',
+                'fibo': '', 'duvod': st.get('duvod') or '',
+                'poznamka': st.get('poznamka') or '',
                 'vysledek': st.get('vysledek') or '', 'den_tydne': '',
                 'delka_obchodu': '', 'slippage': '', 'kvalita': '',
                 'obrazky': '', 'news': '', 'news_event': '',
                 'checklist_ratio': '', 'tags': st.get('tags') or '',
-                'zisk_mena': '', 'web_id': tid,
+                'zisk_mena': st.get('zisk_mena') or '', 'web_id': tid,
             }
 
             if os.path.isfile(csv_path):
@@ -1362,6 +1399,7 @@ def _sync_silent(on_done=None):
             trades = _sync_read_trades()
             if trades:
                 _sync_post(token, trades)
+            _sync_accounts(token)
             _sync_konzistence(token)
             _sync_xp(token)
             _, new_trades = _sync_pull(token)
