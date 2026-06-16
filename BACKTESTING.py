@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.114"
+VERSION = "1.5.116"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -3076,8 +3076,14 @@ def setup_invoices_tab(parent):
     cols_f.pack(fill='both', expand=True, padx=12, pady=8)
     tree_frame[0] = cols_f
 
+    # Tlačítka existují jednou — jen je přestavujeme uvnitř _build_list
+    btn_row2 = tk.Frame(outer, bg=DT_BG, pady=6)
+    btn_row2.pack(fill='x', padx=12)
+
     def _build_list():
         for w in cols_f.winfo_children(): w.destroy()
+        for w in btn_row2.winfo_children(): w.destroy()
+
         invoices = load_invoices_list()
         if not invoices:
             tk.Label(cols_f, text="Žádné faktury. Klikni '+ Nová faktura'.",
@@ -3104,12 +3110,6 @@ def setup_invoices_tab(parent):
                 inv.get('celkem',''),
                 inv.get('stav','Vystavena')
             ))
-
-        # Akce po výběru
-        btn_row = tk.Frame(cols_f, bg=DT_BG)
-        # btn_row placed below tv — need a different layout
-        btn_row2 = tk.Frame(outer, bg=DT_BG, pady=6)
-        btn_row2.pack(fill='x', padx=12)
 
         def _get_selected_inv():
             sel = tv.selection()
@@ -12091,11 +12091,6 @@ def show_intro_screen():
               bg='#1d4ed8', fg='white', font=('Segoe UI', 9, 'bold'),
               padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
 
-    tk.Button(bottom_bar, text="📱  Mobilní app",
-              command=open_mobile_server_window,
-              bg='#0f766e', fg='white', font=('Segoe UI', 9, 'bold'),
-              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
-
     tk.Button(bottom_bar, text="📂  Importovat projekt ze složky",
               command=import_project_from_folder,
               bg=DT_ACCENT, fg="#ffffff", font=('Segoe UI', 9, 'bold'),
@@ -12109,38 +12104,6 @@ def show_intro_screen():
                   bg=DT_BTN, fg=DT_SUBTEXT, font=('Segoe UI', 9),
                   padx=10, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0, 20))
 
-    theme_bar = tk.Frame(bottom_bar, bg=DT_BG)
-    theme_bar.pack(side='left')
-    tk.Label(theme_bar, text="🎨 MOTIV:", bg=DT_BG, fg=DT_SUBTEXT,
-             font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(0, 8))
-
-    # (name, preview_bg, preview_fg, description) — všechny motivy
-    _ALL_THEMES_BTN = [
-        ("Tmavý",            "#1e293b", "#60a5fa", "Tmavé pozadí — slate paleta"),
-        ("Tmavý modrý",      "#111827", "#3b82f6", "Hlubší tmavá — noční varianta"),
-        ("Klasický",         "#e0e0e0", "#1a1a1a", "Světlý klasický Windows styl"),
-        ("Šedý profesionál", "#cfd4d8", "#1c2833", "Světlý šedý profesionální"),
-        ("Světlý elegantní", "#ffffff", "#0d6efd", "Čistě bílý elegantní"),
-    ]
-    current_theme = load_theme_name()
-
-    def _switch_theme(name):
-        apply_theme(name)
-        apply_dark_theme(root)
-        show_intro_screen()
-
-    for tname, tbg, tfg, _tdesc in _ALL_THEMES_BTN:
-        is_active = (tname == current_theme)
-        btn = tk.Button(
-            theme_bar, text=("✔  " if is_active else "  ") + tname,
-            bg=tbg, fg=tfg,
-            font=('Segoe UI', 9, 'bold' if is_active else 'normal'),
-            relief='solid' if is_active else 'flat',
-            bd=2 if is_active else 0,
-            padx=14, pady=5, cursor='hand2',
-            command=lambda n=tname: _switch_theme(n)
-        )
-        btn.pack(side='left', padx=4)
 
     f4 = tk.Frame(grid_frame, bg=DT_PANEL, relief="flat", borderwidth=0, width=300, height=400); f4.grid(row=0, column=3, padx=20, pady=20); f4.pack_propagate(False)
     tk.Label(f4, text="📋 STRATEGIE", font=('Arial', 16, 'bold'), bg=DT_ACCENT, fg="#ffffff", pady=10).pack(fill="x")
