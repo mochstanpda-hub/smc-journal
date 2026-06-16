@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.112"
+VERSION = "1.5.114"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -289,6 +289,9 @@ def check_for_updates(silent=False, startup=False):
     startup=True → dialog JEN pokud je nová verze (ne "jsi aktuální")
     """
     if "TVUJ_USERNAME" in UPDATE_URL:
+        return
+    # Pokud má uživatel aktualizace vypnuté, přeskoč (kromě manuálního volání)
+    if startup and not is_auto_update_enabled():
         return
     if silent:
         # Tichý režim — žádné dialogy, žádná okna
@@ -992,6 +995,67 @@ def _sync_read_trades():
                     })
     return trades
 
+def _sync_pull(token):
+    """Stáhne obchody ze serveru a aktualizuje lokální CSV (poznamka, tags, vysledek, session, rrr)."""
+    import csv, hashlib, urllib.request, tempfile, shutil
+    try:
+        req = urllib.request.Request(
+            WEB_API_URL + '/trades',
+            headers={'Authorization': 'Bearer ' + token})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            server_trades = json.loads(r.read())
+        if not server_trades:
+            return 0
+        srv = {t['id']: t for t in server_trades}
+
+        updated_total = 0
+        EDITABLE = ['poznamka', 'tags', 'vysledek', 'session', 'rrr']
+        # Mapování server pole → CSV sloupec
+        SRV_TO_CSV = {'poznamka': 'poznamka', 'tags': 'tags',
+                      'vysledek': 'vysledek', 'session': 'session', 'rrr': 'rrr'}
+
+        for folder in [DIR_BACKTEST, DIR_REAL]:
+            if not os.path.isdir(folder):
+                continue
+            src = 'BACKTEST' if folder == DIR_BACKTEST else 'REAL'
+            for proj in os.listdir(folder):
+                csv_path = os.path.join(folder, proj, 'trades.csv')
+                if not os.path.isfile(csv_path):
+                    continue
+                with open(csv_path, encoding='utf-8', newline='') as f:
+                    reader = csv.DictReader(f)
+                    fieldnames = reader.fieldnames or []
+                    rows = list(reader)
+
+                changed = False
+                for row in rows:
+                    uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
+                    uid = hashlib.md5(uid_src.encode()).hexdigest()
+                    if uid not in srv:
+                        continue
+                    st = srv[uid]
+                    for srv_field, csv_col in SRV_TO_CSV.items():
+                        if csv_col not in fieldnames:
+                            continue
+                        srv_val = st.get(srv_field)
+                        srv_str = str(srv_val) if srv_val is not None else ''
+                        if row.get(csv_col, '') != srv_str:
+                            row[csv_col] = srv_str
+                            changed = True
+
+                if changed:
+                    tmp = csv_path + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerows(rows)
+                    shutil.move(tmp, csv_path)
+                    updated_total += 1
+        return updated_total
+    except Exception:
+        return 0
+
+
 def open_sync_dialog():
     import threading
     cfg = _sync_load_cfg()
@@ -1111,9 +1175,18 @@ def open_sync_dialog():
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_xp)
                 _sync_xp(token)
+                dlg.after(0, lambda: prog_var.set(90))
+
+                # ── Pull ze serveru zpět do CSV ───────────────────────────────
+                def _ui_pull():
+                    status_var.set("Stahuji změny z webu...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_pull)
+                pulled = _sync_pull(token)
                 dlg.after(0, lambda: prog_var.set(100))
 
-                _msg = f"✓ Hotovo!  Obchody: {ok}  Konzistence: ✓  XP: ✓" + (f"   ❌ Chyb: {err}" if err else '')
+                _pull_txt = f"  ↓ {pulled} CSV aktualizováno" if pulled else ''
+                _msg = f"✓ Hotovo!  Obchody: {ok}  Konzistence: ✓  XP: ✓{_pull_txt}" + (f"   ❌ Chyb: {err}" if err else '')
                 _fg  = '#22c55e' if not err else '#f59e0b'
                 def _done():
                     status_var.set(_msg)
@@ -1223,6 +1296,64 @@ def save_global_settings(data):
             json.dump(data, _f, ensure_ascii=False, indent=2)
     except Exception as e:
         messagebox.showerror("Chyba", f"Nepodařilo se uložit nastavení: {e}")
+
+def is_auto_update_enabled():
+    return load_global_settings().get('auto_update_enabled', True)
+
+def set_auto_update_enabled(val):
+    gs = load_global_settings()
+    gs['auto_update_enabled'] = val
+    save_global_settings(gs)
+
+# Definice všech hlavních záložek — (klíč, label, required)
+ALL_MAIN_TABS = [
+    ('zapis',       '  ZÁPIS  ',           True),
+    ('analyza',     '  ANALÝZA  ',         True),
+    ('galerie',     '  GALERIE  ',         False),
+    ('pravidla',    '  MOJE PRAVIDLA  ',   False),
+    ('monte_carlo', '  MONTE CARLO  ',     False),
+    ('periody',     '  📅 PERIODY  ',      False),
+    ('faktury',     '  📄 FAKTURY  ',      False),
+    ('konzistence', '  📊 KONZISTENCE  ',  False),
+    ('ict',         '  📚 ICT ACADEMY  ',  False),
+    ('yt',          '  📥 YT DOWNLOADER  ',False),
+    ('ctrader',     '  📡 cTRADER  ',      False),
+    ('tradingview', '  TRADINGVIEW GRAF  ',False),
+]
+
+def get_tab_config():
+    """Vrátí konfiguraci záložek: list of {key, visible}."""
+    saved = load_global_settings().get('tab_config', [])
+    saved_keys = [e['key'] for e in saved]
+    # Přidej nové záložky co nejsou v uložené konfiguraci
+    result = list(saved)
+    for key, label, required in ALL_MAIN_TABS:
+        if key not in saved_keys:
+            result.append({'key': key, 'visible': True})
+    return result
+
+def save_tab_config(cfg):
+    gs = load_global_settings()
+    gs['tab_config'] = cfg
+    save_global_settings(gs)
+
+def apply_tab_order(nb, tab_frames):
+    """
+    Přeuspořádá záložky v notebooku podle uložené konfigurace.
+    tab_frames: dict {key: (frame_widget, label_text)}
+    """
+    cfg = get_tab_config()
+    # Odstraň všechny záložky (frames zůstanou v paměti)
+    for _ in range(len(nb.tabs())):
+        nb.forget(0)
+    # Přidej zpět v pořadí dle configu, přeskoč skryté
+    for entry in cfg:
+        key = entry['key']
+        if not entry.get('visible', True):
+            continue
+        if key in tab_frames:
+            frame, label = tab_frames[key]
+            nb.add(frame, text=label)
 
 def get_app_currency():
     """Vrátí zvolenou domácí měnu (výchozí CZK). Ukládá se v global_settings.json."""
@@ -10214,6 +10345,24 @@ def open_settings_window(initial_tab=0):
               bg='#27ae60', fg='white', font=('Segoe UI', 10, 'bold'),
               padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
 
+    _upd_sep = tk.Frame(_upd_frame, bg=DT_BORDER, height=1)
+    _upd_sep.pack(fill='x', pady=18)
+    tk.Label(_upd_frame, text="Automatická kontrola při spuštění", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 8))
+    _auto_upd_var = tk.BooleanVar(value=is_auto_update_enabled())
+    _auto_upd_cb = tk.Checkbutton(
+        _upd_frame,
+        text="Kontrolovat aktualizace při každém spuštění programu",
+        variable=_auto_upd_var,
+        bg=DT_BG, fg=DT_TEXT, selectcolor=DT_SURFACE,
+        activebackground=DT_BG, activeforeground=DT_TEXT,
+        font=('Segoe UI', 10), cursor='hand2',
+        command=lambda: set_auto_update_enabled(_auto_upd_var.get())
+    )
+    _auto_upd_cb.pack(anchor='w')
+    tk.Label(_upd_frame, text="Pokud vypneš, aktualizace jde stále spustit ručně tlačítkem výše.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9)).pack(anchor='w', pady=(4, 0))
+
     # ── Tab: Páry & Timeframes ────────────────────────────────────────────────
     t_lists = ttk.Frame(nb); nb.add(t_lists, text=' 📊 Páry & TF ')
     setup_lists_manager_ui(t_lists)
@@ -10670,6 +10819,90 @@ def open_settings_window(initial_tab=0):
     tk.Button(btn_row_f, text="⭐  Zobrazit XP přehled", command=open_xp_overview,
               bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9),
               padx=14, pady=8, relief='flat', cursor='hand2').pack(side='left', padx=10)
+
+    # ── Tab: Záložky (viditelnost + pořadí) ──────────────────────────────────
+    t_tabs = ttk.Frame(nb); nb.add(t_tabs, text=' 🗂 Záložky ')
+    _tabs_outer = tk.Frame(t_tabs, bg=DT_BG, padx=20, pady=16)
+    _tabs_outer.pack(fill='both', expand=True)
+    tk.Label(_tabs_outer, text="Záložky — viditelnost a pořadí", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 4))
+    tk.Label(_tabs_outer,
+             text="Zaškrtni záložky které chceš vidět. Pořadí měň šipkami. Změny se projeví po restartu programu.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9)).pack(anchor='w', pady=(0, 14))
+
+    _tab_cfg = get_tab_config()
+    # Přidej label z ALL_MAIN_TABS
+    _label_map = {k: lbl for k, lbl, _ in ALL_MAIN_TABS}
+    _required_map = {k: req for k, _, req in ALL_MAIN_TABS}
+
+    # Vnitřní frame pro seznam záložek
+    _list_frame = tk.Frame(_tabs_outer, bg=DT_SURFACE, padx=12, pady=8)
+    _list_frame.pack(fill='both', expand=True)
+
+    _row_widgets = []  # list of (frame, key, visible_var)
+
+    def _rebuild_rows():
+        for w in _list_frame.winfo_children():
+            w.destroy()
+        _row_widgets.clear()
+        for i, entry in enumerate(_tab_cfg):
+            key = entry['key']
+            label = _label_map.get(key, key).strip()
+            required = _required_map.get(key, False)
+            visible = entry.get('visible', True)
+
+            row = tk.Frame(_list_frame, bg=DT_SURFACE if i % 2 == 0 else DT_PANEL)
+            row.pack(fill='x', pady=1)
+
+            v = tk.BooleanVar(value=visible)
+            cb = tk.Checkbutton(row, variable=v, bg=row.cget('bg'),
+                                activebackground=row.cget('bg'), selectcolor=DT_BG,
+                                cursor='hand2' if not required else 'arrow',
+                                state='normal' if not required else 'disabled')
+            cb.pack(side='left', padx=(6, 4))
+
+            lbl_text = label + (' 🔒' if required else '')
+            tk.Label(row, text=lbl_text, bg=row.cget('bg'), fg=DT_TEXT if (visible or required) else DT_SUBTEXT,
+                     font=('Segoe UI', 10)).pack(side='left', padx=4)
+
+            if required:
+                v.set(True)
+
+            # Šipky nahoru / dolů
+            btn_frame = tk.Frame(row, bg=row.cget('bg'))
+            btn_frame.pack(side='right', padx=6)
+
+            def _move(idx=i, direction=-1):
+                ni = idx + direction
+                if 0 <= ni < len(_tab_cfg):
+                    _tab_cfg[idx], _tab_cfg[ni] = _tab_cfg[ni], _tab_cfg[idx]
+                    _rebuild_rows()
+
+            tk.Button(btn_frame, text='▲', command=lambda d=-1, idx=i: _move(idx, d),
+                      bg=DT_BTN, fg=DT_TEXT, relief='flat', font=('Segoe UI', 8),
+                      padx=4, pady=1, cursor='hand2').pack(side='left', padx=1)
+            tk.Button(btn_frame, text='▼', command=lambda d=1, idx=i: _move(idx, d),
+                      bg=DT_BTN, fg=DT_TEXT, relief='flat', font=('Segoe UI', 8),
+                      padx=4, pady=1, cursor='hand2').pack(side='left')
+
+            _row_widgets.append((row, key, v))
+
+    _rebuild_rows()
+
+    def _save_tab_cfg():
+        for row, key, v in _row_widgets:
+            for entry in _tab_cfg:
+                if entry['key'] == key:
+                    if not _required_map.get(key, False):
+                        entry['visible'] = v.get()
+        save_tab_config(_tab_cfg)
+        messagebox.showinfo("✓ Uloženo",
+                            "Nastavení záložek uloženo.\nZměny se projeví při příštím spuštění programu.", parent=sw)
+
+    tk.Button(_tabs_outer, text="💾  Uložit nastavení záložek",
+              command=_save_tab_cfg,
+              bg='#15803d', fg='white', font=('Segoe UI', 10, 'bold'),
+              padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w', pady=(14, 0))
 
     nb.select(initial_tab)
 
@@ -11334,6 +11567,23 @@ def show_main_screen(p_name):
     tab_tv = ttk.Frame(nb)
     nb.add(tab_tv, text='  TRADINGVIEW GRAF  ')
 
+    # ── Aplikuj pořadí a viditelnost záložek dle nastavení ────────────────────
+    _main_tab_frames = {
+        'zapis':       (tab1,        '  ZÁPIS  '),
+        'analyza':     (tab2,        '  ANALÝZA  '),
+        'galerie':     (tab3,        '  GALERIE  '),
+        'pravidla':    (tab_rules,   '  MOJE PRAVIDLA  '),
+        'monte_carlo': (tab5,        '  MONTE CARLO  '),
+        'periody':     (tab_periods, '  📅 PERIODY  '),
+        'faktury':     (tab_inv,     '  📄 FAKTURY  '),
+        'konzistence': (tab_konz,    '  📊 KONZISTENCE  '),
+        'ict':         (tab_ict,     '  📚 ICT ACADEMY  '),
+        'yt':          (tab_yt,      '  📥 YT DOWNLOADER  '),
+        'ctrader':     (tab_ct,      '  📡 cTRADER  '),
+        'tradingview': (tab_tv,      '  TRADINGVIEW GRAF  '),
+    }
+    apply_tab_order(nb, _main_tab_frames)
+
     for w in [cas_otevreni_entry, cas_zavreni_entry, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry, fibo_combo, session_combo, symbol_combo]:
         w.bind('<KeyRelease>', lambda e: [update_calculated_fields(), calculate_auto_score()])
         if isinstance(w, ttk.Combobox): w.bind('<<ComboboxSelected>>', lambda e: [update_calculated_fields(), calculate_auto_score()])
@@ -11352,17 +11602,17 @@ def show_main_screen(p_name):
 
     def on_tab_changed(event):
         try:
-            sel = nb.index("current")
-            if sel == 1:
+            sel = nb.select()  # aktuální frame id
+            if sel == str(tab2):
                 update_statistics()
-            elif sel == 2:
+            elif sel == str(tab3):
                 update_gallery()
-            elif sel == nb.index(tab_periods):
+            elif sel == str(tab_periods):
                 if not tab_periods.winfo_children():
                     setup_periods_tab(tab_periods)
                 else:
                     update_periods_analysis()
-            elif sel == nb.index(tab_tv):
+            elif sel == str(tab_tv):
                 if not tab_tv.winfo_children():
                     setup_tradingview_tab(tab_tv)
         except tk.TclError:
