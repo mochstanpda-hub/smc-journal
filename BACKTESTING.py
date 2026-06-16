@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.122"
+VERSION = "1.5.123"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11319,21 +11319,6 @@ def show_main_screen(p_name):
     tk.Button(hb, text="✕  MENU", command=show_intro_screen,
               bg=DT_LOSS_BG, fg=DT_LOSS_FG,
               font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
-    def _exit_with_sync():
-        cfg = _sync_load_cfg()
-        if cfg.get('token'):
-            _exit_lbl = tk.Label(hb, text="⏳ Ukládám...", bg=DT_PANEL, fg='#f59e0b',
-                                 font=('Segoe UI', 9))
-            _exit_lbl.pack(side='right', padx=8)
-            def _after_sync(msg):
-                root.destroy()
-            _sync_silent(on_done=_after_sync)
-        else:
-            root.destroy()
-
-    tk.Button(hb, text="✕  UKONČIT", command=_exit_with_sync,
-              bg='#7f1d1d', fg='#fca5a5',
-              font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="⚙  NASTAVENÍ", command=open_settings_window,
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
@@ -12364,6 +12349,15 @@ def show_login_screen():
              font=('Segoe UI', 9)).pack(side='bottom', anchor='e', padx=18, pady=8)
 
 
+def _exit_app():
+    """Ukončí program — před zavřením provede sync pokud je uživatel přihlášen."""
+    cfg = _sync_load_cfg()
+    if cfg.get('token'):
+        _sync_silent(on_done=lambda msg: root.destroy())
+    else:
+        root.destroy()
+
+
 def show_intro_screen():
     global root
     for w in root.winfo_children(): w.destroy()
@@ -12436,6 +12430,11 @@ def show_intro_screen():
     tk.Button(bottom_bar, text="🔄  Aktualizace",
               command=lambda: check_for_updates(silent=False),
               bg=DT_BTN, fg=DT_TEXT, font=('Segoe UI', 9, 'bold'),
+              padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
+
+    tk.Button(bottom_bar, text="✕  Ukončit",
+              command=_exit_app,
+              bg='#7f1d1d', fg='#fca5a5', font=('Segoe UI', 9, 'bold'),
               padx=14, pady=6, relief='flat', cursor='hand2').pack(side='left', padx=(0,8))
 
     tk.Button(bottom_bar, text="📄  Faktury",
