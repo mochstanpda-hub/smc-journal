@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.121"
+VERSION = "1.5.122"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1010,6 +1010,13 @@ def _sync_post(token, trades, on_progress=None):
     for i, t in enumerate(trades, 1):
         tid = t.get('id')
         img_path = t.pop('_img_path', None)
+        _web_id = t.pop('_web_id', '') or ''
+        # Web-created trade (má web_id) které bylo smazáno na serveru → přeskočit
+        # Bude odstraněno z lokálního CSV při _sync_pull
+        if _web_id and tid not in server_map:
+            skipped += 1
+            if on_progress: on_progress(i, total, ok, err, skipped)
+            continue
         if tid in server_map:
             # Obchod existuje — zkontroluj jestli chybí project
             if server_map[tid] is None and t.get('project'):
@@ -1187,6 +1194,7 @@ def _sync_read_trades():
                         'poznamka':  pozn or None,
                         'project':   f"{src}/{proj}",
                         '_img_path': first_img,  # lokální cesta k prvnímu obrázku (neposílá se do API)
+                        '_web_id':   row.get('web_id', '') or '',  # UUID ze serveru, nepošle se do API
                     })
     return trades
 
@@ -1207,7 +1215,7 @@ def _sync_pull(token):
         SRV_TO_CSV = {'poznamka': 'poznamka', 'tags': 'tags',
                       'vysledek': 'vysledek', 'session': 'session', 'rrr': 'rrr'}
 
-        # ── Fáze 1: aktualizace existujících lokálních řádků ────────────────────
+        # ── Fáze 1: aktualizace existujících lokálních řádků + mazání web-smazaných ─
         local_ids = set()    # MD5 hashes lokálních obchodů
         local_web_ids = set()  # web_id hodnoty (UUID ze serveru) již importovaných
 
@@ -1225,31 +1233,36 @@ def _sync_pull(token):
                     rows = list(reader)
 
                 changed = False
+                kept_rows = []
                 for row in rows:
-                    # Zaznamenej existující web_id (již importované)
-                    if row.get('web_id'):
-                        local_web_ids.add(row['web_id'])
+                    wid = row.get('web_id', '')
+                    if wid:
+                        if wid not in srv:
+                            # Web obchod byl smazán na serveru → odstraň z lokálního CSV
+                            changed = True
+                            continue
+                        local_web_ids.add(wid)
                     uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
                     uid = hashlib.md5(uid_src.encode()).hexdigest()
                     local_ids.add(uid)
-                    if uid not in srv:
-                        continue
-                    st = srv[uid]
-                    for srv_field, csv_col in SRV_TO_CSV.items():
-                        if csv_col not in fieldnames:
-                            continue
-                        srv_val = st.get(srv_field)
-                        srv_str = str(srv_val) if srv_val is not None else ''
-                        if row.get(csv_col, '') != srv_str:
-                            row[csv_col] = srv_str
-                            changed = True
+                    if uid in srv:
+                        st = srv[uid]
+                        for srv_field, csv_col in SRV_TO_CSV.items():
+                            if csv_col not in fieldnames:
+                                continue
+                            srv_val = st.get(srv_field)
+                            srv_str = str(srv_val) if srv_val is not None else ''
+                            if row.get(csv_col, '') != srv_str:
+                                row[csv_col] = srv_str
+                                changed = True
+                    kept_rows.append(row)
 
                 if changed:
                     tmp = csv_path + '.tmp'
                     with open(tmp, 'w', encoding='utf-8', newline='') as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
-                        writer.writerows(rows)
+                        writer.writerows(kept_rows)
                     shutil.move(tmp, csv_path)
                     updated_total += 1
 
