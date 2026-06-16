@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.120"
+VERSION = "1.5.121"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1149,8 +1149,12 @@ def _sync_read_trades():
             with open(csv_path, encoding='utf-8', newline='') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
-                    uid = hashlib.md5(uid_src.encode()).hexdigest()
+                    # Obchody importované z webu mají uložen UUID ze serveru (web_id)
+                    if row.get('web_id'):
+                        uid = row['web_id']
+                    else:
+                        uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
+                        uid = hashlib.md5(uid_src.encode()).hexdigest()
                     datum = (row.get('cas_otevreni') or '')[:10] or None
                     pozn  = row.get('poznamka') or ''
                     duvod = row.get('duvod') or ''
@@ -1187,8 +1191,8 @@ def _sync_read_trades():
     return trades
 
 def _sync_pull(token):
-    """Stáhne obchody ze serveru a aktualizuje lokální CSV (poznamka, tags, vysledek, session, rrr)."""
-    import csv, hashlib, urllib.request, tempfile, shutil
+    """Stáhne obchody ze serveru, aktualizuje lokální CSV a importuje nové web obchody."""
+    import csv, hashlib, urllib.request, shutil
     try:
         req = urllib.request.Request(
             WEB_API_URL + '/trades',
@@ -1196,14 +1200,16 @@ def _sync_pull(token):
         with urllib.request.urlopen(req, timeout=15) as r:
             server_trades = json.loads(r.read())
         if not server_trades:
-            return 0
+            return 0, 0
         srv = {t['id']: t for t in server_trades}
 
         updated_total = 0
-        EDITABLE = ['poznamka', 'tags', 'vysledek', 'session', 'rrr']
-        # Mapování server pole → CSV sloupec
         SRV_TO_CSV = {'poznamka': 'poznamka', 'tags': 'tags',
                       'vysledek': 'vysledek', 'session': 'session', 'rrr': 'rrr'}
+
+        # ── Fáze 1: aktualizace existujících lokálních řádků ────────────────────
+        local_ids = set()    # MD5 hashes lokálních obchodů
+        local_web_ids = set()  # web_id hodnoty (UUID ze serveru) již importovaných
 
         for folder in [DIR_BACKTEST, DIR_REAL]:
             if not os.path.isdir(folder):
@@ -1215,13 +1221,17 @@ def _sync_pull(token):
                     continue
                 with open(csv_path, encoding='utf-8', newline='') as f:
                     reader = csv.DictReader(f)
-                    fieldnames = reader.fieldnames or []
+                    fieldnames = list(reader.fieldnames or [])
                     rows = list(reader)
 
                 changed = False
                 for row in rows:
+                    # Zaznamenej existující web_id (již importované)
+                    if row.get('web_id'):
+                        local_web_ids.add(row['web_id'])
                     uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
                     uid = hashlib.md5(uid_src.encode()).hexdigest()
+                    local_ids.add(uid)
                     if uid not in srv:
                         continue
                     st = srv[uid]
@@ -1242,9 +1252,73 @@ def _sync_pull(token):
                         writer.writerows(rows)
                     shutil.move(tmp, csv_path)
                     updated_total += 1
-        return updated_total
+
+        # ── Fáze 2: import nových obchodů z webu ────────────────────────────────
+        new_count = 0
+        for st in server_trades:
+            tid = st['id']
+            proj_field = st.get('project') or ''
+            if not proj_field or '/' not in proj_field:
+                continue  # nemá projekt → nelze určit lokální složku
+            if tid in local_ids or tid in local_web_ids:
+                continue  # již existuje lokálně
+
+            src, proj = proj_field.split('/', 1)
+            folder = DIR_BACKTEST if src == 'BACKTEST' else DIR_REAL
+            csv_path = os.path.join(folder, proj, 'trades.csv')
+            os.makedirs(os.path.join(folder, proj), exist_ok=True)
+
+            def _fs(val):
+                return str(val) if val is not None and val != '' else ''
+
+            new_row = {
+                'ucet': '', 'cas_otevreni': st.get('datum') or '',
+                'cas_zavreni': '', 'symbol': st.get('symbol') or '',
+                'smer': st.get('smer') or '',
+                'vstupni_hodnota': _fs(st.get('vstup')),
+                'stoploss': _fs(st.get('sl')), 'takeprofit': _fs(st.get('tp')),
+                'rrr': _fs(st.get('rrr')), 'pips': '', 'session': st.get('session') or '',
+                'timeframe_graf': '', 'timeframe_vstup': '', 'fibo': '',
+                'duvod': '', 'poznamka': st.get('poznamka') or '',
+                'vysledek': st.get('vysledek') or '', 'den_tydne': '',
+                'delka_obchodu': '', 'slippage': '', 'kvalita': '',
+                'obrazky': '', 'news': '', 'news_event': '',
+                'checklist_ratio': '', 'tags': st.get('tags') or '',
+                'zisk_mena': '', 'web_id': tid,
+            }
+
+            if os.path.isfile(csv_path):
+                with open(csv_path, encoding='utf-8', newline='') as f:
+                    reader = csv.DictReader(f)
+                    fn = list(reader.fieldnames or [])
+                    existing = list(reader)
+                # Přidej chybějící sloupce
+                if 'web_id' not in fn:
+                    fn.append('web_id')
+                    for r in existing: r['web_id'] = ''
+                for k in new_row:
+                    if k not in fn:
+                        fn.append(k)
+                        for r in existing: r[k] = ''
+                existing.append(new_row)
+                tmp = csv_path + '.tmp'
+                with open(tmp, 'w', encoding='utf-8', newline='') as f:
+                    w = csv.DictWriter(f, fieldnames=fn, extrasaction='ignore')
+                    w.writeheader(); w.writerows(existing)
+                shutil.move(tmp, csv_path)
+            else:
+                # Nový projekt — vytvoř CSV od začátku
+                fn = list(new_row.keys())
+                with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                    w = csv.DictWriter(f, fieldnames=fn, extrasaction='ignore')
+                    w.writeheader(); w.writerow(new_row)
+
+            local_web_ids.add(tid)
+            new_count += 1
+
+        return updated_total, new_count
     except Exception:
-        return 0
+        return 0, 0
 
 
 _konzistence_tab_frame = None  # nastaví se při startu UI
@@ -1277,11 +1351,16 @@ def _sync_silent(on_done=None):
                 _sync_post(token, trades)
             _sync_konzistence(token)
             _sync_xp(token)
-            _sync_pull(token)
+            _, new_trades = _sync_pull(token)
+            if new_trades > 0:
+                root.after(0, update_listbox)
             pulled = _sync_pull_konzistence(token)
             if pulled:
                 root.after(0, _refresh_konzistence_tab)
-            if on_done: on_done('✓ Sync dokončen')
+            msg = f'✓ Sync dokončen'
+            if new_trades > 0:
+                msg += f' (+{new_trades} nových z webu)'
+            if on_done: on_done(msg)
         except Exception as ex:
             if on_done: on_done(f'Sync chyba: {ex}')
 
