@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.126"
+VERSION = "1.5.127"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1234,6 +1234,27 @@ def _sync_read_trades():
                     })
     return trades
 
+def _sync_download_photo(token, trade_id, images_dir, photo_path_on_server):
+    """Stáhne foto ze serveru do lokálního images/ adresáře. Vrátí jméno souboru nebo None."""
+    import urllib.request, urllib.parse
+    try:
+        url = WEB_API_URL + f'/trades/{trade_id}/photo?token=' + urllib.parse.quote(token)
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as r:
+            content = r.read()
+        if not content:
+            return None
+        ext = os.path.splitext(photo_path_on_server)[1] or '.jpg'
+        local_name = f"web_{trade_id[:12]}{ext}"
+        os.makedirs(images_dir, exist_ok=True)
+        dest = os.path.join(images_dir, local_name)
+        if not os.path.exists(dest):
+            with open(dest, 'wb') as f:
+                f.write(content)
+        return local_name
+    except Exception:
+        return None
+
+
 def _sync_pull(token):
     """Stáhne obchody ze serveru, aktualizuje lokální CSV a importuje nové web obchody."""
     import csv, hashlib, urllib.request, shutil
@@ -1275,6 +1296,7 @@ def _sync_pull(token):
 
                 changed = False
                 kept_rows = []
+                images_dir = os.path.join(folder, proj, 'images')
                 for row in rows:
                     wid = row.get('web_id', '')
                     if wid:
@@ -1286,8 +1308,9 @@ def _sync_pull(token):
                     uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
                     uid = hashlib.md5(uid_src.encode()).hexdigest()
                     local_ids.add(uid)
-                    if uid in srv:
-                        st = srv[uid]
+                    # Web-importované obchody jsou na serveru pod UUID (wid), PC obchody pod MD5 (uid)
+                    st = srv.get(wid) if wid else srv.get(uid)
+                    if st:
                         for srv_field, csv_col in SRV_TO_CSV.items():
                             if csv_col not in fieldnames:
                                 continue
@@ -1295,6 +1318,12 @@ def _sync_pull(token):
                             srv_str = str(srv_val).replace('T', ' ') if srv_val is not None else ''
                             if row.get(csv_col, '') != srv_str:
                                 row[csv_col] = srv_str
+                                changed = True
+                        # Stáhni foto pokud server ho má a lokálně chybí
+                        if st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
+                            local_name = _sync_download_photo(token, st['id'], images_dir, st['photo_path'])
+                            if local_name:
+                                row['obrazky'] = local_name
                                 changed = True
                     kept_rows.append(row)
 
@@ -1374,6 +1403,13 @@ def _sync_pull(token):
                 with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                     w = csv.DictWriter(f, fieldnames=fn, extrasaction='ignore')
                     w.writeheader(); w.writerow(new_row)
+
+            # Stáhni foto ze serveru pokud existuje
+            if st.get('photo_path'):
+                img_dir = os.path.join(folder, proj, 'images')
+                local_name = _sync_download_photo(token, tid, img_dir, st['photo_path'])
+                if local_name:
+                    new_row['obrazky'] = local_name
 
             local_web_ids.add(tid)
             new_count += 1
