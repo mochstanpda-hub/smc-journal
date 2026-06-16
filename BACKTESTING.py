@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.116"
+VERSION = "1.5.117"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -930,11 +930,31 @@ def _sync_xp(token):
     except Exception:
         pass
 
+def _sync_get_server_ids(token):
+    """Vrátí set ID obchodů které už jsou na serveru."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            WEB_API_URL + '/trades/ids',
+            headers={'Authorization': 'Bearer ' + token})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return set(json.loads(r.read()))
+    except Exception:
+        return set()
+
 def _sync_post(token, trades, on_progress=None):
     import urllib.request
-    ok = err = 0
+    # Stáhni IDs co už server má — uploadni jen nové
+    server_ids = _sync_get_server_ids(token)
+    new_trades = [t for t in trades if t.get('id') not in server_ids]
+    ok = err = skipped = 0
     total = len(trades)
     for i, t in enumerate(trades, 1):
+        if t.get('id') in server_ids:
+            skipped += 1
+            if on_progress:
+                on_progress(i, total, ok, err, skipped)
+            continue
         body = json.dumps(t, ensure_ascii=False).encode('utf-8')
         req  = urllib.request.Request(
             WEB_API_URL + '/trades',
@@ -948,8 +968,8 @@ def _sync_post(token, trades, on_progress=None):
         except Exception:
             err += 1
         if on_progress:
-            on_progress(i, total, ok, err)
-    return ok, err
+            on_progress(i, total, ok, err, skipped)
+    return ok, err, skipped
 
 def _sync_read_trades():
     import csv, hashlib
@@ -992,6 +1012,7 @@ def _sync_read_trades():
                         'session':  row.get('session') or None,
                         'tags':     row.get('tags') or None,
                         'poznamka': pozn or None,
+                        'project':  f"{src}/{proj}",
                     })
     return trades
 
@@ -1118,12 +1139,13 @@ def open_sync_dialog():
               relief='flat', font=('Segoe UI', 10), padx=14, pady=8,
               command=dlg.destroy).pack(side='left')
 
-    def _on_progress(done, total, ok, err):
+    def _on_progress(done, total, ok, err, skipped=0):
         pct = done / total * 100
-        _d, _t, _ok, _err, _pct = done, total, ok, err, pct
+        _d, _t, _ok, _err, _skip, _pct = done, total, ok, err, skipped, pct
         def _upd():
             prog_var.set(_pct)
-            count_var.set(f"{_d} / {_t}   ✓ {_ok}" + (f"   ✗ {_err}" if _err else ''))
+            skip_txt = f"   ⏭ {_skip} přeskočeno" if _skip else ''
+            count_var.set(f"{_d} / {_t}   ✓ {_ok}{skip_txt}" + (f"   ✗ {_err}" if _err else ''))
             status_var.set(f"Nahrávám...  {int(_pct)} %")
             status_lbl.config(fg=DT_SUBTEXT)
         dlg.after(0, _upd)
@@ -1157,7 +1179,7 @@ def open_sync_dialog():
                     count_var.set(f"0 / {_n}")
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _set_uploading)
-                ok, err = _sync_post(token, trades, on_progress=_on_progress)
+                ok, err, skipped = _sync_post(token, trades, on_progress=_on_progress)
 
                 # ── Konzistence ───────────────────────────────────────────────
                 def _ui_konz():
@@ -1186,7 +1208,8 @@ def open_sync_dialog():
                 dlg.after(0, lambda: prog_var.set(100))
 
                 _pull_txt = f"  ↓ {pulled} CSV aktualizováno" if pulled else ''
-                _msg = f"✓ Hotovo!  Obchody: {ok}  Konzistence: ✓  XP: ✓{_pull_txt}" + (f"   ❌ Chyb: {err}" if err else '')
+                _skip_txt = f"  ⏭ {skipped} přeskočeno" if skipped else ''
+                _msg = f"✓ Hotovo!  Nové: {ok}{_skip_txt}  Konzistence: ✓  XP: ✓{_pull_txt}" + (f"   ❌ Chyb: {err}" if err else '')
                 _fg  = '#22c55e' if not err else '#f59e0b'
                 def _done():
                     status_var.set(_msg)
