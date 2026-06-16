@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.117"
+VERSION = "1.5.118"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -904,6 +904,13 @@ def _sync_api_post(token, path, body):
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
+def _sync_ensure_project(token, name, proj_type='real'):
+    """Vytvoří projekt na serveru pokud neexistuje. Volá se při každém syncu."""
+    try:
+        _sync_api_post(token, '/projects/ensure', {'name': name, 'type': proj_type})
+    except Exception:
+        pass
+
 def _sync_konzistence(token):
     try:
         if not os.path.exists(KONZISTENCE_FILE):
@@ -930,27 +937,40 @@ def _sync_xp(token):
     except Exception:
         pass
 
-def _sync_get_server_ids(token):
-    """Vrátí set ID obchodů které už jsou na serveru."""
+def _sync_get_server_trades_map(token):
+    """Vrátí {id: project} pro všechny obchody na serveru."""
     import urllib.request
     try:
         req = urllib.request.Request(
-            WEB_API_URL + '/trades/ids',
+            WEB_API_URL + '/trades',
             headers={'Authorization': 'Bearer ' + token})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return set(json.loads(r.read()))
+        with urllib.request.urlopen(req, timeout=15) as r:
+            trades = json.loads(r.read())
+        return {t['id']: t.get('project') for t in trades}
     except Exception:
-        return set()
+        return {}
 
 def _sync_post(token, trades, on_progress=None):
     import urllib.request
-    # Stáhni IDs co už server má — uploadni jen nové
-    server_ids = _sync_get_server_ids(token)
-    new_trades = [t for t in trades if t.get('id') not in server_ids]
+    # Zajisti že všechny projekty existují na serveru
+    seen_projects = set()
+    for t in trades:
+        p = t.get('project')
+        if p and p not in seen_projects:
+            seen_projects.add(p)
+            _sync_ensure_project(token, p, 'real')
+
+    server_map = _sync_get_server_trades_map(token)  # {id: project_or_none}
     ok = err = skipped = 0
     total = len(trades)
+    proj_updates = []  # trades to update project field
+
     for i, t in enumerate(trades, 1):
-        if t.get('id') in server_ids:
+        tid = t.get('id')
+        if tid in server_map:
+            # Obchod existuje — zkontroluj jestli chybí project
+            if server_map[tid] is None and t.get('project'):
+                proj_updates.append({'id': tid, 'project': t['project']})
             skipped += 1
             if on_progress:
                 on_progress(i, total, ok, err, skipped)
@@ -969,7 +989,96 @@ def _sync_post(token, trades, on_progress=None):
             err += 1
         if on_progress:
             on_progress(i, total, ok, err, skipped)
+
+    # Bulk update chybějícího project pole
+    if proj_updates:
+        try:
+            body = json.dumps({'updates': proj_updates}, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                WEB_API_URL + '/trades/set-projects', data=body,
+                headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+                method='POST')
+            urllib.request.urlopen(req, timeout=10).close()
+        except Exception:
+            pass
+
     return ok, err, skipped
+
+
+def _sync_pull_konzistence(token):
+    """Stáhne konzistenci ze serveru a aktualizuje lokální JSON."""
+    import urllib.request
+    try:
+        headers = {'Authorization': 'Bearer ' + token}
+
+        # Stáhni pravidla
+        req = urllib.request.Request(WEB_API_URL + '/konzistence/rules', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            srv_rules = json.loads(r.read()).get('rules', [])
+
+        # Stáhni týdny
+        req = urllib.request.Request(WEB_API_URL + '/konzistence/weeks', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            srv_weeks = json.loads(r.read())
+
+        if not srv_rules and not srv_weeks:
+            return False
+
+        # Načti lokální data
+        local = {'rules': [], 'weeks': []}
+        if os.path.exists(KONZISTENCE_FILE):
+            try:
+                with open(KONZISTENCE_FILE, encoding='utf-8') as f:
+                    local = json.load(f)
+            except Exception:
+                pass
+
+        # Aktualizuj pravidla (server má plain strings, lokálně mohou být dicts)
+        local_rules_by_text = {}
+        for r in local.get('rules', []):
+            text = r['text'] if isinstance(r, dict) else r
+            local_rules_by_text[text] = r
+
+        new_rules = []
+        for rule_text in srv_rules:
+            if rule_text in local_rules_by_text:
+                new_rules.append(local_rules_by_text[rule_text])
+            else:
+                new_rules.append(rule_text)
+        local['rules'] = new_rules
+
+        # Aktualizuj týdny — match podle labelu
+        local_weeks = {w.get('label', ''): w for w in local.get('weeks', [])}
+        for sw in srv_weeks:
+            label = sw.get('label', '')
+            days  = sw.get('days', [])
+            # Převeď server formát {rule: {str_idx: state}} → lokální {rule: [state, ...]}
+            new_data = {}
+            for rule, cells in (sw.get('data') or {}).items():
+                if isinstance(cells, dict):
+                    n = max((int(k) for k in cells.keys()), default=-1) + 1
+                    arr = [''] * max(n, len(days))
+                    for k, v in cells.items():
+                        arr[int(k)] = v or ''
+                elif isinstance(cells, list):
+                    arr = list(cells)
+                else:
+                    arr = []
+                new_data[rule] = arr
+
+            if label in local_weeks:
+                local_weeks[label]['data'] = new_data
+                local_weeks[label]['days'] = days
+            else:
+                local_weeks[label] = {'label': label, 'days': days, 'data': new_data}
+
+        local['weeks'] = list(local_weeks.values())
+
+        with open(KONZISTENCE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(local, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
 
 def _sync_read_trades():
     import csv, hashlib
@@ -1075,6 +1184,31 @@ def _sync_pull(token):
         return updated_total
     except Exception:
         return 0
+
+
+def _sync_silent(on_done=None):
+    """Tichý sync na pozadí — bez dialogu. Volá on_done(msg) po dokončení."""
+    import threading
+    cfg = _sync_load_cfg()
+    token = cfg.get('token', '')
+    if not token:
+        if on_done: on_done(None)
+        return
+
+    def _run():
+        try:
+            trades = _sync_read_trades()
+            if trades:
+                _sync_post(token, trades)
+            _sync_konzistence(token)
+            _sync_xp(token)
+            _sync_pull(token)
+            _sync_pull_konzistence(token)
+            if on_done: on_done('✓ Sync dokončen')
+        except Exception as ex:
+            if on_done: on_done(f'Sync chyba: {ex}')
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def open_sync_dialog():
@@ -1205,6 +1339,13 @@ def open_sync_dialog():
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_pull)
                 pulled = _sync_pull(token)
+
+                # ── Pull konzistence ze serveru ───────────────────────────────
+                def _ui_pull_konz():
+                    status_var.set("Stahuji konzistenci z webu...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_pull_konz)
+                _sync_pull_konzistence(token)
                 dlg.after(0, lambda: prog_var.set(100))
 
                 _pull_txt = f"  ↓ {pulled} CSV aktualizováno" if pulled else ''
@@ -11009,6 +11150,21 @@ def show_main_screen(p_name):
     tk.Button(hb, text="✕  MENU", command=show_intro_screen,
               bg=DT_LOSS_BG, fg=DT_LOSS_FG,
               font=('Segoe UI', 9, 'bold'), padx=12, pady=6).pack(side='right', padx=4, pady=10)
+    def _exit_with_sync():
+        cfg = _sync_load_cfg()
+        if cfg.get('token'):
+            _exit_lbl = tk.Label(hb, text="⏳ Ukládám...", bg=DT_PANEL, fg='#f59e0b',
+                                 font=('Segoe UI', 9))
+            _exit_lbl.pack(side='right', padx=8)
+            def _after_sync(msg):
+                root.destroy()
+            _sync_silent(on_done=_after_sync)
+        else:
+            root.destroy()
+
+    tk.Button(hb, text="✕  UKONČIT", command=_exit_with_sync,
+              bg='#7f1d1d', fg='#fca5a5',
+              font=('Segoe UI', 9, 'bold'), padx=10, pady=6).pack(side='right', padx=4, pady=10)
     tk.Button(hb, text="⚙  NASTAVENÍ", command=open_settings_window,
               bg=DT_BTN, fg=DT_SUBTEXT,
               font=('Segoe UI', 9), padx=10, pady=6).pack(side='right', padx=4, pady=10)
@@ -11922,6 +12078,8 @@ def show_login_screen():
         current_user = user
         _apply_user_paths(user['home'])
         show_intro_screen()
+        # Tichý sync na pozadí po přihlášení
+        root.after(1500, lambda: _sync_silent())
 
     def _ask_password(user):
         dlg = tk.Toplevel(root)
