@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.125"
+VERSION = "1.5.126"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -951,14 +951,26 @@ def _sync_ensure_project(token, name, proj_type='real'):
         pass
 
 def _sync_accounts(token):
-    """Nahraje seznam názvů účtů na server, aby je bylo možné vybrat na webu."""
+    """Nahraje seznam názvů účtů na server — prohledá accounts.json ve všech projektech."""
     import urllib.request
     try:
-        accounts = load_accounts()
-        names = [a.get('nazev', '').strip() for a in accounts if a.get('nazev', '').strip()]
+        names = set()
+        # Sbírej účty ze všech REAL projektů (BACKTEST účty neeviduje)
+        if os.path.isdir(DIR_REAL):
+            for proj in os.listdir(DIR_REAL):
+                af = os.path.join(DIR_REAL, proj, 'accounts.json')
+                if os.path.isfile(af):
+                    try:
+                        with open(af, 'r', encoding='utf-8') as f:
+                            for a in json.load(f):
+                                n = a.get('nazev', '').strip()
+                                if n:
+                                    names.add(n)
+                    except Exception:
+                        pass
         if not names:
             return
-        body = json.dumps({'accounts': names}, ensure_ascii=False).encode('utf-8')
+        body = json.dumps({'accounts': sorted(names)}, ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(
             WEB_API_URL + '/accounts/sync', data=body,
             headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
