@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.119"
+VERSION = "1.5.120"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1247,6 +1247,20 @@ def _sync_pull(token):
         return 0
 
 
+_konzistence_tab_frame = None  # nastaví se při startu UI
+
+def _refresh_konzistence_tab():
+    """Znovu postaví záložku Konzistence z lokálního JSON. Musí běžet na hlavním vlákně."""
+    global _konzistence_tab_frame
+    if _konzistence_tab_frame is None:
+        return
+    try:
+        for w in _konzistence_tab_frame.winfo_children():
+            w.destroy()
+        setup_konzistence_tab(_konzistence_tab_frame)
+    except Exception:
+        pass
+
 def _sync_silent(on_done=None):
     """Tichý sync na pozadí — bez dialogu. Volá on_done(msg) po dokončení."""
     import threading
@@ -1264,7 +1278,9 @@ def _sync_silent(on_done=None):
             _sync_konzistence(token)
             _sync_xp(token)
             _sync_pull(token)
-            _sync_pull_konzistence(token)
+            pulled = _sync_pull_konzistence(token)
+            if pulled:
+                root.after(0, _refresh_konzistence_tab)
             if on_done: on_done('✓ Sync dokončen')
         except Exception as ex:
             if on_done: on_done(f'Sync chyba: {ex}')
@@ -11787,6 +11803,8 @@ def show_main_screen(p_name):
     tab_konz = ttk.Frame(nb)
     nb.add(tab_konz, text='  📊 KONZISTENCE  ')
     setup_konzistence_tab(tab_konz)
+    global _konzistence_tab_frame
+    _konzistence_tab_frame = tab_konz
 
     # TAB ICT ACADEMY
     tab_ict = ttk.Frame(nb)
