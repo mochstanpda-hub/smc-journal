@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.136"
+VERSION = "1.5.137"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1106,15 +1106,7 @@ def _sync_konzistence_file(token):
         # Merge
         merged = _merge_konzistence(local_data, server_data)
 
-        # PUT merged na server
-        body = json.dumps(merged, ensure_ascii=False).encode('utf-8')
-        req = urllib.request.Request(
-            WEB_API_URL + '/konzistence/data', data=body,
-            headers={**headers, 'Content-Type': 'application/json'},
-            method='PUT')
-        urllib.request.urlopen(req, timeout=10).close()
-
-        # Ulož merged lokálně (zachovej lokální rule objekty pokud existují)
+        # Obnov lokální rule objekty (mohou být dicts s extra poli)
         local_rules_by_text = {}
         for r in local_data.get('rules', []):
             text = r['text'] if isinstance(r, dict) else r
@@ -1123,11 +1115,30 @@ def _sync_konzistence_file(token):
         merged_local['rules'] = [
             local_rules_by_text.get(r, r) for r in merged['rules']
         ]
+
+        # Zjisti jestli se lokál změnil (přišly změny ze serveru/webu)
+        def _norm(d):
+            rr = sorted(r['text'] if isinstance(r, dict) else r for r in d.get('rules', []))
+            ww = sorted(d.get('weeks', []), key=lambda w: w.get('label', ''))
+            return json.dumps({'r': rr, 'w': ww}, sort_keys=True, ensure_ascii=False)
+        local_changed = _norm(local_data) != _norm(merged_local)
+
+        # Ulož lokálně PŘED PUT — aby se změny uložily i při chybě sítě
         with open(KONZISTENCE_FILE, 'w', encoding='utf-8') as f:
             json.dump(merged_local, f, ensure_ascii=False, indent=2)
 
-        # Vrátí True pokud se server lišil od lokálu (přišly nové změny)
-        return server_data != merged
+        # PUT merged na server (best effort)
+        try:
+            body = json.dumps(merged, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                WEB_API_URL + '/konzistence/data', data=body,
+                headers={**headers, 'Content-Type': 'application/json'},
+                method='PUT')
+            urllib.request.urlopen(req, timeout=10).close()
+        except Exception:
+            pass
+
+        return local_changed
     except Exception:
         return False
 
