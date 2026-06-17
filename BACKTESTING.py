@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.131"
+VERSION = "1.5.132"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1508,7 +1508,7 @@ def open_sync_dialog():
 
     dlg = tk.Toplevel(root)
     dlg.title("☁ Sync na tradeobd.fun")
-    dlg.geometry("420x380")
+    dlg.geometry("420x420")
     dlg.resizable(False, False)
     dlg.configure(bg=DT_BG)
     dlg.grab_set()
@@ -1535,7 +1535,14 @@ def open_sync_dialog():
 
     tk.Label(pad, text="Web heslo", bg=DT_BG, fg=DT_SUBTEXT,
              font=('Segoe UI', 9)).pack(anchor='w')
-    e_pass = _entry(pad, show='•'); e_pass.pack(fill='x', pady=(2, 16))
+    e_pass = _entry(pad, show='•'); e_pass.pack(fill='x', pady=(2, 6))
+    e_pass.insert(0, cfg.get('password', ''))
+
+    remember_var = tk.IntVar(value=1 if cfg.get('password') else 0)
+    tk.Checkbutton(pad, text="Pamatovat si heslo", variable=remember_var,
+                   bg=DT_BG, fg=DT_SUBTEXT, selectcolor=DT_PANEL,
+                   activebackground=DT_BG, activeforeground=DT_TEXT,
+                   font=('Segoe UI', 9)).pack(anchor='w', pady=(0, 12))
 
     # ── Progress ──────────────────────────────────────────────────────────────
     prog_frame = tk.Frame(pad, bg=DT_BG); prog_frame.pack(fill='x', pady=(0, 4))
@@ -1560,9 +1567,21 @@ def open_sync_dialog():
     sync_btn = tk.Button(btn_frame, text="☁  Spustit sync", bg='#3b82f6', fg='white',
                          relief='flat', font=('Segoe UI', 10, 'bold'), padx=14, pady=8)
     sync_btn.pack(side='left', padx=(0, 8))
+    reload_btn = tk.Button(btn_frame, text="↺  Načíst změny", bg='#22c55e', fg='white',
+                           relief='flat', font=('Segoe UI', 10, 'bold'), padx=14, pady=8,
+                           state='disabled')
+    reload_btn.pack(side='left', padx=(0, 8))
     tk.Button(btn_frame, text="Zavřít", bg=DT_BTN, fg=DT_SUBTEXT,
               relief='flat', font=('Segoe UI', 10), padx=14, pady=8,
               command=dlg.destroy).pack(side='left')
+
+    def _reload_ui():
+        update_listbox()
+        update_statistics()
+        status_var.set("✓ Změny načteny do programu.")
+        status_lbl.config(fg='#22c55e')
+
+    reload_btn.config(command=_reload_ui)
 
     def _on_progress(done, total, ok, err, skipped=0):
         pct = done / total * 100
@@ -1586,7 +1605,10 @@ def open_sync_dialog():
         def _thread():
             try:
                 token = _sync_login(u, p)
-                _sync_save_cfg({'username': u, 'token': token})
+                _cfg_to_save = {'username': u, 'token': token}
+                if remember_var.get():
+                    _cfg_to_save['password'] = p
+                _sync_save_cfg(_cfg_to_save)
                 def _set_reading():
                     status_var.set("Čtu obchody z PC...")
                     status_lbl.config(fg=DT_SUBTEXT)
@@ -1597,6 +1619,9 @@ def open_sync_dialog():
                         status_var.set("Žádné obchody k nahrání.")
                         status_lbl.config(fg=DT_SUBTEXT)
                         sync_btn.config(state='normal', text="☁  Spustit sync")
+                        reload_btn.config(state='normal')
+                        update_listbox()
+                        update_statistics()
                     dlg.after(0, _no_trades); return
                 _n = len(trades)
                 def _set_uploading():
@@ -1649,6 +1674,10 @@ def open_sync_dialog():
                     prog_var.set(100)
                     count_var.set('')
                     sync_btn.config(state='normal', text="☁  Znovu")
+                    reload_btn.config(state='normal')
+                    # Auto-refresh the trade list in main window
+                    update_listbox()
+                    update_statistics()
                 dlg.after(0, _done)
             except Exception as ex:
                 _emsg = str(ex)
