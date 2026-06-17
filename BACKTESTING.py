@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.130"
+VERSION = "1.5.131"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1485,13 +1485,14 @@ def _sync_silent(on_done=None):
             _sync_accounts(token)
             _sync_konzistence(token)
             _sync_xp(token)
-            _, new_trades = _sync_pull(token)
-            if new_trades > 0:
+            updated, new_trades = _sync_pull(token)
+            if updated > 0 or new_trades > 0:
                 root.after(0, update_listbox)
+                root.after(50, update_statistics)
             pulled = _sync_pull_konzistence(token)
             if pulled:
                 root.after(0, _refresh_konzistence_tab)
-            msg = f'✓ Sync dokončen'
+            msg = '✓ Sync dokončen'
             if new_trades > 0:
                 msg += f' (+{new_trades} nových z webu)'
             if on_done: on_done(msg)
