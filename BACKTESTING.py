@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.133"
+VERSION = "1.5.134"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1434,6 +1434,13 @@ def _sync_pull(token):
                 'zisk_mena': st.get('zisk_mena') or '', 'web_id': tid,
             }
 
+            # Stáhni foto PŘED zápisem do CSV — aby se jméno souboru uložilo do řádku
+            img_dir = os.path.join(folder, proj, 'images')
+            if st.get('photo_path'):
+                local_name = _sync_download_photo(token, tid, img_dir, st['photo_path'])
+                if local_name:
+                    new_row['obrazky'] = local_name
+
             if os.path.isfile(csv_path):
                 with open(csv_path, encoding='utf-8', newline='') as f:
                     reader = csv.DictReader(f)
@@ -1459,13 +1466,6 @@ def _sync_pull(token):
                 with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                     w = csv.DictWriter(f, fieldnames=fn, extrasaction='ignore')
                     w.writeheader(); w.writerow(new_row)
-
-            # Stáhni foto ze serveru pokud existuje
-            if st.get('photo_path'):
-                img_dir = os.path.join(folder, proj, 'images')
-                local_name = _sync_download_photo(token, tid, img_dir, st['photo_path'])
-                if local_name:
-                    new_row['obrazky'] = local_name
 
             local_web_ids.add(tid)
             new_count += 1
@@ -1500,14 +1500,13 @@ def _sync_silent(on_done=None):
 
     def _run():
         try:
-            # Pull první — aby lokální data byla aktuální před push
-            updated, new_trades = _sync_pull(token)
-            trades = _sync_read_trades()  # čti po pull
+            trades = _sync_read_trades()
             if trades:
                 _sync_post(token, trades)
             _sync_accounts(token)
             _sync_konzistence(token)
             _sync_xp(token)
+            updated, new_trades = _sync_pull(token)
             if updated > 0 or new_trades > 0:
                 root.after(0, update_listbox)
                 root.after(50, update_statistics)
@@ -1634,18 +1633,7 @@ def open_sync_dialog():
                     _cfg_to_save['password'] = p
                 _sync_save_cfg(_cfg_to_save)
 
-                # ── 1. Pull ze serveru PRVNÍ (web změny do lokálního CSV) ─────
-                def _ui_pull():
-                    status_var.set("Stahuji změny z webu...")
-                    status_lbl.config(fg=DT_SUBTEXT)
-                dlg.after(0, _ui_pull)
-                pulled_csv, pulled_new = _sync_pull(token)
-                dlg.after(0, lambda: prog_var.set(15))
-
-                # ── 2. Účty ───────────────────────────────────────────────────
-                _sync_accounts(token)
-
-                # ── 3. Push lokálních obchodů na server (čerstvá data po pull) ─
+                # ── 1. Push lokálních obchodů na server ───────────────────────
                 def _set_reading():
                     status_var.set("Čtu obchody z PC...")
                     status_lbl.config(fg=DT_SUBTEXT)
@@ -1660,22 +1648,28 @@ def open_sync_dialog():
                         status_lbl.config(fg=DT_SUBTEXT)
                     dlg.after(0, _set_uploading)
                     ok, err, skipped = _sync_post(token, trades, on_progress=_on_progress)
-                dlg.after(0, lambda: prog_var.set(75))
+                dlg.after(0, lambda: prog_var.set(50))
 
-                # ── 4. Konzistence push ───────────────────────────────────────
+                # ── 2. Účty, konzistence, XP push ─────────────────────────────
                 def _ui_konz():
-                    status_var.set("Synchronizuji konzistenci...")
+                    status_var.set("Synchronizuji konzistenci a účty...")
                     count_var.set('')
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_konz)
+                _sync_accounts(token)
                 _sync_konzistence(token)
-                dlg.after(0, lambda: prog_var.set(87))
-
-                # ── 5. XP push ────────────────────────────────────────────────
                 _sync_xp(token)
-                dlg.after(0, lambda: prog_var.set(93))
+                dlg.after(0, lambda: prog_var.set(70))
 
-                # ── 6. Pull konzistence ze serveru ────────────────────────────
+                # ── 3. Pull obchodů ze serveru ────────────────────────────────
+                def _ui_pull():
+                    status_var.set("Stahuji změny z webu...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_pull)
+                pulled_csv, pulled_new = _sync_pull(token)
+                dlg.after(0, lambda: prog_var.set(90))
+
+                # ── 4. Pull konzistence ze serveru ────────────────────────────
                 def _ui_pull_konz():
                     status_var.set("Stahuji konzistenci z webu...")
                     status_lbl.config(fg=DT_SUBTEXT)
