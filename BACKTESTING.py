@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.137"
+VERSION = "1.5.138"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1031,7 +1031,9 @@ def _sync_accounts(token):
 
 
 def _merge_konzistence(local, server):
-    """Merge local + server konzistence JSON. Non-empty wins over empty; conflict → local wins."""
+    """Merge local + server konzistence JSON.
+    Server (web) vždy vyhraje pokud má hodnotu — lokál vyhraje jen pokud server je prázdný.
+    Tím se zaručí že web→PC funguje správně."""
     # Normalize local rules to strings
     def _rule_text(r): return r['text'] if isinstance(r, dict) else r
     local_rules_text = [_rule_text(r) for r in local.get('rules', [])]
@@ -1061,6 +1063,7 @@ def _merge_konzistence(local, server):
             merged_weeks.append({'label': label, 'days': sw.get('days', []), 'data': sw.get('data', {})})
             continue
         # Both exist — merge data cell by cell
+        # Server (web) vítězí pokud má hodnotu; lokál jen pokud server je prázdný
         days = lw.get('days') or sw.get('days', [])
         l_data = lw.get('data', {})
         s_data = sw.get('data', {})
@@ -1074,8 +1077,8 @@ def _merge_konzistence(local, server):
             for i in range(n):
                 lv = l_cells[i] if i < len(l_cells) else ''
                 sv = s_cells[i] if i < len(s_cells) else ''
-                if lv: cells.append(lv)      # local non-empty wins
-                elif sv: cells.append(sv)    # server non-empty if local empty
+                if sv: cells.append(sv)      # server/web non-empty → vždy vítězí
+                elif lv: cells.append(lv)    # server prázdný, lokál má hodnotu → lokál
                 else: cells.append('')
             merged_data[rule] = cells
         merged_weeks.append({'label': label, 'days': days, 'data': merged_data})
