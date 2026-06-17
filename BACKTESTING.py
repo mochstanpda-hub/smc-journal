@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.132"
+VERSION = "1.5.133"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1020,8 +1020,11 @@ def _sync_konzistence(token):
             return
         with open(KONZISTENCE_FILE, encoding='utf-8') as f:
             data = json.load(f)
+        # Server expects List[str] for rules — normalize dicts to plain strings
+        raw_rules = data.get('rules', [])
+        rules_str = [r['text'] if isinstance(r, dict) else r for r in raw_rules]
         _sync_api_post(token, '/konzistence/sync', {
-            'rules': data.get('rules', []),
+            'rules': rules_str,
             'weeks': data.get('weeks', []),
         })
     except Exception:
@@ -1305,14 +1308,10 @@ def _sync_pull(token):
             return 0, 0
         srv = {t['id']: t for t in server_trades}
 
+        def _dt(v): return (v or '').replace('T', ' ').strip()
+        def _fs(v): return str(v) if v is not None and str(v).strip() != '' else ''
+
         updated_total = 0
-        SRV_TO_CSV = {
-            'poznamka': 'poznamka', 'tags': 'tags', 'vysledek': 'vysledek',
-            'session': 'session', 'rrr': 'rrr',
-            'timeframe_graf': 'timeframe_graf', 'timeframe_vstup': 'timeframe_vstup',
-            'duvod': 'duvod', 'zisk_mena': 'zisk_mena', 'ucet': 'ucet',
-            'cas_zavreni': 'cas_zavreni',
-        }
 
         # ── Fáze 1: aktualizace existujících lokálních řádků + mazání web-smazaných ─
         local_ids = set()    # MD5 hashes lokálních obchodů
@@ -1342,9 +1341,31 @@ def _sync_pull(token):
                             changed = True
                             continue
                         local_web_ids.add(wid)
-                        # Pro web-importované obchody: stáhni foto pokud lokálně chybí
-                        st = srv.get(wid)
-                        if st and st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
+                        st = srv[wid]
+                        # Server je autoritativní pro web-vytvořené obchody → aktualizuj všechna pole
+                        _updates = {
+                            'smer':            st.get('smer') or '',
+                            'symbol':          st.get('symbol') or '',
+                            'cas_otevreni':    _dt(st.get('datum')),
+                            'cas_zavreni':     _dt(st.get('cas_zavreni')),
+                            'vstupni_hodnota': _fs(st.get('vstup')),
+                            'stoploss':        _fs(st.get('sl')),
+                            'takeprofit':      _fs(st.get('tp')),
+                            'rrr':             _fs(st.get('rrr')),
+                            'vysledek':        st.get('vysledek') or '',
+                            'session':         st.get('session') or '',
+                            'tags':            st.get('tags') or '',
+                            'timeframe_graf':  st.get('timeframe_graf') or '',
+                            'timeframe_vstup': st.get('timeframe_vstup') or '',
+                            'zisk_mena':       _fs(st.get('zisk_mena')),
+                            'ucet':            st.get('ucet') or '',
+                        }
+                        for csv_k, new_v in _updates.items():
+                            if csv_k in fieldnames and str(row.get(csv_k, '')) != str(new_v):
+                                row[csv_k] = new_v
+                                changed = True
+                        # Foto stáhnout pokud lokálně chybí
+                        if st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
                             local_name = _sync_download_photo(token, wid, images_dir, st['photo_path'])
                             if local_name:
                                 row['obrazky'] = local_name
@@ -1479,13 +1500,14 @@ def _sync_silent(on_done=None):
 
     def _run():
         try:
-            trades = _sync_read_trades()
+            # Pull první — aby lokální data byla aktuální před push
+            updated, new_trades = _sync_pull(token)
+            trades = _sync_read_trades()  # čti po pull
             if trades:
                 _sync_post(token, trades)
             _sync_accounts(token)
             _sync_konzistence(token)
             _sync_xp(token)
-            updated, new_trades = _sync_pull(token)
             if updated > 0 or new_trades > 0:
                 root.after(0, update_listbox)
                 root.after(50, update_statistics)
@@ -1578,6 +1600,8 @@ def open_sync_dialog():
     def _reload_ui():
         update_listbox()
         update_statistics()
+        _refresh_konzistence_tab()
+        root.update_idletasks()
         status_var.set("✓ Změny načteny do programu.")
         status_lbl.config(fg='#22c55e')
 
@@ -1609,65 +1633,66 @@ def open_sync_dialog():
                 if remember_var.get():
                     _cfg_to_save['password'] = p
                 _sync_save_cfg(_cfg_to_save)
+
+                # ── 1. Pull ze serveru PRVNÍ (web změny do lokálního CSV) ─────
+                def _ui_pull():
+                    status_var.set("Stahuji změny z webu...")
+                    status_lbl.config(fg=DT_SUBTEXT)
+                dlg.after(0, _ui_pull)
+                pulled_csv, pulled_new = _sync_pull(token)
+                dlg.after(0, lambda: prog_var.set(15))
+
+                # ── 2. Účty ───────────────────────────────────────────────────
+                _sync_accounts(token)
+
+                # ── 3. Push lokálních obchodů na server (čerstvá data po pull) ─
                 def _set_reading():
                     status_var.set("Čtu obchody z PC...")
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _set_reading)
                 trades = _sync_read_trades()
-                if not trades:
-                    def _no_trades():
-                        status_var.set("Žádné obchody k nahrání.")
+                ok = err = skipped = 0
+                if trades:
+                    _n = len(trades)
+                    def _set_uploading():
+                        status_var.set(f"Nahrávám {_n} obchodů...")
+                        count_var.set(f"0 / {_n}")
                         status_lbl.config(fg=DT_SUBTEXT)
-                        sync_btn.config(state='normal', text="☁  Spustit sync")
-                        reload_btn.config(state='normal')
-                        update_listbox()
-                        update_statistics()
-                    dlg.after(0, _no_trades); return
-                _n = len(trades)
-                def _set_uploading():
-                    status_var.set(f"Připraveno {_n} obchodů, nahrávám...")
-                    count_var.set(f"0 / {_n}")
-                    status_lbl.config(fg=DT_SUBTEXT)
-                dlg.after(0, _set_uploading)
-                ok, err, skipped = _sync_post(token, trades, on_progress=_on_progress)
+                    dlg.after(0, _set_uploading)
+                    ok, err, skipped = _sync_post(token, trades, on_progress=_on_progress)
+                dlg.after(0, lambda: prog_var.set(75))
 
-                # ── Konzistence ───────────────────────────────────────────────
+                # ── 4. Konzistence push ───────────────────────────────────────
                 def _ui_konz():
-                    status_var.set("Nahrávám konzistenci...")
+                    status_var.set("Synchronizuji konzistenci...")
                     count_var.set('')
-                    prog_var.set(0)
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_konz)
                 _sync_konzistence(token)
-                dlg.after(0, lambda: prog_var.set(50))
+                dlg.after(0, lambda: prog_var.set(87))
 
-                # ── XP ────────────────────────────────────────────────────────
-                def _ui_xp():
-                    status_var.set("Nahrávám XP...")
-                    status_lbl.config(fg=DT_SUBTEXT)
-                dlg.after(0, _ui_xp)
+                # ── 5. XP push ────────────────────────────────────────────────
                 _sync_xp(token)
-                dlg.after(0, lambda: prog_var.set(90))
+                dlg.after(0, lambda: prog_var.set(93))
 
-                # ── Pull ze serveru zpět do CSV ───────────────────────────────
-                def _ui_pull():
-                    status_var.set("Stahuji změny z webu...")
-                    status_lbl.config(fg=DT_SUBTEXT)
-                dlg.after(0, _ui_pull)
-                pulled = _sync_pull(token)
-
-                # ── Pull konzistence ze serveru ───────────────────────────────
+                # ── 6. Pull konzistence ze serveru ────────────────────────────
                 def _ui_pull_konz():
                     status_var.set("Stahuji konzistenci z webu...")
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_pull_konz)
-                _sync_pull_konzistence(token)
+                konz_pulled = _sync_pull_konzistence(token)
                 dlg.after(0, lambda: prog_var.set(100))
 
-                _pull_txt = f"  ↓ {pulled} CSV aktualizováno" if pulled else ''
-                _skip_txt = f"  ⏭ {skipped} přeskočeno" if skipped else ''
-                _msg = f"✓ Hotovo!  Nové: {ok}{_skip_txt}  Konzistence: ✓  XP: ✓{_pull_txt}" + (f"   ❌ Chyb: {err}" if err else '')
+                # ── Výsledek ──────────────────────────────────────────────────
+                _parts = [f"✓ Hotovo!  Nahráno: {ok}"]
+                if skipped: _parts.append(f"⏭ {skipped} beze změny")
+                _web_upd = pulled_csv + pulled_new
+                if _web_upd: _parts.append(f"↓ {_web_upd} aktualizací z webu")
+                if err: _parts.append(f"❌ {err} chyb")
+                _msg = "  |  ".join(_parts)
                 _fg  = '#22c55e' if not err else '#f59e0b'
+                _kp  = konz_pulled
+
                 def _done():
                     status_var.set(_msg)
                     status_lbl.config(fg=_fg)
@@ -1675,9 +1700,11 @@ def open_sync_dialog():
                     count_var.set('')
                     sync_btn.config(state='normal', text="☁  Znovu")
                     reload_btn.config(state='normal')
-                    # Auto-refresh the trade list in main window
                     update_listbox()
                     update_statistics()
+                    if _kp:
+                        _refresh_konzistence_tab()
+                    root.update_idletasks()
                 dlg.after(0, _done)
             except Exception as ex:
                 _emsg = str(ex)
