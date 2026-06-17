@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.129"
+VERSION = "1.5.130"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -893,6 +893,7 @@ def _sync_save_state(state):
 
 def _trade_checksum(t):
     """MD5 hash hodnot obchodu — detekuje zda se obchod změnil od posledního syncu."""
+    import hashlib
     skip = {'_img_path', '_web_id'}
     filtered = {k: v for k, v in t.items() if k not in skip and v is not None and v != ''}
     return hashlib.md5(json.dumps(filtered, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
