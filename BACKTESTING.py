@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.128"
+VERSION = "1.5.129"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -875,6 +875,39 @@ def _verify_pw(password, stored_hash, salt):
 # ── Web sync ──────────────────────────────────────────────────────────────────
 WEB_API_URL      = "https://tradeobd.fun/api"
 SYNC_CONFIG_FILE = os.path.join(_APP_DIR, 'sync_config.json')
+SYNC_STATE_FILE  = os.path.join(_APP_DIR, 'sync_state.json')  # checksums naposledy synced obchodů
+
+def _sync_load_state():
+    try:
+        with open(SYNC_STATE_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _sync_save_state(state):
+    try:
+        with open(SYNC_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def _trade_checksum(t):
+    """MD5 hash hodnot obchodu — detekuje zda se obchod změnil od posledního syncu."""
+    skip = {'_img_path', '_web_id'}
+    filtered = {k: v for k, v in t.items() if k not in skip and v is not None and v != ''}
+    return hashlib.md5(json.dumps(filtered, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+def _sync_delete_trade(token, trade_id):
+    """Smaže obchod na serveru. Tiché selhání pokud server odpoví chybou."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            WEB_API_URL + f'/trades/{trade_id}',
+            headers={'Authorization': 'Bearer ' + token},
+            method='DELETE')
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception:
+        pass
 
 def _sync_load_cfg():
     try:
@@ -1020,7 +1053,7 @@ def _sync_get_server_trades_map(token):
         return {}
 
 def _sync_post(token, trades, on_progress=None):
-    import urllib.request
+    import urllib.request, hashlib
     # Zajisti že všechny projekty existují na serveru
     seen_projects = set()
     for t in trades:
@@ -1030,73 +1063,68 @@ def _sync_post(token, trades, on_progress=None):
             _sync_ensure_project(token, p, 'real')
 
     server_map = _sync_get_server_trades_map(token)  # {id: project_or_none}
+    server_photos = _sync_get_server_photos(token)
+    state = _sync_load_state()
+    checksums = state.get('checksums', {})
+    new_checksums = dict(checksums)  # začni s existujícím stavem
+
     ok = err = skipped = 0
     total = len(trades)
-    proj_updates = []  # trades to update project field
-
-    # Zjisti které obchody na serveru nemají foto (pro upload)
-    server_photos = _sync_get_server_photos(token)
 
     for i, t in enumerate(trades, 1):
         tid = t.get('id')
         img_path = t.pop('_img_path', None)
-        _web_id = t.pop('_web_id', '') or ''
-        # Web-created trade (má web_id) které bylo smazáno na serveru → přeskočit
-        # Bude odstraněno z lokálního CSV při _sync_pull
+        _web_id  = t.pop('_web_id', '') or ''
+
+        # Web-importovaný obchod smazaný na serveru → přeskočit (pull ho odstraní z CSV)
         if _web_id and tid not in server_map:
             skipped += 1
             if on_progress: on_progress(i, total, ok, err, skipped)
             continue
+
+        chk = _trade_checksum(t)
+
         if tid in server_map:
-            # Obchod existuje — pošli aktualizaci (PUT) aby PC verze přepsala server
+            # Obchod na serveru existuje — PUT jen pokud se změnil od posledního syncu
+            if checksums.get(tid) == chk:
+                skipped += 1
+                if img_path and tid not in server_photos:
+                    _sync_upload_photo(token, tid, img_path)
+                if on_progress: on_progress(i, total, ok, err, skipped)
+                continue
             body = json.dumps(t, ensure_ascii=False).encode('utf-8')
             req = urllib.request.Request(
-                WEB_API_URL + f'/trades/{tid}',
-                data=body,
+                WEB_API_URL + f'/trades/{tid}', data=body,
                 headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
-                method='PUT',
-            )
+                method='PUT')
             try:
-                with urllib.request.urlopen(req, timeout=10):
-                    ok += 1
+                with urllib.request.urlopen(req, timeout=10): pass
+                ok += 1
+                new_checksums[tid] = chk
             except Exception:
                 err += 1
-            # Nahraj foto pokud server ho nemá a lokálně existuje
             if img_path and tid not in server_photos:
                 _sync_upload_photo(token, tid, img_path)
-            if on_progress:
-                on_progress(i, total, ok, err, skipped)
-            continue
-        body = json.dumps(t, ensure_ascii=False).encode('utf-8')
-        req  = urllib.request.Request(
-            WEB_API_URL + '/trades',
-            data=body,
-            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
-            method='POST',
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10):
-                ok += 1
-            # Nahraje screenshot pokud existuje
-            if img_path:
-                _sync_upload_photo(token, t['id'], img_path)
-        except Exception:
-            err += 1
-        if on_progress:
-            on_progress(i, total, ok, err, skipped)
-
-    # Bulk update chybějícího project pole
-    if proj_updates:
-        try:
-            body = json.dumps({'updates': proj_updates}, ensure_ascii=False).encode('utf-8')
+        else:
+            # Nový obchod → POST
+            body = json.dumps(t, ensure_ascii=False).encode('utf-8')
             req = urllib.request.Request(
-                WEB_API_URL + '/trades/set-projects', data=body,
+                WEB_API_URL + '/trades', data=body,
                 headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
                 method='POST')
-            urllib.request.urlopen(req, timeout=10).close()
-        except Exception:
-            pass
+            try:
+                with urllib.request.urlopen(req, timeout=10): pass
+                ok += 1
+                new_checksums[tid] = chk
+                if img_path:
+                    _sync_upload_photo(token, tid, img_path)
+            except Exception:
+                err += 1
 
+        if on_progress: on_progress(i, total, ok, err, skipped)
+
+    state['checksums'] = new_checksums
+    _sync_save_state(state)
     return ok, err, skipped
 
 
@@ -1309,27 +1337,25 @@ def _sync_pull(token):
                     wid = row.get('web_id', '')
                     if wid:
                         if wid not in srv:
-                            # Web obchod byl smazán na serveru → odstraň z lokálního CSV
+                            # Web obchod smazán na serveru → odstraň z lokálního CSV
                             changed = True
                             continue
                         local_web_ids.add(wid)
+                        # Pro web-importované obchody: stáhni foto pokud lokálně chybí
+                        st = srv.get(wid)
+                        if st and st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
+                            local_name = _sync_download_photo(token, wid, images_dir, st['photo_path'])
+                            if local_name:
+                                row['obrazky'] = local_name
+                                changed = True
                     uid_src = f"{src}|{proj}|{row.get('cas_otevreni','')}|{row.get('symbol','')}|{row.get('vstupni_hodnota','')}"
                     uid = hashlib.md5(uid_src.encode()).hexdigest()
                     local_ids.add(uid)
-                    # Web-importované obchody jsou na serveru pod UUID (wid), PC obchody pod MD5 (uid)
-                    st = srv.get(wid) if wid else srv.get(uid)
-                    if st:
-                        for srv_field, csv_col in SRV_TO_CSV.items():
-                            if csv_col not in fieldnames:
-                                continue
-                            srv_val = st.get(srv_field)
-                            srv_str = str(srv_val).replace('T', ' ') if srv_val is not None else ''
-                            if row.get(csv_col, '') != srv_str:
-                                row[csv_col] = srv_str
-                                changed = True
-                        # Stáhni foto pokud server ho má a lokálně chybí
-                        if st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
-                            local_name = _sync_download_photo(token, st['id'], images_dir, st['photo_path'])
+                    # PC obchody (bez web_id): stáhni foto pokud lokálně chybí
+                    if not wid:
+                        st = srv.get(uid)
+                        if st and st.get('photo_path') and not row.get('obrazky') and 'obrazky' in fieldnames:
+                            local_name = _sync_download_photo(token, uid, images_dir, st['photo_path'])
                             if local_name:
                                 row['obrazky'] = local_name
                                 changed = True
@@ -6443,6 +6469,10 @@ def pridat_obchod():
         trades = load_data()
         if editing_trade_index is not None:
             if editing_trade_index < len(trades):
+                # Zachovej web_id z původního záznamu — bez toho by sync vytvořil duplikát
+                orig = trades[editing_trade_index]
+                if orig.get('web_id'):
+                    d['web_id'] = orig['web_id']
                 trades[editing_trade_index] = d
                 _save_trades_file(trades, d)
                 _dbg_log('TRADE', f"EDIT #{editing_trade_index}: {d.get('symbol')} {d.get('smer')} výsledek={d.get('vysledek')} zisk={d.get('zisk_mena')} projekt={os.path.basename(DATA_FILE)}")
@@ -6556,9 +6586,29 @@ def smazat_obchod():
     if sel:
         idx = int(sel[0]); tr = load_data()
         if idx < len(tr):
+            deleted = tr[idx]
             del tr[idx]
             _save_trades_file(tr)
             update_listbox(); update_statistics(); reset_form()
+            # Smaž obchod i na serveru
+            import hashlib as _hl
+            cfg = _sync_load_cfg()
+            token = cfg.get('token', '')
+            if token:
+                wid = deleted.get('web_id', '')
+                if wid:
+                    trade_id = wid
+                else:
+                    src_str = 'BACKTEST' if DIR_BACKTEST in DATA_FILE else 'REAL'
+                    proj_name = os.path.basename(os.path.dirname(DATA_FILE))
+                    uid_src = f"{src_str}|{proj_name}|{deleted.get('cas_otevreni','')}|{deleted.get('symbol','')}|{deleted.get('vstupni_hodnota','')}"
+                    trade_id = _hl.md5(uid_src.encode()).hexdigest()
+                import threading
+                threading.Thread(target=_sync_delete_trade, args=(token, trade_id), daemon=True).start()
+                # Odstraň checksum ze sync state
+                state = _sync_load_state()
+                state.get('checksums', {}).pop(trade_id, None)
+                _sync_save_state(state)
 
 def _tree_sort(col):
     """Kliknutí na záhlaví sloupce — přepne řazení a znovu sestaví seznam."""
