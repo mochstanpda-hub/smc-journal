@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.134"
+VERSION = "1.5.136"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -984,6 +984,22 @@ def _sync_ensure_project(token, name, proj_type='real'):
     except Exception:
         pass
 
+def _sync_setups(token):
+    """Nahraje seznam setupů na server."""
+    import urllib.request
+    try:
+        setups = load_setups()
+        if not setups:
+            return
+        body = json.dumps({'setups': setups}, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            WEB_API_URL + '/setups/sync', data=body,
+            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+            method='POST')
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception:
+        pass
+
 def _sync_accounts(token):
     """Nahraje seznam názvů účtů na server — prohledá accounts.json ve všech projektech."""
     import urllib.request
@@ -1014,21 +1030,106 @@ def _sync_accounts(token):
         pass
 
 
-def _sync_konzistence(token):
+def _merge_konzistence(local, server):
+    """Merge local + server konzistence JSON. Non-empty wins over empty; conflict → local wins."""
+    # Normalize local rules to strings
+    def _rule_text(r): return r['text'] if isinstance(r, dict) else r
+    local_rules_text = [_rule_text(r) for r in local.get('rules', [])]
+    server_rules = server.get('rules', [])
+    # Union: local order first, then new from server
+    merged_rules = list(local_rules_text)
+    for r in server_rules:
+        if r not in merged_rules:
+            merged_rules.append(r)
+
+    # Merge weeks by label
+    local_weeks = {w['label']: w for w in local.get('weeks', [])}
+    server_weeks = {w['label']: w for w in server.get('weeks', [])}
+    all_labels = list(local_weeks.keys())
+    for lbl in server_weeks:
+        if lbl not in local_weeks:
+            all_labels.append(lbl)
+
+    merged_weeks = []
+    for label in all_labels:
+        lw = local_weeks.get(label)
+        sw = server_weeks.get(label)
+        if lw and not sw:
+            merged_weeks.append(lw)
+            continue
+        if sw and not lw:
+            merged_weeks.append({'label': label, 'days': sw.get('days', []), 'data': sw.get('data', {})})
+            continue
+        # Both exist — merge data cell by cell
+        days = lw.get('days') or sw.get('days', [])
+        l_data = lw.get('data', {})
+        s_data = sw.get('data', {})
+        all_rules = set(list(l_data.keys()) + list(s_data.keys()))
+        merged_data = {}
+        for rule in all_rules:
+            l_cells = l_data.get(rule, [])
+            s_cells = s_data.get(rule, [])
+            n = max(len(l_cells), len(s_cells), len(days))
+            cells = []
+            for i in range(n):
+                lv = l_cells[i] if i < len(l_cells) else ''
+                sv = s_cells[i] if i < len(s_cells) else ''
+                if lv: cells.append(lv)      # local non-empty wins
+                elif sv: cells.append(sv)    # server non-empty if local empty
+                else: cells.append('')
+            merged_data[rule] = cells
+        merged_weeks.append({'label': label, 'days': days, 'data': merged_data})
+
+    return {'rules': merged_rules, 'weeks': merged_weeks}
+
+
+def _sync_konzistence_file(token):
+    """Bidirectional konzistence sync přes JSON soubor na serveru."""
+    import urllib.request
     try:
-        if not os.path.exists(KONZISTENCE_FILE):
-            return
-        with open(KONZISTENCE_FILE, encoding='utf-8') as f:
-            data = json.load(f)
-        # Server expects List[str] for rules — normalize dicts to plain strings
-        raw_rules = data.get('rules', [])
-        rules_str = [r['text'] if isinstance(r, dict) else r for r in raw_rules]
-        _sync_api_post(token, '/konzistence/sync', {
-            'rules': rules_str,
-            'weeks': data.get('weeks', []),
-        })
+        headers = {'Authorization': 'Bearer ' + token}
+
+        # GET aktuální stav ze serveru
+        req = urllib.request.Request(WEB_API_URL + '/konzistence/data', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            server_data = json.loads(r.read())
+
+        # Načti lokální stav
+        local_data = {'rules': [], 'weeks': []}
+        if os.path.exists(KONZISTENCE_FILE):
+            try:
+                with open(KONZISTENCE_FILE, encoding='utf-8') as f:
+                    local_data = json.load(f)
+            except Exception:
+                pass
+
+        # Merge
+        merged = _merge_konzistence(local_data, server_data)
+
+        # PUT merged na server
+        body = json.dumps(merged, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            WEB_API_URL + '/konzistence/data', data=body,
+            headers={**headers, 'Content-Type': 'application/json'},
+            method='PUT')
+        urllib.request.urlopen(req, timeout=10).close()
+
+        # Ulož merged lokálně (zachovej lokální rule objekty pokud existují)
+        local_rules_by_text = {}
+        for r in local_data.get('rules', []):
+            text = r['text'] if isinstance(r, dict) else r
+            local_rules_by_text[text] = r
+        merged_local = dict(merged)
+        merged_local['rules'] = [
+            local_rules_by_text.get(r, r) for r in merged['rules']
+        ]
+        with open(KONZISTENCE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(merged_local, f, ensure_ascii=False, indent=2)
+
+        # Vrátí True pokud se server lišil od lokálu (přišly nové změny)
+        return server_data != merged
     except Exception:
-        pass
+        return False
 
 def _sync_xp(token):
     try:
@@ -1132,80 +1233,6 @@ def _sync_post(token, trades, on_progress=None):
     return ok, err, skipped
 
 
-def _sync_pull_konzistence(token):
-    """Stáhne konzistenci ze serveru a aktualizuje lokální JSON."""
-    import urllib.request
-    try:
-        headers = {'Authorization': 'Bearer ' + token}
-
-        # Stáhni pravidla
-        req = urllib.request.Request(WEB_API_URL + '/konzistence/rules', headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as r:
-            srv_rules = json.loads(r.read()).get('rules', [])
-
-        # Stáhni týdny
-        req = urllib.request.Request(WEB_API_URL + '/konzistence/weeks', headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as r:
-            srv_weeks = json.loads(r.read())
-
-        if not srv_rules and not srv_weeks:
-            return False
-
-        # Načti lokální data
-        local = {'rules': [], 'weeks': []}
-        if os.path.exists(KONZISTENCE_FILE):
-            try:
-                with open(KONZISTENCE_FILE, encoding='utf-8') as f:
-                    local = json.load(f)
-            except Exception:
-                pass
-
-        # Aktualizuj pravidla (server má plain strings, lokálně mohou být dicts)
-        local_rules_by_text = {}
-        for r in local.get('rules', []):
-            text = r['text'] if isinstance(r, dict) else r
-            local_rules_by_text[text] = r
-
-        new_rules = []
-        for rule_text in srv_rules:
-            if rule_text in local_rules_by_text:
-                new_rules.append(local_rules_by_text[rule_text])
-            else:
-                new_rules.append(rule_text)
-        local['rules'] = new_rules
-
-        # Aktualizuj týdny — match podle labelu
-        local_weeks = {w.get('label', ''): w for w in local.get('weeks', [])}
-        for sw in srv_weeks:
-            label = sw.get('label', '')
-            days  = sw.get('days', [])
-            # Převeď server formát {rule: {str_idx: state}} → lokální {rule: [state, ...]}
-            new_data = {}
-            for rule, cells in (sw.get('data') or {}).items():
-                if isinstance(cells, dict):
-                    n = max((int(k) for k in cells.keys()), default=-1) + 1
-                    arr = [''] * max(n, len(days))
-                    for k, v in cells.items():
-                        arr[int(k)] = v or ''
-                elif isinstance(cells, list):
-                    arr = list(cells)
-                else:
-                    arr = []
-                new_data[rule] = arr
-
-            if label in local_weeks:
-                local_weeks[label]['data'] = new_data
-                local_weeks[label]['days'] = days
-            else:
-                local_weeks[label] = {'label': label, 'days': days, 'data': new_data}
-
-        local['weeks'] = list(local_weeks.values())
-
-        with open(KONZISTENCE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(local, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
 
 def _sync_read_trades():
     import csv, hashlib
@@ -1268,6 +1295,7 @@ def _sync_read_trades():
                         'duvod':          row.get('duvod') or None,
                         'zisk_mena':      row.get('zisk_mena') or None,
                         'ucet':           row.get('ucet') or None,
+                        'fibo':           row.get('fibo') or None,
                         'project':        f"{src}/{proj}",
                         '_img_path':      first_img,
                         '_web_id':        row.get('web_id', '') or '',
@@ -1359,6 +1387,7 @@ def _sync_pull(token):
                             'timeframe_vstup': st.get('timeframe_vstup') or '',
                             'zisk_mena':       _fs(st.get('zisk_mena')),
                             'ucet':            st.get('ucet') or '',
+                            'fibo':            st.get('fibo') or '',
                         }
                         for csv_k, new_v in _updates.items():
                             if csv_k in fieldnames and str(row.get(csv_k, '')) != str(new_v):
@@ -1431,7 +1460,8 @@ def _sync_pull(token):
                 'delka_obchodu': '', 'slippage': '', 'kvalita': '',
                 'obrazky': '', 'news': '', 'news_event': '',
                 'checklist_ratio': '', 'tags': st.get('tags') or '',
-                'zisk_mena': st.get('zisk_mena') or '', 'web_id': tid,
+                'zisk_mena': st.get('zisk_mena') or '',
+                'fibo': st.get('fibo') or '', 'web_id': tid,
             }
 
             # Stáhni foto PŘED zápisem do CSV — aby se jméno souboru uložilo do řádku
@@ -1504,13 +1534,13 @@ def _sync_silent(on_done=None):
             if trades:
                 _sync_post(token, trades)
             _sync_accounts(token)
-            _sync_konzistence(token)
+            _sync_setups(token)
             _sync_xp(token)
             updated, new_trades = _sync_pull(token)
             if updated > 0 or new_trades > 0:
                 root.after(0, update_listbox)
                 root.after(50, update_statistics)
-            pulled = _sync_pull_konzistence(token)
+            pulled = _sync_konzistence_file(token)
             if pulled:
                 root.after(0, _refresh_konzistence_tab)
             msg = '✓ Sync dokončen'
@@ -1650,14 +1680,14 @@ def open_sync_dialog():
                     ok, err, skipped = _sync_post(token, trades, on_progress=_on_progress)
                 dlg.after(0, lambda: prog_var.set(50))
 
-                # ── 2. Účty, konzistence, XP push ─────────────────────────────
+                # ── 2. Účty, setups, XP push ──────────────────────────────────
                 def _ui_konz():
-                    status_var.set("Synchronizuji konzistenci a účty...")
+                    status_var.set("Synchronizuji účty a konzistenci...")
                     count_var.set('')
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_konz)
                 _sync_accounts(token)
-                _sync_konzistence(token)
+                _sync_setups(token)
                 _sync_xp(token)
                 dlg.after(0, lambda: prog_var.set(70))
 
@@ -1667,14 +1697,14 @@ def open_sync_dialog():
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_pull)
                 pulled_csv, pulled_new = _sync_pull(token)
-                dlg.after(0, lambda: prog_var.set(90))
+                dlg.after(0, lambda: prog_var.set(85))
 
-                # ── 4. Pull konzistence ze serveru ────────────────────────────
+                # ── 4. Bidirectional konzistence sync ─────────────────────────
                 def _ui_pull_konz():
-                    status_var.set("Stahuji konzistenci z webu...")
+                    status_var.set("Synchronizuji konzistenci (obousměrně)...")
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_pull_konz)
-                konz_pulled = _sync_pull_konzistence(token)
+                konz_pulled = _sync_konzistence_file(token)
                 dlg.after(0, lambda: prog_var.set(100))
 
                 # ── Výsledek ──────────────────────────────────────────────────
