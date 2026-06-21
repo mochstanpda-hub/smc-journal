@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.139"
+VERSION = "1.5.140"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1030,56 +1030,56 @@ def _sync_accounts(token):
         pass
 
 
-def _merge_konzistence(local, server):
-    """Merge local + server konzistence JSON.
-    Server (web) vždy vyhraje pokud má hodnotu — lokál vyhraje jen pokud server je prázdný.
-    Tím se zaručí že web→PC funguje správně."""
-    # Normalize local rules to strings
+def _merge_konzistence_3way(base, local, server):
+    """3-way merge konzistence: base=stav po posledním syncu, local=PC změny, server=web změny.
+    Každá strana vítězí pro svoje změny; pokud obě změnily stejnou buňku → server vítězí."""
     def _rule_text(r): return r['text'] if isinstance(r, dict) else r
-    local_rules_text = [_rule_text(r) for r in local.get('rules', [])]
-    server_rules = server.get('rules', [])
-    # Union: local order first, then new from server
-    merged_rules = list(local_rules_text)
-    for r in server_rules:
+
+    base_rules   = [_rule_text(r) for r in base.get('rules', [])]
+    local_rules  = [_rule_text(r) for r in local.get('rules', [])]
+    server_rules = list(server.get('rules', []))
+
+    merged_rules = list(base_rules)
+    for r in local_rules + server_rules:
         if r not in merged_rules:
             merged_rules.append(r)
 
-    # Merge weeks by label
-    local_weeks = {w['label']: w for w in local.get('weeks', [])}
+    base_weeks   = {w['label']: w for w in base.get('weeks', [])}
+    local_weeks  = {w['label']: w for w in local.get('weeks', [])}
     server_weeks = {w['label']: w for w in server.get('weeks', [])}
-    all_labels = list(local_weeks.keys())
-    for lbl in server_weeks:
-        if lbl not in local_weeks:
-            all_labels.append(lbl)
+    all_labels = list(dict.fromkeys(list(base_weeks) + list(local_weeks) + list(server_weeks)))
 
     merged_weeks = []
     for label in all_labels:
-        lw = local_weeks.get(label)
-        sw = server_weeks.get(label)
-        if lw and not sw:
-            merged_weeks.append(lw)
-            continue
-        if sw and not lw:
-            merged_weeks.append({'label': label, 'days': sw.get('days', []), 'data': sw.get('data', {})})
-            continue
-        # Both exist — merge data cell by cell
-        # Server (web) vítězí pokud má hodnotu; lokál jen pokud server je prázdný
-        days = lw.get('days') or sw.get('days', [])
+        bw = base_weeks.get(label, {})
+        lw = local_weeks.get(label, {})
+        sw = server_weeks.get(label, {})
+        days = (lw or sw or bw).get('days', [])
+        b_data = bw.get('data', {})
         l_data = lw.get('data', {})
         s_data = sw.get('data', {})
-        all_rules = set(list(l_data.keys()) + list(s_data.keys()))
+        all_rules_in_week = set(list(b_data) + list(l_data) + list(s_data))
         merged_data = {}
-        for rule in all_rules:
+        for rule in all_rules_in_week:
+            b_cells = b_data.get(rule, [])
             l_cells = l_data.get(rule, [])
             s_cells = s_data.get(rule, [])
-            n = max(len(l_cells), len(s_cells), len(days))
+            n = max(len(b_cells), len(l_cells), len(s_cells), len(days))
             cells = []
             for i in range(n):
+                bv = b_cells[i] if i < len(b_cells) else ''
                 lv = l_cells[i] if i < len(l_cells) else ''
                 sv = s_cells[i] if i < len(s_cells) else ''
-                if sv: cells.append(sv)      # server/web non-empty → vždy vítězí
-                elif lv: cells.append(lv)    # server prázdný, lokál má hodnotu → lokál
-                else: cells.append('')
+                pc_changed  = lv != bv
+                web_changed = sv != bv
+                if pc_changed and not web_changed:
+                    cells.append(lv)
+                elif web_changed and not pc_changed:
+                    cells.append(sv)
+                elif pc_changed and web_changed:
+                    cells.append(sv)  # konflikt → server vítězí
+                else:
+                    cells.append(bv)
             merged_data[rule] = cells
         merged_weeks.append({'label': label, 'days': days, 'data': merged_data})
 
@@ -1087,7 +1087,7 @@ def _merge_konzistence(local, server):
 
 
 def _sync_konzistence_file(token):
-    """Bidirectional konzistence sync přes JSON soubor na serveru."""
+    """Bidirectional konzistence sync přes JSON soubor na serveru. 3-way merge se snapshotem."""
     import urllib.request
     try:
         headers = {'Authorization': 'Bearer ' + token}
@@ -1106,8 +1106,18 @@ def _sync_konzistence_file(token):
             except Exception:
                 pass
 
-        # Merge
-        merged = _merge_konzistence(local_data, server_data)
+        # Načti base snapshot (stav po posledním syncu)
+        base_file = os.path.join(os.path.dirname(KONZISTENCE_FILE), 'konzistence_sync_base.json')
+        base_data = {'rules': [], 'weeks': []}
+        if os.path.exists(base_file):
+            try:
+                with open(base_file, encoding='utf-8') as f:
+                    base_data = json.load(f)
+            except Exception:
+                pass
+
+        # 3-way merge
+        merged = _merge_konzistence_3way(base_data, local_data, server_data)
 
         # Obnov lokální rule objekty (mohou být dicts s extra poli)
         local_rules_by_text = {}
@@ -1141,6 +1151,13 @@ def _sync_konzistence_file(token):
         except Exception:
             pass
 
+        # Ulož nový base snapshot (co jsme právě nasyncrovali)
+        try:
+            with open(base_file, 'w', encoding='utf-8') as f:
+                json.dump(merged, f, ensure_ascii=False)
+        except Exception:
+            pass
+
         return local_changed
     except Exception:
         return False
@@ -1159,7 +1176,7 @@ def _sync_xp(token):
         pass
 
 def _sync_journal_file(token):
-    """Bidirectional deník sync přes JSON soubor na serveru. Merge: union zápisů, server vítězí při konfliktu."""
+    """Bidirectional deník sync přes JSON soubor na serveru. 3-way merge se snapshotem."""
     import urllib.request
     try:
         headers = {'Authorization': 'Bearer ' + token}
@@ -1175,18 +1192,36 @@ def _sync_journal_file(token):
             except Exception:
                 pass
 
-        # Merge: union zápisů; pokud oba mají záznam pro stejné datum → server vítězí
-        merged = dict(local_data)
-        for date, text in server_data.items():
-            if text:
-                merged[date] = text  # server vždy přepíše lokál pro daný den
+        # Načti base snapshot (stav po posledním syncu)
+        base_file = os.path.join(os.path.dirname(JOURNAL_FILE), 'journal_sync_base.json')
+        base_data = {}
+        if os.path.exists(base_file):
+            try:
+                with open(base_file, encoding='utf-8') as f:
+                    base_data = json.load(f)
+            except Exception:
+                pass
 
-        # Přidej lokální záznamy které server nemá
-        for date, text in local_data.items():
-            if date not in merged and text:
-                merged[date] = text
+        # 3-way merge: každá strana vítězí pro svoje změny
+        all_dates = set(list(local_data) + list(server_data) + list(base_data))
+        merged = {}
+        for date in all_dates:
+            bv = base_data.get(date, '')
+            lv = local_data.get(date, '')
+            sv = server_data.get(date, '')
+            pc_changed  = lv != bv
+            web_changed = sv != bv
+            if pc_changed and not web_changed:
+                val = lv
+            elif web_changed and not pc_changed:
+                val = sv
+            elif pc_changed and web_changed:
+                val = sv  # konflikt → server vítězí
+            else:
+                val = bv
+            if val:
+                merged[date] = val
 
-        # Check jestli se lokál změnil
         local_changed = merged != local_data
 
         # Ulož lokálně
@@ -1201,6 +1236,13 @@ def _sync_journal_file(token):
                 headers={**headers, 'Content-Type': 'application/json'},
                 method='PUT')
             urllib.request.urlopen(req, timeout=10).close()
+        except Exception:
+            pass
+
+        # Ulož nový base snapshot
+        try:
+            with open(base_file, 'w', encoding='utf-8') as f:
+                json.dump(merged, f, ensure_ascii=False)
         except Exception:
             pass
 
