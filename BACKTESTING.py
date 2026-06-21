@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.138"
+VERSION = "1.5.139"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1158,6 +1158,57 @@ def _sync_xp(token):
     except Exception:
         pass
 
+def _sync_journal_file(token):
+    """Bidirectional deník sync přes JSON soubor na serveru. Merge: union zápisů, server vítězí při konfliktu."""
+    import urllib.request
+    try:
+        headers = {'Authorization': 'Bearer ' + token}
+        req = urllib.request.Request(WEB_API_URL + '/journal/data', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            server_data = json.loads(r.read())
+
+        local_data = {}
+        if os.path.exists(JOURNAL_FILE):
+            try:
+                with open(JOURNAL_FILE, encoding='utf-8') as f:
+                    local_data = json.load(f)
+            except Exception:
+                pass
+
+        # Merge: union zápisů; pokud oba mají záznam pro stejné datum → server vítězí
+        merged = dict(local_data)
+        for date, text in server_data.items():
+            if text:
+                merged[date] = text  # server vždy přepíše lokál pro daný den
+
+        # Přidej lokální záznamy které server nemá
+        for date, text in local_data.items():
+            if date not in merged and text:
+                merged[date] = text
+
+        # Check jestli se lokál změnil
+        local_changed = merged != local_data
+
+        # Ulož lokálně
+        with open(JOURNAL_FILE, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, ensure_ascii=False, indent=4)
+
+        # PUT na server (best effort)
+        try:
+            body = json.dumps(merged, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                WEB_API_URL + '/journal/data', data=body,
+                headers={**headers, 'Content-Type': 'application/json'},
+                method='PUT')
+            urllib.request.urlopen(req, timeout=10).close()
+        except Exception:
+            pass
+
+        return local_changed
+    except Exception:
+        return False
+
+
 def _sync_get_server_trades_map(token):
     """Vrátí {id: project} pro všechny obchody na serveru."""
     import urllib.request
@@ -1557,6 +1608,7 @@ def _sync_silent(on_done=None):
             pulled = _sync_konzistence_file(token)
             if pulled:
                 root.after(0, _refresh_konzistence_tab)
+            _sync_journal_file(token)
             msg = '✓ Sync dokončen'
             if new_trades > 0:
                 msg += f' (+{new_trades} nových z webu)'
@@ -1713,12 +1765,13 @@ def open_sync_dialog():
                 pulled_csv, pulled_new = _sync_pull(token)
                 dlg.after(0, lambda: prog_var.set(85))
 
-                # ── 4. Bidirectional konzistence sync ─────────────────────────
+                # ── 4. Konzistence + deník sync ───────────────────────────────
                 def _ui_pull_konz():
-                    status_var.set("Synchronizuji konzistenci (obousměrně)...")
+                    status_var.set("Synchronizuji konzistenci a deník...")
                     status_lbl.config(fg=DT_SUBTEXT)
                 dlg.after(0, _ui_pull_konz)
                 konz_pulled = _sync_konzistence_file(token)
+                _sync_journal_file(token)
                 dlg.after(0, lambda: prog_var.set(100))
 
                 # ── Výsledek ──────────────────────────────────────────────────
