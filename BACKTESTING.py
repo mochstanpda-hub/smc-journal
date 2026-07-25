@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.140"
+VERSION = "1.5.141"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2142,7 +2142,7 @@ COL_TRANSLATION = {
 
 DEFAULT_SCORING = {
     "setups": {"Golden Zone (50-61.8)": 4, "Discount (>61.8)": 3, "Premium (<50)": 2, "Order Block": 1},
-    "sessions": {"London": 3, "NY AM": 2, "NY PM": 2, "Asia": 1, "Close": 1},
+    "sessions": {"RTH": 3, "OVERNIGHT": 2},
     "days": {"Úterý": 2, "Středa": 2, "Čtvrtek": 2, "Pondělí": 1, "Pátek": 1},
     "rrr": {"1:1": 0, "1:2": 1, "1:3": 2, "1:4": 3, "1:5+": 4},
     "pips": {"5-10": 2, "10-15": 1, "15-20": 0, "20+": -1},
@@ -2155,7 +2155,7 @@ DEFAULT_SCORING = {
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "GBPAUD", "AUDUSD", "USDCAD", "EURJPY", "EURGBP", "US30", "NAS100", "DAX"]
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1W", "1M"]
 FIBO_OPTIONS = ["DISCOUNT", "GOLDEN ZONE", "PREMIUM", "ORDER BLOCK", "BREAKER", "FVG ONLY"]
-SESSIONS_LIST = ["Asia", "London", "NY AM", "NY PM", "Close"]
+SESSIONS_LIST = ["OVERNIGHT", "RTH"]
 
 # Globální soubor pro vlastní setupy (nezávislý na projektu)
 SETUPS_FILE = os.path.join(_APP_DIR, 'setups_config.json')
@@ -3968,14 +3968,17 @@ def export_for_ai():
         return d
 
     def _setup_norm(t):
-        s = t.get('fibo','?').upper()
-        if 'GOLDEN' in s: return 'Golden Zone'
-        if 'DISCOUNT' in s: return 'Discount'
-        if 'PREMIUM' in s: return 'Premium'
-        if 'ORDER' in s: return 'Order Block'
-        if 'BREAKER' in s: return 'Breaker'
-        if 'FVG' in s: return 'FVG Only'
-        return s if s else 'Nezadáno'
+        s = t.get('fibo', '') or ''
+        if not s or s == '?': return 'Nezadáno'
+        if ',' in s: return s  # multi-setup: vrátit as-is
+        su = s.upper()
+        if 'GOLDEN' in su: return 'Golden Zone'
+        if 'DISCOUNT' in su: return 'Discount'
+        if 'PREMIUM' in su: return 'Premium'
+        if 'ORDER' in su: return 'Order Block'
+        if 'BREAKER' in su: return 'Breaker'
+        if 'FVG' in su: return 'FVG Only'
+        return s
 
     by_session = _agg(lambda t: t.get('session','Nezadáno') or 'Nezadáno')
     by_setup   = _agg(_setup_norm)
@@ -4212,12 +4215,16 @@ def update_statistics():
         except: rrr_val = 0.0
         
         session = t.get('session', 'Neznámý')
-        setup = t.get('fibo', 'Neznámý').upper() 
-        
-        if "GOLDEN" in setup: setup = "GOLDEN"
-        elif "DISCOUNT" in setup: setup = "DISCOUNT"
-        elif "PREMIUM" in setup: setup = "PREMIUM"
-        elif "ORDER" in setup: setup = "ORDER BLOCK"
+        fibo_val = t.get('fibo', '') or ''
+        if ',' in fibo_val:
+            setup = fibo_val  # multi-setup: ponechat as-is
+        else:
+            setup = fibo_val.upper()
+            if "GOLDEN" in setup: setup = "GOLDEN"
+            elif "DISCOUNT" in setup: setup = "DISCOUNT"
+            elif "PREMIUM" in setup: setup = "PREMIUM"
+            elif "ORDER" in setup: setup = "ORDER BLOCK"
+            if not setup: setup = 'Neznámý'
         
         direction = t.get('smer', 'Neznámý')
         tags_str = t.get('tags', '') # NOVÉ
@@ -4794,10 +4801,10 @@ def update_calculated_fields():
             dt_start = datetime.strptime(t_start, "%Y-%m-%d %H:%M")
             _cz = ["Pondělí","Úterý","Středa","Čtvrtek","Pátek","Sobota","Neděle"]
             den = _cz[dt_start.weekday()]; den_tydne_entry.config(state='normal'); den_tydne_entry.delete(0, tk.END); den_tydne_entry.insert(0, den); den_tydne_entry.config(state='readonly'); h = dt_start.hour
-            if 8 <= h < 13: session_combo.set("London")
-            elif 13 <= h < 17: session_combo.set("NY AM")
-            elif 17 <= h < 21: session_combo.set("NY PM")
-            else: session_combo.set("Asia")
+            m = h * 60 + dt_start.minute
+            if 120 <= m <= 929: session_combo.set("OVERNIGHT")   # 02:00 – 15:29
+            elif 930 <= m <= 1320: session_combo.set("RTH")       # 15:30 – 22:00
+            else: session_combo.set("")
             if t_end:
                 dt_end = datetime.strptime(t_end, "%Y-%m-%d %H:%M")
                 duration_str = _weekday_duration(dt_start, dt_end)
@@ -4833,7 +4840,9 @@ def calculate_auto_rrr(event=None):
 
 def calculate_auto_score():
     config = load_scoring_config(); total = 0
-    total += _get_setup_pts(config["setups"], fibo_combo.get()); total += config["sessions"].get(session_combo.get(), 0); total += config["days"].get(den_tydne_entry.get(), 0)
+    for _s in [p.strip() for p in fibo_combo.get().split(',') if p.strip()]:
+        total += _get_setup_pts(config["setups"], _s)
+    total += config["sessions"].get(session_combo.get(), 0); total += config["days"].get(den_tydne_entry.get(), 0)
     try:
         r = float(rrr_entry.get().replace(',', '.')); rrr_pts = config["rrr"]
         if r >= 5.0: total += rrr_pts.get("1:5+", 0)
@@ -11587,6 +11596,47 @@ def open_project_by_name(mode, name):
     current_mode = mode
     show_main_screen(name)
 
+
+class _MultiSetupWidget:
+    """Tři combo boxy pro multi-výběr setupu (max 3 najednou)."""
+    def __init__(self, parent, values=(), width=15):
+        self._frame = tk.Frame(parent)
+        opts = [''] + list(values)
+        self._vars = [tk.StringVar() for _ in range(3)]
+        self._combos = []
+        for sv in self._vars:
+            c = ttk.Combobox(self._frame, textvariable=sv, values=opts, width=width)
+            c.pack(side='left', padx=(0, 3))
+            self._combos.append(c)
+
+    def pack(self, **kw):  self._frame.pack(**kw)
+    def grid(self, **kw):  self._frame.grid(**kw)
+
+    def get(self):
+        parts = [v.get().strip() for v in self._vars if v.get().strip()]
+        return ', '.join(parts)
+
+    def set(self, val):
+        parts = [p.strip() for p in str(val).split(',') if p.strip()] if val else []
+        for i, sv in enumerate(self._vars):
+            sv.set(parts[i] if i < len(parts) else '')
+
+    def __setitem__(self, key, value):
+        if key == 'values':
+            opts = [''] + list(value)
+            for c in self._combos:
+                c['values'] = opts
+
+    def __bool__(self):
+        return True
+
+    def bind(self, event, callback, add=None):
+        for c in self._combos:
+            c.bind(event, callback)
+            if event == '<KeyRelease>':
+                c.bind('<<ComboboxSelected>>', callback)
+
+
 def show_main_screen(p_name):
     global current_project_name, trades_tree, filter_col_var, filter_val_var, paned, v_paned, save_btn
     global cas_otevreni_entry, cas_zavreni_entry, symbol_combo, smer_var, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry
@@ -11785,7 +11835,8 @@ def show_main_screen(p_name):
     tk.Label(f, text="Vypočtené RRR:").grid(row=r, column=0, sticky='w'); rrr_entry = tk.Entry(f, width=35); rrr_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="SL v Pipsech:").grid(row=r, column=0, sticky='w'); pips_entry = tk.Entry(f, width=35, state='readonly', fg='blue'); pips_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="HTF Graf / LTF Vstup:").grid(row=r, column=0, sticky='w'); ft = tk.Frame(f); ft.grid(row=r, column=1, sticky='w'); htf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); htf_combo.pack(side='left'); ltf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); ltf_combo.pack(side='left', padx=5); r+=1
-    tk.Label(f, text="Setup / Seance:").grid(row=r, column=0, sticky='w'); fs = tk.Frame(f); fs.grid(row=r, column=1, sticky='w'); fibo_combo = ttk.Combobox(fs, values=FIBO_OPTIONS, width=15); fibo_combo.pack(side='left'); session_combo = ttk.Combobox(fs, values=SESSIONS_LIST, width=15); session_combo.pack(side='left', padx=5); r+=1
+    tk.Label(f, text="Setup (1–3):").grid(row=r, column=0, sticky='w'); fibo_combo = _MultiSetupWidget(f, FIBO_OPTIONS, width=14); fibo_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
+    tk.Label(f, text="Seance:").grid(row=r, column=0, sticky='w'); session_combo = ttk.Combobox(f, values=SESSIONS_LIST, width=14); session_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
     
     # NOVÉ NEWS UI
     tk.Label(f, text="High Impact News?:").grid(row=r, column=0, sticky='w'); 
