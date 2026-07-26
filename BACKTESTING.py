@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.141"
+VERSION = "1.5.142"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11597,44 +11597,84 @@ def open_project_by_name(mode, name):
     show_main_screen(name)
 
 
-class _MultiSetupWidget:
-    """Tři combo boxy pro multi-výběr setupu (max 3 najednou)."""
-    def __init__(self, parent, values=(), width=15):
+class _SetupPicker:
+    """Jedno pole + popup se zaškrtávacími políčky pro multi-výběr setupu (max 3)."""
+    def __init__(self, parent, values=(), width=33):
+        self._values = list(values)
+        self._selected = []
         self._frame = tk.Frame(parent)
-        opts = [''] + list(values)
-        self._vars = [tk.StringVar() for _ in range(3)]
-        self._combos = []
-        for sv in self._vars:
-            c = ttk.Combobox(self._frame, textvariable=sv, values=opts, width=width)
-            c.pack(side='left', padx=(0, 3))
-            self._combos.append(c)
+        self._display_var = tk.StringVar(value='')
+        self._entry = tk.Entry(self._frame, textvariable=self._display_var,
+                               state='readonly', width=width - 5, cursor='hand2')
+        self._entry.pack(side='left')
+        self._btn = tk.Button(self._frame, text=' ▾ ', command=self._open_popup)
+        self._btn.pack(side='left', padx=(2, 0))
+        self._entry.bind('<Button-1>', lambda e: self._open_popup())
+
+    def _open_popup(self):
+        popup = tk.Toplevel()
+        popup.title("Vybrat setupy  (max 3)")
+        popup.resizable(False, False)
+        try:
+            x = self._btn.winfo_rootx()
+            y = self._btn.winfo_rooty() + self._btn.winfo_height()
+            popup.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        check_vars = {}
+        check_btns = {}
+
+        def _update_state():
+            checked = sum(1 for v in check_vars.values() if v.get())
+            for val, btn in check_btns.items():
+                if check_vars[val].get():
+                    btn.config(state='normal')
+                else:
+                    btn.config(state='normal' if checked < 3 else 'disabled')
+
+        for val in self._values:
+            var = tk.BooleanVar(value=val in self._selected)
+            check_vars[val] = var
+            cb = tk.Checkbutton(popup, text=val, variable=var,
+                                anchor='w', command=_update_state)
+            cb.pack(fill='x', padx=12, pady=2)
+            check_btns[val] = cb
+        _update_state()
+
+        def apply():
+            self._selected = [v for v, var in check_vars.items() if var.get()]
+            self._display_var.set(', '.join(self._selected))
+            popup.destroy()
+            try: calculate_auto_score()
+            except Exception: pass
+
+        tk.Button(popup, text='✓  Potvrdit', command=apply,
+                  bg='#2ecc71', fg='white', font=('Arial', 9, 'bold')).pack(fill='x', padx=10, pady=(6, 10))
+        popup.bind('<Return>', lambda e: apply())
+        popup.bind('<Escape>', lambda e: popup.destroy())
+        popup.grab_set()
+        popup.focus_set()
 
     def pack(self, **kw):  self._frame.pack(**kw)
     def grid(self, **kw):  self._frame.grid(**kw)
 
     def get(self):
-        parts = [v.get().strip() for v in self._vars if v.get().strip()]
-        return ', '.join(parts)
+        return self._display_var.get()
 
     def set(self, val):
-        parts = [p.strip() for p in str(val).split(',') if p.strip()] if val else []
-        for i, sv in enumerate(self._vars):
-            sv.set(parts[i] if i < len(parts) else '')
+        self._selected = [p.strip() for p in str(val).split(',') if p.strip()] if val else []
+        self._display_var.set(', '.join(self._selected))
 
     def __setitem__(self, key, value):
         if key == 'values':
-            opts = [''] + list(value)
-            for c in self._combos:
-                c['values'] = opts
+            self._values = list(value)
 
     def __bool__(self):
         return True
 
     def bind(self, event, callback, add=None):
-        for c in self._combos:
-            c.bind(event, callback)
-            if event == '<KeyRelease>':
-                c.bind('<<ComboboxSelected>>', callback)
+        pass  # read-only pole, KeyRelease není potřeba
 
 
 def show_main_screen(p_name):
@@ -11835,7 +11875,7 @@ def show_main_screen(p_name):
     tk.Label(f, text="Vypočtené RRR:").grid(row=r, column=0, sticky='w'); rrr_entry = tk.Entry(f, width=35); rrr_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="SL v Pipsech:").grid(row=r, column=0, sticky='w'); pips_entry = tk.Entry(f, width=35, state='readonly', fg='blue'); pips_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="HTF Graf / LTF Vstup:").grid(row=r, column=0, sticky='w'); ft = tk.Frame(f); ft.grid(row=r, column=1, sticky='w'); htf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); htf_combo.pack(side='left'); ltf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); ltf_combo.pack(side='left', padx=5); r+=1
-    tk.Label(f, text="Setup (1–3):").grid(row=r, column=0, sticky='w'); fibo_combo = _MultiSetupWidget(f, FIBO_OPTIONS, width=14); fibo_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
+    tk.Label(f, text="Setup (max 3):").grid(row=r, column=0, sticky='w'); fibo_combo = _SetupPicker(f, FIBO_OPTIONS, width=33); fibo_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
     tk.Label(f, text="Seance:").grid(row=r, column=0, sticky='w'); session_combo = ttk.Combobox(f, values=SESSIONS_LIST, width=14); session_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
     
     # NOVÉ NEWS UI
