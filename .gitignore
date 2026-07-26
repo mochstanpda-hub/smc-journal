@@ -33,3 +33,17 @@ __pycache__/
 # IDE
 .vscode/
 .claude/
+ict_academy/index.html
+ict_academy/js/app.js
+invoices/faktura_2026003.pdf
+invoices/invoices_index.json
+mobile_app/app.js
+mobile_app/index.html
+mobile_app/icon.svg
+mobile_app/manifest.json
+mobile_app/style.css
+mobile_app/sw.js
+OBD/
+Trading/AI exporty z obd/AI_export_01.06.2026_BACKTEST_20260616.md
+Trading/AI exporty z obd/AI_export_BACKTESTING_20260616.md
+upload_to_github.bat
