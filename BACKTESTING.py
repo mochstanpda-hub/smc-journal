@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.143"
+VERSION = "1.5.145"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11597,6 +11597,151 @@ def open_project_by_name(mode, name):
     show_main_screen(name)
 
 
+# ==============================================================================
+# AI ASISTENT — Ollama lokální AI
+# ==============================================================================
+OLLAMA_URL   = "http://localhost:11434"
+OLLAMA_MODEL = "llava:7b"
+
+def _ollama_running():
+    try:
+        import urllib.request
+        urllib.request.urlopen(OLLAMA_URL, timeout=2).close()
+        return True
+    except Exception:
+        return False
+
+def _trade_context_text(t):
+    """Sestaví textový kontext obchodu pro AI."""
+    lines = [
+        f"Symbol: {t.get('symbol','')}",
+        f"Směr: {t.get('smer','')}",
+        f"Setup: {t.get('fibo','')}",
+        f"Seance: {t.get('session','')}",
+        f"RRR: {t.get('rrr','')}",
+        f"Výsledek: {t.get('vysledek','')}",
+        f"Délka obchodu: {t.get('delka_obchodu','')}",
+        f"HTF: {t.get('timeframe_graf','')}  LTF: {t.get('timeframe_vstup','')}",
+        f"Důvod vstupu: {t.get('duvod','')}",
+        f"Poznámka: {t.get('poznamka','')}",
+    ]
+    return "\n".join(l for l in lines if l.split(': ', 1)[-1].strip())
+
+def _ask_ollama_async(prompt, images_b64, callback):
+    """Zavolá Ollama API ve vlákně, výsledek předá přes callback(text)."""
+    import threading, json as _json, urllib.request as _req
+
+    def _worker():
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            if images_b64:
+                messages[0]["images"] = images_b64
+            body = _json.dumps({
+                "model": OLLAMA_MODEL,
+                "messages": messages,
+                "stream": False,
+            }).encode('utf-8')
+            r = _req.Request(OLLAMA_URL + "/api/chat", data=body,
+                             headers={"Content-Type": "application/json"})
+            with _req.urlopen(r, timeout=180) as resp:
+                data = _json.loads(resp.read())
+            text = data.get("message", {}).get("content", "(prázdná odpověď)")
+        except Exception as e:
+            text = f"Chyba při komunikaci s AI:\n{e}"
+        callback(text)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+def open_ai_analysis(trade):
+    """Otevře okno s AI analýzou obchodu."""
+    if not _ollama_running():
+        messagebox.showwarning(
+            "AI Asistent",
+            "Ollama neběží nebo není nainstalovaná.\n\n"
+            "1. Nainstaluj Ollama z ollama.com\n"
+            f"2. Spusť: ollama pull {OLLAMA_MODEL}"
+        )
+        return
+
+    win = tk.Toplevel()
+    win.title("🤖 AI Analýza obchodu")
+    win.geometry("700x550")
+    win.resizable(True, True)
+
+    tk.Label(win, text="🤖  AI ASISTENT — analýza obchodu",
+             font=("Arial", 11, "bold")).pack(pady=(12, 4))
+    tk.Label(win, text=f"Model: {OLLAMA_MODEL}",
+             font=("Arial", 8), fg="gray").pack()
+
+    # Textové pole pro odpověď
+    out_frame = tk.Frame(win)
+    out_frame.pack(fill='both', expand=True, padx=12, pady=8)
+    out_text = tk.Text(out_frame, wrap='word', font=("Arial", 10),
+                       state='disabled', bg='#1e1e2e', fg='#cdd6f4',
+                       insertbackground='white', relief='flat')
+    out_sb = ttk.Scrollbar(out_frame, command=out_text.yview)
+    out_text.configure(yscrollcommand=out_sb.set)
+    out_sb.pack(side='right', fill='y')
+    out_text.pack(fill='both', expand=True)
+
+    # Pole pro vlastní dotaz
+    q_frame = tk.Frame(win)
+    q_frame.pack(fill='x', padx=12, pady=(0, 8))
+    q_entry = tk.Entry(q_frame, font=("Arial", 10))
+    q_entry.pack(side='left', fill='x', expand=True, padx=(0, 6))
+    q_entry.insert(0, "Zhodnoť tento obchod a navrhni co zlepšit.")
+
+    def _show(text):
+        root.after(0, lambda: (
+            out_text.config(state='normal'),
+            out_text.delete(1.0, tk.END),
+            out_text.insert(tk.END, text),
+            out_text.config(state='disabled'),
+            send_btn.config(state='normal', text='Analyzovat')
+        ))
+
+    def send():
+        question = q_entry.get().strip()
+        if not question:
+            return
+        context = _trade_context_text(trade)
+        prompt = (
+            "Jsi zkušený trading coach. Analyzuj tento obchod na základě parametrů "
+            "a screenshotů (pokud jsou k dispozici). Piš česky, stručně a konkrétně.\n\n"
+            f"PARAMETRY OBCHODU:\n{context}\n\n"
+            f"DOTAZ: {question}"
+        )
+        # Načti screenshoty jako base64
+        images_b64 = []
+        import base64
+        for img_name in trade.get('obrazky', '').split(';'):
+            img_name = img_name.strip()
+            if not img_name:
+                continue
+            full = os.path.join(IMAGES_DIR, img_name)
+            if os.path.exists(full):
+                try:
+                    with open(full, 'rb') as f:
+                        images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
+                except Exception:
+                    pass
+
+        send_btn.config(state='disabled', text='Analyzuji...')
+        out_text.config(state='normal')
+        out_text.delete(1.0, tk.END)
+        out_text.insert(tk.END, "⏳  Čekám na AI odpověď...")
+        out_text.config(state='disabled')
+        _ask_ollama_async(prompt, images_b64, _show)
+
+    send_btn = tk.Button(q_frame, text="Analyzovat", command=send,
+                         bg="#8e44ad", fg="white", font=("Arial", 9, "bold"), width=12)
+    send_btn.pack(side='right')
+    q_entry.bind('<Return>', lambda e: send())
+
+    # Automaticky spusť analýzu při otevření
+    win.after(200, send)
+
+
 class _SetupPicker:
     """Jedno pole + popup se zaškrtávacími políčky pro multi-výběr setupu (max 3)."""
     def __init__(self, parent, values=(), width=33):
@@ -12227,6 +12372,17 @@ def show_main_screen(p_name):
         tk.Button(bp_header, text="📖 ZOBRAZIT ZÁPIS Z DENÍKU", command=jump_to_journal, bg="#8e44ad", fg="white", font=("Arial", 8, "bold")).pack(side='right', padx=5)
     
     tk.Button(bp_header, text="🌍 OTEVŘÍT ZPRÁVY (FF) PRO TENTO DEN", command=jump_to_ff_details, bg="#e67e22", fg="white", font=("Arial", 8, "bold")).pack(side='right')
+
+    def _ai_analyze_selected():
+        if not trades_tree: return
+        sel = trades_tree.selection()
+        if not sel:
+            messagebox.showinfo("AI Analýza", "Nejdřív vyber obchod ze seznamu."); return
+        t = load_data()[int(sel[0])]
+        open_ai_analysis(t)
+
+    tk.Button(bp_header, text="🤖 AI ANALÝZA", command=_ai_analyze_selected,
+              bg="#8e44ad", fg="white", font=("Arial", 8, "bold")).pack(side='right', padx=(0, 5))
 
     checklist_display_label = tk.Label(bp_header, text="", font=("Arial", 10, "bold"), padx=10)
     checklist_display_label.pack(side="right", padx=10)
