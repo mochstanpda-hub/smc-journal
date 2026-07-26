@@ -1,0 +1,63 @@
+AI TRADING CONTEXT — BACKTESTING.py (v1.5.147)
+================================================
+Nastroje: US100 (NAS100, Nasdaq 100) + XAUUSD (Zlato)
+Primarni kontext: ON profil + VWAP (oba stejně důležité)
+Primarni typ obchodu: Mean Reversion (odraz od úrovně zpět k VWAP/POC)
+
+KLÍČOVÉ ÚROVNĚ
+==============
+ON VAH  — Overnight Value Area High (horní hranice ON value area)
+ON VAL  — Overnight Value Area Low  (dolní hranice ON value area)
+ON POC  — Overnight Point of Control (úroveň s největším objemem v ON)
+ON High — Nejvyšší cena overnight seance
+ON Low  — Nejnižší cena overnight seance
+RTH VAH — RTH Value Area High
+RTH VAL — RTH Value Area Low
+RTH POC — RTH Point of Control
+RTH High— Nejvyšší cena RTH seance
+RTH Low — Nejnižší cena RTH seance
+PDH     — Previous Day High (vzorek dne)
+PDL     — Previous Day Low
+VWAP    — Volume Weighted Average Price (denní, reset na RTH open)
+VWAP +1σ / -1σ — první standardní odchylka
+VWAP +2σ / -2σ — druhá standardní odchylka (extrémní extenze)
+Daily Open — cena otevření dnešního RTH (15:30 CET)
+
+SEANCE
+======
+OVERNIGHT: 02:00 – 15:29 CET
+RTH:       15:30 – 22:00 CET
+Definice seancí je dána časovými volume profily (nikoliv jen časem).
+
+BIAS (kontext vstupu)
+=====================
+Nad ON POC AND nad VWAP → bullish bias (kupuj poklesy)
+Pod ON POC AND pod VWAP → bearish bias (prodávej vzestupy)
+Mezi ON POC a VWAP     → neutrální / opatrnost
+
+VSTUPNÍ LOGIKA — 4 kroky
+========================
+1. SWEEP (sweepnutí úrovně) — cena se přiblíží nebo krátce prorazí klíčovou úroveň
+2. ABSORPCE — CVD ukazuje divergenci (cena jde na úroveň, ale CVD nepotvrzuje)
+3. RELOAD — potvrzovací svíčkový pattern na úrovni (odmítnutí, engulfing)
+4. DELTA KONFIRMACE — CVD se otočí ve směru obchodu
+
+CÍLOVÁ HLADINA: návrat k VWAP, ON POC nebo protilehlé hranici value area.
+
+COMMON SETUP NAMES (pro poznámku)
+==================================
+Mean Reversion         — odraz od klíčové úrovně zpět k průměru
+Failed Auction         — prolomení úrovně bez pokračování → reversal
+Balance VA             — obchodování uvnitř value area (mezi VAH a VAL)
+IB Breakout            — prolomení Initial Balance high/low s pokračováním
+VWAP Reclaim           — cena si opět nárokuje VWAP po separaci
+CVD Divergence         — cena dělá nové extrémum, ale CVD diverguje
+
+GRAF (TradingView)
+==================
+- Svíčkový graf (1m / 3m / 5m / 15m)
+- Session Volume Profile indikátor (ON + RTH profily s VAH/VAL/POC)
+- VWAP s ±1σ a ±2σ pásmy
+- CVD panel dole
+- Případně Big Traders indikátor (velké objednávky)
+- Daily Open jako úroveň

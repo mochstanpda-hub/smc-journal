@@ -11628,7 +11628,7 @@ def open_project_by_name(mode, name):
 # AI ASISTENT — Ollama lokální AI
 # ==============================================================================
 OLLAMA_URL   = "http://localhost:11434"
-OLLAMA_MODEL = "llava:7b"
+OLLAMA_MODEL = "llava:34b"  # výchozí; lze změnit v Nastavení → AI model
 
 def _ollama_running():
     try:
@@ -11637,6 +11637,24 @@ def _ollama_running():
         return True
     except Exception:
         return False
+
+def _ollama_list_models():
+    """Vrátí seznam názvů modelů nainstalovaných v Ollama."""
+    try:
+        import urllib.request, json as _j
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as r:
+            return [m['name'] for m in _j.loads(r.read()).get('models', [])]
+    except Exception:
+        return []
+
+def _ollama_get_active_model():
+    """Vrátí aktivní model (z config nebo OLLAMA_MODEL, s fallback na 7b)."""
+    global OLLAMA_MODEL
+    cfg = load_scoring_config()
+    stored = cfg.get('ai_model', '')
+    if stored:
+        OLLAMA_MODEL = stored
+    return OLLAMA_MODEL
 
 def _trade_context_text(t):
     """Sestaví textový kontext obchodu pro AI."""
@@ -11664,9 +11682,10 @@ def _ask_ollama_async(prompt, images_b64, callback):
             if images_b64:
                 messages[0]["images"] = images_b64
             body = _json.dumps({
-                "model": OLLAMA_MODEL,
+                "model": _ollama_get_active_model(),
                 "messages": messages,
                 "stream": False,
+                "options": {"num_ctx": 4096},
             }).encode('utf-8')
             r = _req.Request(OLLAMA_URL + "/api/chat", data=body,
                              headers={"Content-Type": "application/json"})
@@ -12070,42 +12089,30 @@ def show_main_screen(p_name):
         with open(path, 'rb') as fh:
             img_b64 = base64.b64encode(fh.read()).decode('utf-8')
 
-        _levels_list = ", ".join(FIBO_OPTIONS)
         prompt = (
-            "You are a professional trading journal assistant specialized in Volume Profile, VWAP, and CVD order flow analysis.\n\n"
-            "TRADING INSTRUMENTS: NAS100 (US100, Nasdaq 100) and XAUUSD (Gold).\n\n"
-            "CHART SETUP (TradingView): Regular candlestick chart (1min/3min/5min/15min). "
-            "Session Volume Profile indicator shows ON (Overnight 02:00-15:29 CET) and RTH (15:30-22:00 CET) profiles. "
-            "VWAP with ±1σ and ±2σ bands. CVD (Cumulative Volume Delta) panel at the bottom.\n\n"
-            "KEY LEVELS on chart (horizontal lines):\n"
-            "ON VAH/VAL/POC/High/Low = Overnight session levels.\n"
-            "RTH VAH/VAL/POC/High/Low = Regular Trading Hours levels.\n"
-            "PDH/PDL = Previous Day High/Low.\n"
-            "VWAP, VWAP +1σ/-1σ, VWAP +2σ/-2σ = VWAP and standard deviation bands.\n"
-            "Daily Open = price where the day opened (RTH open 15:30 CET).\n\n"
-            "STRATEGY (Mean Reversion primary):\n"
-            "Bias: above ON POC and VWAP = bullish; below both = bearish.\n"
-            "Entry: price sweeps to key level → CVD shows absorption/divergence → rejection candle → trade back toward VWAP/POC.\n"
-            "Common setups: Mean Reversion (odraz), Failed Auction (failed breakout reversal), Balance VA (range between VAH/VAL), VWAP Reclaim.\n\n"
-            "Analyze this TradingView screenshot and return ONLY a valid JSON object "
-            "(use empty string \"\" for anything not visible):\n"
+            "Analyze this TradingView trading chart. Look for: the ticker symbol in the top-left title, "
+            "trade entry/exit markers or colored rectangle showing the position, "
+            "price labels on horizontal lines (ON VAH, ON VAL, ON POC, ON High, ON Low, "
+            "RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low, PDH, PDL, VWAP, Daily Open), "
+            "time labels on the x-axis, and the timeframe button (1m/3m/5m/15m) at the top.\n\n"
+            "Return ONLY this JSON (empty string for anything not clearly visible):\n"
             "{\n"
-            "  \"symbol\": \"NAS100 or XAUUSD or other ticker\",\n"
+            "  \"symbol\": \"ticker from chart title e.g. US100 XAUUSD\",\n"
             "  \"smer\": \"Buy or Sell\",\n"
-            "  \"vstupni_hodnota\": \"entry price as decimal\",\n"
-            "  \"stoploss\": \"stop loss price as decimal\",\n"
-            "  \"takeprofit\": \"take profit price as decimal\",\n"
-            "  \"cas_otevreni\": \"open datetime YYYY-MM-DD HH:MM if visible\",\n"
-            "  \"cas_zavreni\": \"close datetime YYYY-MM-DD HH:MM if visible\",\n"
-            "  \"timeframe_vstup\": \"chart timeframe e.g. 1m 3m 5m 15m\",\n"
-            f"  \"fibo\": \"comma-separated key levels involved in entry (choose from: {_levels_list})\",\n"
-            f"  \"tp_level\": \"which level is the TP at (choose from: {_levels_list})\",\n"
-            f"  \"sl_level\": \"which level is the SL at (choose from: {_levels_list})\",\n"
-            "  \"session\": \"OVERNIGHT if entry time 02:00-15:29, RTH if 15:30-22:00\",\n"
-            "  \"duvod\": \"entry reason in Czech (1-2 sentences, e.g. Odmítnutí ON VAL s CVD absorpcí)\",\n"
-            "  \"poznamka\": \"setup description in Czech (e.g. Mean Reversion od ON VAL k VWAP, CVD divergence potvrdila vstup)\"\n"
-            "}\n\n"
-            "Return ONLY the JSON object. No explanation, no markdown, no extra text."
+            "  \"vstupni_hodnota\": \"entry price number\",\n"
+            "  \"stoploss\": \"stop loss price number\",\n"
+            "  \"takeprofit\": \"take profit price number\",\n"
+            "  \"cas_otevreni\": \"trade open time YYYY-MM-DD HH:MM\",\n"
+            "  \"cas_zavreni\": \"trade close time YYYY-MM-DD HH:MM\",\n"
+            "  \"timeframe_vstup\": \"chart timeframe e.g. 5m\",\n"
+            "  \"fibo\": \"key level(s) at entry from: ON VAH,ON VAL,ON POC,ON High,ON Low,RTH VAH,RTH VAL,RTH POC,RTH High,RTH Low,PDH,PDL,VWAP,VWAP +1σ,VWAP -1σ,Daily Open\",\n"
+            "  \"tp_level\": \"level at TP from the same list\",\n"
+            "  \"sl_level\": \"level at SL from the same list\",\n"
+            "  \"session\": \"OVERNIGHT if before 15:30, RTH if 15:30-22:00\",\n"
+            "  \"duvod\": \"entry reason in Czech 1 sentence\",\n"
+            "  \"poznamka\": \"what you see on chart in Czech 1 sentence\"\n"
+            "}\n"
+            "JSON only. No markdown. No extra text."
         )
 
         def on_ai_result(raw_text):
@@ -12125,6 +12132,20 @@ def show_main_screen(p_name):
             if not result:
                 root.after(0, lambda: messagebox.showerror(
                     "AI Analýza", f"AI nevrátila platný výsledek.\n\n{raw_text[:400]}"))
+                return
+
+            # Zkontroluj jestli AI vrátila prázdné hodnoty — ukaz debug info
+            filled = sum(1 for v in result.values() if v and str(v).strip())
+            if filled <= 1:
+                def _show_debug():
+                    msg = (f"AI vrátila JSON ale bez dat ({filled} vyplněných polí).\n\n"
+                           f"Pravděpodobná příčina: model llava:7b je příliš malý.\n"
+                           f"Zkus: ollama pull llava:13b\n\n"
+                           f"Raw odpověď AI:\n{raw_text[:600]}")
+                    if messagebox.askyesno("AI — prázdný výsledek",
+                                           msg + "\n\nChceš přesto otevřít formulář (s prázdnými hodnotami)?"):
+                        _show_ai_confirm(result)
+                root.after(0, _show_debug)
                 return
 
             root.after(0, lambda: _show_ai_confirm(result))

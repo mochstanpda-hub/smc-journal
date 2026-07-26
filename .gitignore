@@ -1,0 +1,35 @@
+# === OSOBNÍ DATA — NIKDY NA GITHUB ===
+projects/
+backups/
+konzistence.json
+konzistence_sync_base.json
+xp_data.json
+sync_state.json
+sync_config.json
+users.json
+debug_log.txt
+firebase_config.json
+invoice_details.json
+invoice_recipients.json
+global_settings.json
+
+# Spustitelné soubory
+*.exe
+*.dat
+unins*
+
+# Debug obrázky
+debug_*.png
+
+# Build artefakty
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+*.log
+
+# IDE
+.vscode/
+.claude/
