@@ -60,14 +60,15 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.149"
+VERSION = "1.5.150"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.150 | "Daily Open" přejmenován na "DAY open" (úrovně, scoring, AI prompt, setups_config)
 1.5.149 | AI model auto-fallback: pokud llava:34b není nainstalovaný, použije první dostupný vision model (llava:7b atd.)
 1.5.148 | Verze zvýšena
-1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, Daily Open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL; AI prompt přepsán na Volume Profile strategii (US100 + XAUUSD, Mean Reversion, CVD, ON/RTH bias)
+1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, DAY open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL; AI prompt přepsán na Volume Profile strategii (US100 + XAUUSD, Mean Reversion, CVD, ON/RTH bias)
 1.5.102 | Verze zvýšena
 1.5.101 | Uživatelské účty — přihlašovací obrazovka po spuštění; každý profil má vlastní data (projekty, konzistence, XP, nastavení); volitelné heslo (PBKDF2-SHA256); navázání na existující data při registraci; badge s jménem v toolbaru; tlačítko Odhlásit se na intro obrazovce
 1.5.100 | Konzistence — oprava cyklování šedého stavu: modulo % 3 → % len(_states), neutrální políčko nyní správně funguje
@@ -2151,7 +2152,7 @@ DEFAULT_SCORING = {
         "RTH VAH": 4, "RTH VAL": 4, "RTH POC": 3, "RTH High": 2, "RTH Low": 2,
         "PDH": 3, "PDL": 3,
         "VWAP": 3, "VWAP +1σ": 2, "VWAP -1σ": 2, "VWAP +2σ": 1, "VWAP -2σ": 1,
-        "Daily Open": 2
+        "DAY open": 2
     },
     "sessions": {"RTH": 3, "OVERNIGHT": 2},
     "days": {"Úterý": 2, "Středa": 2, "Čtvrtek": 2, "Pondělí": 1, "Pátek": 1},
@@ -2170,7 +2171,7 @@ FIBO_OPTIONS = [
     "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
     "PDH", "PDL",
     "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
-    "Daily Open",
+    "DAY open",
 ]
 SESSIONS_LIST = ["OVERNIGHT", "RTH"]
 
@@ -12105,7 +12106,7 @@ def show_main_screen(p_name):
             "Analyze this TradingView trading chart. Look for: the ticker symbol in the top-left title, "
             "trade entry/exit markers or colored rectangle showing the position, "
             "price labels on horizontal lines (ON VAH, ON VAL, ON POC, ON High, ON Low, "
-            "RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low, PDH, PDL, VWAP, Daily Open), "
+            "RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low, PDH, PDL, VWAP, DAY open), "
             "time labels on the x-axis, and the timeframe button (1m/3m/5m/15m) at the top.\n\n"
             "Return ONLY this JSON (empty string for anything not clearly visible):\n"
             "{\n"
@@ -12117,7 +12118,7 @@ def show_main_screen(p_name):
             "  \"cas_otevreni\": \"trade open time YYYY-MM-DD HH:MM\",\n"
             "  \"cas_zavreni\": \"trade close time YYYY-MM-DD HH:MM\",\n"
             "  \"timeframe_vstup\": \"chart timeframe e.g. 5m\",\n"
-            "  \"fibo\": \"key level(s) at entry from: ON VAH,ON VAL,ON POC,ON High,ON Low,RTH VAH,RTH VAL,RTH POC,RTH High,RTH Low,PDH,PDL,VWAP,VWAP +1σ,VWAP -1σ,Daily Open\",\n"
+            "  \"fibo\": \"key level(s) at entry from: ON VAH,ON VAL,ON POC,ON High,ON Low,RTH VAH,RTH VAL,RTH POC,RTH High,RTH Low,PDH,PDL,VWAP,VWAP +1σ,VWAP -1σ,DAY open\",\n"
             "  \"tp_level\": \"level at TP from the same list\",\n"
             "  \"sl_level\": \"level at SL from the same list\",\n"
             "  \"session\": \"OVERNIGHT if before 15:30, RTH if 15:30-22:00\",\n"
