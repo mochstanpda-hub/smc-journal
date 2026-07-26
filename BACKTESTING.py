@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.148"
+VERSION = "1.5.149"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.149 | AI model auto-fallback: pokud llava:34b není nainstalovaný, použije první dostupný vision model (llava:7b atd.)
 1.5.148 | Verze zvýšena
 1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, Daily Open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL; AI prompt přepsán na Volume Profile strategii (US100 + XAUUSD, Mean Reversion, CVD, ON/RTH bias)
 1.5.102 | Verze zvýšena
@@ -11649,13 +11650,23 @@ def _ollama_list_models():
         return []
 
 def _ollama_get_active_model():
-    """Vrátí aktivní model (z config nebo OLLAMA_MODEL, s fallback na 7b)."""
+    """Vrátí aktivní model — z config, nebo OLLAMA_MODEL, nebo první dostupný vision model."""
     global OLLAMA_MODEL
     cfg = load_scoring_config()
     stored = cfg.get('ai_model', '')
-    if stored:
-        OLLAMA_MODEL = stored
-    return OLLAMA_MODEL
+    preferred = stored if stored else OLLAMA_MODEL
+    available = _ollama_list_models()
+    if not available:
+        return preferred
+    # Exact match nebo prefix match (llava:34b může být uložen jako llava:34b-...)
+    for m in available:
+        if m == preferred or m.startswith(preferred.split(':')[0] + ':'):
+            return m
+    # Fallback: první dostupný llava nebo vision model
+    for m in available:
+        if 'llava' in m or 'vision' in m or 'minicpm' in m or 'moondream' in m:
+            return m
+    return available[0]  # cokoliv co je nainstalované
 
 def _trade_context_text(t):
     """Sestaví textový kontext obchodu pro AI."""
