@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.150"
+VERSION = "1.5.151"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.151 | AI prompt přepsán na 2-krokový formát s ? placeholdery — llava:7b přestane vracet popisy polí místo hodnot
 1.5.150 | "Daily Open" přejmenován na "DAY open" (úrovně, scoring, AI prompt, setups_config)
 1.5.149 | AI model auto-fallback: pokud llava:34b není nainstalovaný, použije první dostupný vision model (llava:7b atd.)
 1.5.148 | Verze zvýšena
@@ -12103,29 +12104,31 @@ def show_main_screen(p_name):
             img_b64 = base64.b64encode(fh.read()).decode('utf-8')
 
         prompt = (
-            "Analyze this TradingView trading chart. Look for: the ticker symbol in the top-left title, "
-            "trade entry/exit markers or colored rectangle showing the position, "
-            "price labels on horizontal lines (ON VAH, ON VAL, ON POC, ON High, ON Low, "
-            "RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low, PDH, PDL, VWAP, DAY open), "
-            "time labels on the x-axis, and the timeframe button (1m/3m/5m/15m) at the top.\n\n"
-            "Return ONLY this JSON (empty string for anything not clearly visible):\n"
-            "{\n"
-            "  \"symbol\": \"ticker from chart title e.g. US100 XAUUSD\",\n"
-            "  \"smer\": \"Buy or Sell\",\n"
-            "  \"vstupni_hodnota\": \"entry price number\",\n"
-            "  \"stoploss\": \"stop loss price number\",\n"
-            "  \"takeprofit\": \"take profit price number\",\n"
-            "  \"cas_otevreni\": \"trade open time YYYY-MM-DD HH:MM\",\n"
-            "  \"cas_zavreni\": \"trade close time YYYY-MM-DD HH:MM\",\n"
-            "  \"timeframe_vstup\": \"chart timeframe e.g. 5m\",\n"
-            "  \"fibo\": \"key level(s) at entry from: ON VAH,ON VAL,ON POC,ON High,ON Low,RTH VAH,RTH VAL,RTH POC,RTH High,RTH Low,PDH,PDL,VWAP,VWAP +1σ,VWAP -1σ,DAY open\",\n"
-            "  \"tp_level\": \"level at TP from the same list\",\n"
-            "  \"sl_level\": \"level at SL from the same list\",\n"
-            "  \"session\": \"OVERNIGHT if before 15:30, RTH if 15:30-22:00\",\n"
-            "  \"duvod\": \"entry reason in Czech 1 sentence\",\n"
-            "  \"poznamka\": \"what you see on chart in Czech 1 sentence\"\n"
-            "}\n"
-            "JSON only. No markdown. No extra text."
+            "This is a TradingView chart image. I need you to read the chart and fill in a JSON.\n\n"
+            "STEP 1 — Read the chart:\n"
+            "- Top-left title: what is the ticker symbol? (US100 or XAUUSD)\n"
+            "- Top toolbar: what timeframe button is highlighted? (1m, 3m, 5m, 15m)\n"
+            "- Colored rectangle on chart: what direction is the trade? (Buy=green goes up, Sell=red goes down)\n"
+            "- Price axis (right side): read the entry, stop loss, and take profit price numbers\n"
+            "- X-axis (bottom): what times are the trade open and close?\n"
+            "- Horizontal line labels: ON VAH, ON VAL, ON POC, RTH POC, RTH VAL, VWAP, DAY open — which is closest to entry/SL/TP?\n"
+            "- Time of entry: before 15:30 = OVERNIGHT, after 15:30 = RTH\n\n"
+            "STEP 2 — Fill this JSON. Replace each ? with the real value. Use empty string if unsure.\n\n"
+            "{\"symbol\":\"?\","
+            "\"smer\":\"?\","
+            "\"vstupni_hodnota\":\"?\","
+            "\"stoploss\":\"?\","
+            "\"takeprofit\":\"?\","
+            "\"cas_otevreni\":\"?\","
+            "\"cas_zavreni\":\"?\","
+            "\"timeframe_vstup\":\"?\","
+            "\"fibo\":\"?\","
+            "\"tp_level\":\"?\","
+            "\"sl_level\":\"?\","
+            "\"session\":\"?\","
+            "\"duvod\":\"?\","
+            "\"poznamka\":\"?\"}\n\n"
+            "Output the completed JSON only. No explanations."
         )
 
         def on_ai_result(raw_text):
