@@ -1,6 +1,9 @@
 # === OSOBNÍ DATA — NIKDY NA GITHUB ===
 projects/
 backups/
+ai_memory.json
+ai_summary.txt
+ai_chat_history.json
 konzistence.json
 konzistence_sync_base.json
 xp_data.json
