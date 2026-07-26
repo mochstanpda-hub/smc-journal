@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.151"
+VERSION = "1.5.152"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.152 | Záložka 🤖 CHAT — lokální AI chatbot (qwen2.5:7b); A+C paměť: ai_memory.json (insight po každém obchodu) + ai_summary.txt (komprese každých 10 obchodů); kontext: obchody, stats, Volume Profile strategie
 1.5.151 | AI prompt přepsán na 2-krokový formát s ? placeholdery — llava:7b přestane vracet popisy polí místo hodnot
 1.5.150 | "Daily Open" přejmenován na "DAY open" (úrovně, scoring, AI prompt, setups_config)
 1.5.149 | AI model auto-fallback: pokud llava:34b není nainstalovaný, použije první dostupný vision model (llava:7b atd.)
@@ -1968,6 +1969,7 @@ ALL_MAIN_TABS = [
     ('yt',          '  📥 YT DOWNLOADER  ',False),
     ('ctrader',     '  📡 cTRADER  ',      False),
     ('tradingview', '  TRADINGVIEW GRAF  ',False),
+    ('chat',        '  🤖 CHAT  ',         False),
 ]
 
 def get_tab_config():
@@ -6708,6 +6710,8 @@ def pridat_obchod():
             _dbg_log('TRADE', f"NOVÝ: {d.get('symbol')} {d.get('smer')} výsledek={d.get('vysledek')} zisk={d.get('zisk_mena')} projekt={os.path.basename(DATA_FILE)}")
             messagebox.showinfo("OK", "Obchod uložen.")
             try: award_xp_for_trade(d, is_edit=False, parent_win=root)
+            except Exception: pass
+            try: _write_trade_to_ai_memory(d)
             except Exception: pass
         update_listbox(); reset_form(); update_statistics()
     except Exception as e:
@@ -11631,8 +11635,9 @@ def open_project_by_name(mode, name):
 # ==============================================================================
 # AI ASISTENT — Ollama lokální AI
 # ==============================================================================
-OLLAMA_URL   = "http://localhost:11434"
-OLLAMA_MODEL = "llava:34b"  # výchozí; lze změnit v Nastavení → AI model
+OLLAMA_URL        = "http://localhost:11434"
+OLLAMA_MODEL      = "llava:34b"    # vision model pro screenshoty
+OLLAMA_CHAT_MODEL = "qwen2.5:7b"  # chatbot model (text)
 
 def _ollama_running():
     try:
@@ -11711,6 +11716,417 @@ def _ask_ollama_async(prompt, images_b64, callback):
         callback(text)
 
     threading.Thread(target=_worker, daemon=True).start()
+
+
+# ==============================================================================
+# AI CHATBOT — qwen2.5:7b + A+C paměť
+# ==============================================================================
+
+def _get_chat_model():
+    """Vrátí chatbot model — z config nebo OLLAMA_CHAT_MODEL, nebo první textový model."""
+    cfg = load_scoring_config()
+    preferred = cfg.get('chat_model', '') or OLLAMA_CHAT_MODEL
+    available = _ollama_list_models()
+    if not available:
+        return preferred
+    for m in available:
+        if m == preferred or m.startswith(preferred.split(':')[0] + ':'):
+            return m
+    for m in available:
+        if any(k in m for k in ('qwen', 'llama', 'mistral', 'phi', 'gemma', 'deepseek')):
+            if not any(k in m for k in ('vision', 'llava', 'moondream', 'minicpm')):
+                return m
+    return available[0]
+
+def _chat_ollama_async(messages, callback, model=None):
+    """Zavolá Ollama chat API ve vlákně s historií zpráv."""
+    import threading, json as _json, urllib.request as _req
+
+    def _worker():
+        try:
+            m = model or _get_chat_model()
+            body = _json.dumps({
+                "model": m,
+                "messages": messages,
+                "stream": False,
+                "options": {"num_ctx": 8192},
+            }).encode('utf-8')
+            r = _req.Request(OLLAMA_URL + "/api/chat", data=body,
+                             headers={"Content-Type": "application/json"})
+            with _req.urlopen(r, timeout=120) as resp:
+                data = _json.loads(resp.read())
+            text = data.get("message", {}).get("content", "(prázdná odpověď)")
+        except Exception as e:
+            text = f"⚠ Chyba při komunikaci s AI:\n{e}"
+        callback(text)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+def _ai_memory_file():
+    return os.path.join(os.path.dirname(DATA_FILE), 'ai_memory.json') if DATA_FILE else None
+
+def _ai_summary_file():
+    return os.path.join(os.path.dirname(DATA_FILE), 'ai_summary.txt') if DATA_FILE else None
+
+def _ai_chat_history_file():
+    return os.path.join(os.path.dirname(DATA_FILE), 'ai_chat_history.json') if DATA_FILE else None
+
+def _load_ai_memory():
+    f = _ai_memory_file()
+    if f and os.path.exists(f):
+        try:
+            with open(f, 'r', encoding='utf-8') as fh:
+                return json.load(fh)
+        except Exception:
+            pass
+    return {"trades": [], "last_updated": ""}
+
+def _save_ai_memory(mem):
+    f = _ai_memory_file()
+    if not f:
+        return
+    mem['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M')
+    try:
+        with open(f, 'w', encoding='utf-8') as fh:
+            json.dump(mem, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _load_ai_summary():
+    f = _ai_summary_file()
+    if f and os.path.exists(f):
+        try:
+            with open(f, 'r', encoding='utf-8') as fh:
+                return fh.read()
+        except Exception:
+            pass
+    return ""
+
+def _save_ai_summary(text):
+    f = _ai_summary_file()
+    if not f:
+        return
+    try:
+        with open(f, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+    except Exception:
+        pass
+
+def _load_chat_history():
+    f = _ai_chat_history_file()
+    if f and os.path.exists(f):
+        try:
+            with open(f, 'r', encoding='utf-8') as fh:
+                return json.load(fh)
+        except Exception:
+            pass
+    return []
+
+def _save_chat_history(history):
+    f = _ai_chat_history_file()
+    if not f:
+        return
+    try:
+        with open(f, 'w', encoding='utf-8') as fh:
+            json.dump(history[-100:], fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _write_trade_to_ai_memory(trade):
+    """Po uložení obchodu zavolá AI pro krátký insight a zapíše do ai_memory.json."""
+    if not _ollama_running():
+        return
+    context = _trade_context_text(trade)
+    prompt = [{
+        "role": "user",
+        "content": (
+            f"Analyze this trade briefly (2-3 sentences). What worked or didn't work? "
+            f"What pattern does this represent?\n\nTrade:\n{context}"
+        )
+    }]
+
+    def _on_insight(text):
+        mem = _load_ai_memory()
+        mem['trades'].append({
+            'id':      trade.get('id', ''),
+            'date':    (trade.get('cas_otevreni') or '')[:10],
+            'symbol':  trade.get('symbol', ''),
+            'result':  trade.get('vysledek', ''),
+            'setup':   trade.get('fibo', ''),
+            'rrr':     trade.get('rrr', ''),
+            'insight': text.strip()[:500],
+        })
+        mem['trades'] = mem['trades'][-50:]
+        _save_ai_memory(mem)
+        if len(mem['trades']) % 10 == 0:
+            _update_ai_summary(mem)
+
+    _chat_ollama_async(prompt, _on_insight)
+
+def _update_ai_summary(mem=None):
+    """Komprimuje posledních 20 insight záznamů do ai_summary.txt."""
+    if mem is None:
+        mem = _load_ai_memory()
+    recent = mem.get('trades', [])[-20:]
+    if not recent:
+        return
+    trades_text = "\n\n".join(
+        f"[{t.get('date','')}] {t.get('symbol','')} {t.get('result','')} setup={t.get('setup','')} RRR={t.get('rrr','')}\n{t.get('insight','')}"
+        for t in recent
+    )
+    prompt = [{
+        "role": "user",
+        "content": (
+            "Based on these trade insights, write a concise summary (5-8 sentences) covering:\n"
+            "1. Patterns that lead to wins\n"
+            "2. Patterns that lead to losses\n"
+            "3. Key strengths and weaknesses\n\n"
+            f"Trades:\n{trades_text}"
+        )
+    }]
+
+    def _on_summary(text):
+        _save_ai_summary(
+            f"[Aktualizováno: {datetime.now().strftime('%Y-%m-%d %H:%M')}]\n\n{text.strip()}"
+        )
+
+    _chat_ollama_async(prompt, _on_summary)
+
+
+def setup_chat_tab(parent):
+    """Sestaví záložku 🤖 CHAT — lokální AI chatbot s A+C pamětí."""
+
+    # ── Hlavička ──────────────────────────────────────────────────────────────
+    hdr = tk.Frame(parent, bg='#0f172a', pady=8)
+    hdr.pack(fill='x')
+    tk.Label(hdr, text="🤖  AI CHATBOT", font=('Segoe UI', 12, 'bold'),
+             bg='#0f172a', fg='white').pack(side='left', padx=16)
+
+    model_lbl = tk.Label(hdr, text="", font=('Segoe UI', 8), bg='#0f172a', fg='#94a3b8')
+    model_lbl.pack(side='left', padx=4)
+    status_dot = tk.Label(hdr, text='●', font=('Segoe UI', 10), bg='#0f172a', fg='#ef4444')
+    status_dot.pack(side='left')
+
+    def _refresh_status():
+        running = _ollama_running()
+        status_dot.config(fg='#22c55e' if running else '#ef4444')
+        model_lbl.config(text=f"  {_get_chat_model()}  ")
+
+    _refresh_status()
+
+    tk.Button(hdr, text='↺', command=_refresh_status,
+              bg='#1e293b', fg='#60a5fa', font=('Segoe UI', 9),
+              relief='flat', cursor='hand2', padx=6).pack(side='left')
+
+    def _clear_chat():
+        if messagebox.askyesno("Vymazat chat", "Smazat historii chatu?\n(AI paměť zůstane)"):
+            chat_history.clear()
+            _save_chat_history([])
+            _render_chat()
+
+    tk.Button(hdr, text='🗑 Smazat chat', command=_clear_chat,
+              bg='#0f172a', fg='#f87171', font=('Segoe UI', 8),
+              relief='flat', cursor='hand2', padx=8).pack(side='right', padx=12)
+
+    # ── Lišta paměti ─────────────────────────────────────────────────────────
+    mem_bar = tk.Frame(parent, bg='#0f172a', pady=3)
+    mem_bar.pack(fill='x')
+
+    mem_lbl = tk.Label(mem_bar, text="", font=('Segoe UI', 8), bg='#0f172a', fg='#475569')
+    mem_lbl.pack(side='left', padx=16)
+
+    def _refresh_mem_lbl():
+        mem = _load_ai_memory()
+        n = len(mem.get('trades', []))
+        has_sum = bool(_load_ai_summary())
+        mem_lbl.config(text=f"Paměť: {n} obchodů  {'✓ summary' if has_sum else '—'}")
+
+    _refresh_mem_lbl()
+
+    def _view_memory():
+        w = tk.Toplevel(); w.title("AI Paměť"); w.geometry("700x520")
+        w.configure(bg=DT_BG)
+        t = tk.Text(w, bg='#0f172a', fg='#e2e8f0', font=('Consolas', 9), wrap='word')
+        sb = ttk.Scrollbar(w, command=t.yview); t.config(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y'); t.pack(fill='both', expand=True, padx=8, pady=8)
+        summary = _load_ai_summary()
+        if summary:
+            t.insert('end', "═══ SUMMARY ═══\n" + summary + "\n\n")
+        t.insert('end', "═══ TRADE INSIGHTS ═══\n")
+        for e in reversed(_load_ai_memory().get('trades', [])):
+            t.insert('end', f"\n[{e.get('date','')}] {e.get('symbol','')} {e.get('result','')} @ {e.get('setup','')}  RRR={e.get('rrr','')}\n")
+            t.insert('end', e.get('insight', '') + "\n")
+        t.config(state='disabled')
+
+    def _manual_summary():
+        if messagebox.askyesno("Aktualizovat summary", "Přegenerovat AI summary nyní?"):
+            _update_ai_summary()
+            root.after(5000, _refresh_mem_lbl)
+
+    tk.Button(mem_bar, text='📖 Paměť', command=_view_memory,
+              bg='#0f172a', fg='#60a5fa', font=('Segoe UI', 8),
+              relief='flat', cursor='hand2').pack(side='left', padx=4)
+    tk.Button(mem_bar, text='↺ Summary', command=_manual_summary,
+              bg='#0f172a', fg='#a78bfa', font=('Segoe UI', 8),
+              relief='flat', cursor='hand2').pack(side='left', padx=4)
+
+    # ── Chat oblast ───────────────────────────────────────────────────────────
+    chat_outer = tk.Frame(parent, bg=DT_BG)
+    chat_outer.pack(fill='both', expand=True, padx=6, pady=(4, 0))
+
+    chat_canvas = tk.Canvas(chat_outer, bg=DT_BG, highlightthickness=0)
+    chat_sb_w = ttk.Scrollbar(chat_outer, command=chat_canvas.yview)
+    chat_canvas.configure(yscrollcommand=chat_sb_w.set)
+    chat_sb_w.pack(side='right', fill='y')
+    chat_canvas.pack(side='left', fill='both', expand=True)
+
+    chat_inner = tk.Frame(chat_canvas, bg=DT_BG)
+    _cwin = chat_canvas.create_window((0, 0), window=chat_inner, anchor='nw')
+    chat_canvas.bind('<Configure>', lambda e: chat_canvas.itemconfig(_cwin, width=e.width))
+    chat_inner.bind('<Configure>', lambda e: chat_canvas.configure(scrollregion=chat_canvas.bbox('all')))
+
+    def _mw(e): chat_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+    chat_canvas.bind('<MouseWheel>', _mw)
+    chat_inner.bind('<MouseWheel>', _mw)
+
+    # ── Chat history ──────────────────────────────────────────────────────────
+    chat_history = _load_chat_history()
+
+    def _render_chat():
+        for w in chat_inner.winfo_children():
+            w.destroy()
+        if not chat_history:
+            tk.Label(chat_inner,
+                     text="Zeptej se na své obchody, strategii nebo výkon.\n"
+                          "Mám přístup k historii obchodů a AI paměti.",
+                     bg=DT_BG, fg='#475569', font=('Segoe UI', 10),
+                     wraplength=560, justify='center').pack(pady=48)
+            return
+        for msg in chat_history:
+            role = msg.get('role', 'user')
+            if role == 'system':
+                continue
+            content = msg.get('content', '')
+            is_user = (role == 'user')
+            row = tk.Frame(chat_inner, bg=DT_BG)
+            row.pack(fill='x', padx=10, pady=3)
+            prefix = 'Ty' if is_user else '🤖'
+            tk.Label(row, text=prefix + ':', bg=DT_BG, fg='#475569',
+                     font=('Segoe UI', 8)).pack(anchor='e' if is_user else 'w')
+            bubble = tk.Label(row, text=content,
+                              bg='#1e3a5f' if is_user else '#1e293b',
+                              fg='#bfdbfe' if is_user else '#e2e8f0',
+                              font=('Segoe UI', 10), wraplength=580,
+                              justify='left', padx=12, pady=8)
+            bubble.pack(anchor='e' if is_user else 'w')
+        chat_inner.update_idletasks()
+        chat_canvas.configure(scrollregion=chat_canvas.bbox('all'))
+        chat_canvas.yview_moveto(1.0)
+
+    _render_chat()
+
+    # ── Input ─────────────────────────────────────────────────────────────────
+    inp_frame = tk.Frame(parent, bg=DT_PANEL, padx=8, pady=8)
+    inp_frame.pack(fill='x', side='bottom')
+
+    inp_text = tk.Text(inp_frame, height=3, font=('Segoe UI', 10),
+                       bg=DT_ENTRY, fg=DT_TEXT, insertbackground='white',
+                       relief='solid', bd=1, wrap='word')
+    inp_text.pack(side='left', fill='x', expand=True, padx=(0, 8))
+
+    thinking_ref = [None]  # mutable ref pro "přemýšlím..." label
+
+    def _build_system_prompt():
+        all_trades = load_data() if DATA_FILE else []
+        n = len(all_trades)
+        wins = sum(1 for t in all_trades if t.get('vysledek') == 'Win')
+        losses = sum(1 for t in all_trades if t.get('vysledek') == 'Loss')
+        wr = (wins / n * 100) if n else 0
+        recent = all_trades[-10:] if len(all_trades) >= 10 else all_trades
+        recent_txt = "\n".join(
+            f"- {t.get('cas_otevreni','')[:10]} {t.get('symbol','')} {t.get('smer','')} @ {t.get('fibo','')} → {t.get('vysledek','')} RRR={t.get('rrr','')}"
+            for t in reversed(recent)
+        )
+        mem = _load_ai_memory()
+        summary = _load_ai_summary()
+        recent_insights = "\n".join(
+            f"[{e.get('date','')} {e.get('symbol','')} {e.get('result','')}]: {e.get('insight','')[:200]}"
+            for e in mem.get('trades', [])[-5:]
+        )
+        # Načti trading context
+        ctx_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ai_trading_context.txt')
+        trading_ctx = ""
+        if os.path.exists(ctx_file):
+            try:
+                with open(ctx_file, 'r', encoding='utf-8') as cf:
+                    trading_ctx = cf.read()[:2000]
+            except Exception:
+                pass
+        sys_prompt = (
+            "You are a personal trading coach and journal assistant. "
+            "Respond in Czech. Be concise, specific, and actionable.\n\n"
+        )
+        if trading_ctx:
+            sys_prompt += f"TRADING STRATEGY:\n{trading_ctx}\n\n"
+        sys_prompt += (
+            f"STATS: {n} obchodů, {wins}W/{losses}L, Winrate {wr:.1f}%\n\n"
+            f"POSLEDNÍCH 10 OBCHODŮ:\n{recent_txt}\n\n"
+        )
+        if summary:
+            sys_prompt += f"AI SUMMARY:\n{summary}\n\n"
+        if recent_insights:
+            sys_prompt += f"RECENT INSIGHTS:\n{recent_insights}\n\n"
+        return sys_prompt
+
+    def _send():
+        user_text = inp_text.get('1.0', 'end').strip()
+        if not user_text:
+            return
+        if not _ollama_running():
+            messagebox.showwarning("AI Chatbot", "Ollama neběží.\nSpusť Ollama a zkus znovu.")
+            return
+        inp_text.delete('1.0', 'end')
+        chat_history.append({"role": "user", "content": user_text})
+        _save_chat_history(chat_history)
+        _render_chat()
+        # "přemýšlím..." indikátor
+        thinking_row = tk.Frame(chat_inner, bg=DT_BG)
+        thinking_row.pack(fill='x', padx=10, pady=3)
+        tk.Label(thinking_row, text="🤖: ⏳  přemýšlím...",
+                 bg=DT_BG, fg='#475569', font=('Segoe UI', 9, 'italic')).pack(anchor='w')
+        thinking_ref[0] = thinking_row
+        chat_canvas.update_idletasks()
+        chat_canvas.yview_moveto(1.0)
+
+        api_msgs = [{"role": "system", "content": _build_system_prompt()}]
+        visible = [m for m in chat_history if m.get('role') != 'system'][-20:]
+        api_msgs.extend(visible)
+
+        def _on_resp(text):
+            try:
+                if thinking_ref[0]:
+                    thinking_ref[0].destroy()
+                    thinking_ref[0] = None
+            except Exception:
+                pass
+            chat_history.append({"role": "assistant", "content": text})
+            _save_chat_history(chat_history)
+            root.after(0, _render_chat)
+            root.after(0, _refresh_mem_lbl)
+
+        _chat_ollama_async(api_msgs, _on_resp)
+
+    inp_text.bind('<Control-Return>', lambda e: (_send(), 'break')[1])
+
+    btn_col = tk.Frame(inp_frame, bg=DT_PANEL)
+    btn_col.pack(side='right', fill='y')
+    tk.Button(btn_col, text="Odeslat\nCtrl+↵",
+              command=_send, bg='#1d4ed8', fg='white',
+              font=('Segoe UI', 9, 'bold'), padx=14, pady=8,
+              relief='flat', cursor='hand2').pack()
+    tk.Label(btn_col, text="Enter = nová řádka",
+             bg=DT_PANEL, fg='#475569', font=('Segoe UI', 7)).pack(pady=(4, 0))
+
 
 def open_ai_analysis(trade):
     """Otevře okno s AI analýzou obchodu."""
@@ -12736,6 +13152,11 @@ def show_main_screen(p_name):
     tab_tv = ttk.Frame(nb)
     nb.add(tab_tv, text='  TRADINGVIEW GRAF  ')
 
+    # TAB CHAT
+    tab_chat = ttk.Frame(nb)
+    nb.add(tab_chat, text='  🤖 CHAT  ')
+    setup_chat_tab(tab_chat)
+
     # ── Aplikuj pořadí a viditelnost záložek dle nastavení ────────────────────
     _main_tab_frames = {
         'zapis':       (tab1,        '  ZÁPIS  '),
@@ -12750,6 +13171,7 @@ def show_main_screen(p_name):
         'yt':          (tab_yt,      '  📥 YT DOWNLOADER  '),
         'ctrader':     (tab_ct,      '  📡 cTRADER  '),
         'tradingview': (tab_tv,      '  TRADINGVIEW GRAF  '),
+        'chat':        (tab_chat,    '  🤖 CHAT  '),
     }
     apply_tab_order(nb, _main_tab_frames)
 
