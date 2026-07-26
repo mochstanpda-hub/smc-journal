@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.146"
+VERSION = "1.5.147"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, Daily Open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL; AI prompt přepsán na Volume Profile strategii (US100 + XAUUSD, Mean Reversion, CVD, ON/RTH bias)
 1.5.102 | Verze zvýšena
 1.5.101 | Uživatelské účty — přihlašovací obrazovka po spuštění; každý profil má vlastní data (projekty, konzistence, XP, nastavení); volitelné heslo (PBKDF2-SHA256); navázání na existující data při registraci; badge s jménem v toolbaru; tlačítko Odhlásit se na intro obrazovce
 1.5.100 | Konzistence — oprava cyklování šedého stavu: modulo % 3 → % len(_states), neutrální políčko nyní správně funguje
@@ -2106,6 +2107,8 @@ delka_obchodu_entry = None; slippage_entry = None; obrazky_list = None; score_la
 news_var = None; news_event_entry = None
 tags_entry = None # NOVÉ: Štítky
 zisk_mena_entry = None  # Ručně zadaná částka zisku/ztráty v domácí měně
+tp_level_combo = None; tp_level_note = None  # TP @ úroveň
+sl_level_combo = None; sl_level_note = None  # SL @ úroveň
 details_text = None; image_frame = None; gallery_inner = None
 checklist_display_label = None
 
@@ -2141,7 +2144,13 @@ COL_TRANSLATION = {
 }
 
 DEFAULT_SCORING = {
-    "setups": {"Golden Zone (50-61.8)": 4, "Discount (>61.8)": 3, "Premium (<50)": 2, "Order Block": 1},
+    "setups": {
+        "ON VAH": 4, "ON VAL": 4, "ON POC": 3, "ON High": 2, "ON Low": 2,
+        "RTH VAH": 4, "RTH VAL": 4, "RTH POC": 3, "RTH High": 2, "RTH Low": 2,
+        "PDH": 3, "PDL": 3,
+        "VWAP": 3, "VWAP +1σ": 2, "VWAP -1σ": 2, "VWAP +2σ": 1, "VWAP -2σ": 1,
+        "Daily Open": 2
+    },
     "sessions": {"RTH": 3, "OVERNIGHT": 2},
     "days": {"Úterý": 2, "Středa": 2, "Čtvrtek": 2, "Pondělí": 1, "Pátek": 1},
     "rrr": {"1:1": 0, "1:2": 1, "1:3": 2, "1:4": 3, "1:5+": 4},
@@ -2154,7 +2163,13 @@ DEFAULT_SCORING = {
 # Výchozí páry, pokud není načten config
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "GBPAUD", "AUDUSD", "USDCAD", "EURJPY", "EURGBP", "US30", "NAS100", "DAX"]
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1W", "1M"]
-FIBO_OPTIONS = ["DISCOUNT", "GOLDEN ZONE", "PREMIUM", "ORDER BLOCK", "BREAKER", "FVG ONLY"]
+FIBO_OPTIONS = [
+    "ON VAH", "ON VAL", "ON POC", "ON High", "ON Low",
+    "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
+    "PDH", "PDL",
+    "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
+    "Daily Open",
+]
 SESSIONS_LIST = ["OVERNIGHT", "RTH"]
 
 # Globální soubor pro vlastní setupy (nezávislý na projektu)
@@ -6665,6 +6680,10 @@ def pridat_obchod():
             'checklist_ratio': checklist_res,
             'tags': tags_entry.get(),
             'zisk_mena': zisk_mena_entry.get() if zisk_mena_entry else '',
+            'tp_level': tp_level_combo.get() if tp_level_combo else '',
+            'tp_level_note': tp_level_note.get() if tp_level_note else '',
+            'sl_level': sl_level_combo.get() if sl_level_combo else '',
+            'sl_level_note': sl_level_note.get() if sl_level_note else '',
         }
         trades = load_data()
         if editing_trade_index is not None:
@@ -6775,6 +6794,10 @@ def reset_form():
     for e in _clear: e.delete(0, tk.END)
     cas_otevreni_entry.delete(0, tk.END); cas_otevreni_entry.insert(0, datetime.now().strftime("%Y-%m-%d %H:%M"))
     obrazky_list.set(""); editing_trade_index = None; news_var.set("Ne"); save_btn.config(text="ULOŽIT OBCHOD", bg='#2ecc71')
+    if tp_level_combo: tp_level_combo.set('')
+    if tp_level_note: tp_level_note.delete(0, tk.END)
+    if sl_level_combo: sl_level_combo.set('')
+    if sl_level_note: sl_level_note.delete(0, tk.END)
     if accounts_combo:
         vals = get_account_dropdown_values()
         accounts_combo['values'] = vals
@@ -7102,6 +7125,10 @@ def naci_obchod_pro_upravu():
     news_event_entry.delete(0, tk.END); news_event_entry.insert(0, t.get('news_event', ''))
     tags_entry.delete(0, tk.END); tags_entry.insert(0, t.get('tags', ''))
     if zisk_mena_entry: zisk_mena_entry.delete(0, tk.END); zisk_mena_entry.insert(0, t.get('zisk_mena', ''))
+    if tp_level_combo: tp_level_combo.set(t.get('tp_level', ''))
+    if tp_level_note: tp_level_note.delete(0, tk.END); tp_level_note.insert(0, t.get('tp_level_note', ''))
+    if sl_level_combo: sl_level_combo.set(t.get('sl_level', ''))
+    if sl_level_note: sl_level_note.delete(0, tk.END); sl_level_note.insert(0, t.get('sl_level_note', ''))
     update_calculated_fields(); calculate_auto_score(); save_btn.config(text="AKTUALIZOVAT OBCHOD", bg="#e67e22")
 
 # ==============================================================================
@@ -11852,6 +11879,7 @@ def show_main_screen(p_name):
     global cas_otevreni_entry, cas_zavreni_entry, symbol_combo, smer_var, vstupni_hodnota_entry, stoploss_entry, takeprofit_entry
     global rrr_entry, pips_entry, duvod_entry, session_combo, fibo_combo, den_tydne_entry, delka_obchodu_entry, htf_combo, ltf_combo
     global obrazky_list, poznamka_entry, vysledek_combo, slippage_entry, score_label, details_text, image_frame, stats_text, stats_graph_frame, gallery_inner, best_performers_frame, zisk_mena_entry, accounts_combo
+    global tp_level_combo, tp_level_note, sl_level_combo, sl_level_note
     global stats_symbol_var, stats_symbol_combo, news_var, checklist_display_label, pie_graph_frame, news_event_entry
     global heatmap_graph_frame, tags_entry, bar_chart_frame, bar_chart_canvases, kpi_frame, tables_frame, xp_badge_btn, periods_account_var, bt_sw_btn, main_notebook, _sort_col, _sort_rev
     _sort_col = None; _sort_rev = False   # reset řazení při přepnutí projektu
@@ -12004,6 +12032,10 @@ def show_main_screen(p_name):
         if data.get('session'):       session_combo.set(data['session'])
         if data.get('duvod'):         set_entry(duvod_entry, data['duvod'])
         if data.get('poznamka'):      set_entry(poznamka_entry, data['poznamka'])
+        if data.get('tp_level') and tp_level_combo:  tp_level_combo.set(data['tp_level'])
+        if data.get('tp_level_note') and tp_level_note: set_entry(tp_level_note, data['tp_level_note'])
+        if data.get('sl_level') and sl_level_combo:  sl_level_combo.set(data['sl_level'])
+        if data.get('sl_level_note') and sl_level_note: set_entry(sl_level_note, data['sl_level_note'])
         update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
 
     def show_ai_screenshot_dialog():
@@ -12038,24 +12070,40 @@ def show_main_screen(p_name):
         with open(path, 'rb') as fh:
             img_b64 = base64.b64encode(fh.read()).decode('utf-8')
 
+        _levels_list = ", ".join(FIBO_OPTIONS)
         prompt = (
-            "You are a trading journal assistant. Analyze this TradingView trading chart screenshot "
-            "and extract all visible trading parameters.\n\n"
-            "Return ONLY a valid JSON object with these keys "
+            "You are a professional trading journal assistant specialized in Volume Profile, VWAP, and CVD order flow analysis.\n\n"
+            "TRADING INSTRUMENTS: NAS100 (US100, Nasdaq 100) and XAUUSD (Gold).\n\n"
+            "CHART SETUP (TradingView): Regular candlestick chart (1min/3min/5min/15min). "
+            "Session Volume Profile indicator shows ON (Overnight 02:00-15:29 CET) and RTH (15:30-22:00 CET) profiles. "
+            "VWAP with ±1σ and ±2σ bands. CVD (Cumulative Volume Delta) panel at the bottom.\n\n"
+            "KEY LEVELS on chart (horizontal lines):\n"
+            "ON VAH/VAL/POC/High/Low = Overnight session levels.\n"
+            "RTH VAH/VAL/POC/High/Low = Regular Trading Hours levels.\n"
+            "PDH/PDL = Previous Day High/Low.\n"
+            "VWAP, VWAP +1σ/-1σ, VWAP +2σ/-2σ = VWAP and standard deviation bands.\n"
+            "Daily Open = price where the day opened (RTH open 15:30 CET).\n\n"
+            "STRATEGY (Mean Reversion primary):\n"
+            "Bias: above ON POC and VWAP = bullish; below both = bearish.\n"
+            "Entry: price sweeps to key level → CVD shows absorption/divergence → rejection candle → trade back toward VWAP/POC.\n"
+            "Common setups: Mean Reversion (odraz), Failed Auction (failed breakout reversal), Balance VA (range between VAH/VAL), VWAP Reclaim.\n\n"
+            "Analyze this TradingView screenshot and return ONLY a valid JSON object "
             "(use empty string \"\" for anything not visible):\n"
             "{\n"
-            "  \"symbol\": \"ticker, e.g. XAUUSD / EURUSD / NAS100 / US30\",\n"
+            "  \"symbol\": \"NAS100 or XAUUSD or other ticker\",\n"
             "  \"smer\": \"Buy or Sell\",\n"
-            "  \"vstupni_hodnota\": \"entry price as decimal number\",\n"
-            "  \"stoploss\": \"stop loss price as decimal number\",\n"
-            "  \"takeprofit\": \"take profit price as decimal number\",\n"
+            "  \"vstupni_hodnota\": \"entry price as decimal\",\n"
+            "  \"stoploss\": \"stop loss price as decimal\",\n"
+            "  \"takeprofit\": \"take profit price as decimal\",\n"
             "  \"cas_otevreni\": \"open datetime YYYY-MM-DD HH:MM if visible\",\n"
             "  \"cas_zavreni\": \"close datetime YYYY-MM-DD HH:MM if visible\",\n"
-            "  \"timeframe_vstup\": \"chart timeframe e.g. 1m 5m 15m 1h 4h\",\n"
-            "  \"fibo\": \"setup or pattern you see, e.g. FVG, Order Block, BOS, CHOCH, MSB\",\n"
-            "  \"session\": \"OVERNIGHT if time 02:00-15:29 UTC+2, RTH if 15:30-22:00\",\n"
-            "  \"duvod\": \"brief entry reason in Czech language (1-2 sentences)\",\n"
-            "  \"poznamka\": \"trade observation in Czech language (1 sentence)\"\n"
+            "  \"timeframe_vstup\": \"chart timeframe e.g. 1m 3m 5m 15m\",\n"
+            f"  \"fibo\": \"comma-separated key levels involved in entry (choose from: {_levels_list})\",\n"
+            f"  \"tp_level\": \"which level is the TP at (choose from: {_levels_list})\",\n"
+            f"  \"sl_level\": \"which level is the SL at (choose from: {_levels_list})\",\n"
+            "  \"session\": \"OVERNIGHT if entry time 02:00-15:29, RTH if 15:30-22:00\",\n"
+            "  \"duvod\": \"entry reason in Czech (1-2 sentences, e.g. Odmítnutí ON VAL s CVD absorpcí)\",\n"
+            "  \"poznamka\": \"setup description in Czech (e.g. Mean Reversion od ON VAL k VWAP, CVD divergence potvrdila vstup)\"\n"
             "}\n\n"
             "Return ONLY the JSON object. No explanation, no markdown, no extra text."
         )
@@ -12098,15 +12146,17 @@ def show_main_screen(p_name):
                 ('symbol',           'Symbol:',          '#e2e8f0'),
                 ('smer',             'Směr:',             '#7c3aed'),
                 ('vstupni_hodnota',  'Entry cena:',       '#60a5fa'),
-                ('stoploss',         'Stop Loss:',        '#f87171'),
                 ('takeprofit',       'Take Profit:',      '#4ade80'),
+                ('tp_level',         'TP @ úroveň:',      '#4ade80'),
+                ('stoploss',         'Stop Loss:',        '#f87171'),
+                ('sl_level',         'SL @ úroveň:',      '#f87171'),
                 ('cas_otevreni',     'Čas otevření:',     '#e2e8f0'),
                 ('cas_zavreni',      'Čas uzavření:',     '#e2e8f0'),
                 ('timeframe_vstup',  'Timeframe:',        '#e2e8f0'),
-                ('fibo',             'Setup:',            '#fbbf24'),
+                ('fibo',             'Úrovně vstupu:',    '#fbbf24'),
                 ('session',          'Seance:',           '#fbbf24'),
                 ('duvod',            'Důvod vstupu:',     '#a3e635'),
-                ('poznamka',         'Poznámka:',         '#a3e635'),
+                ('poznamka',         'Popis setupu:',     '#a3e635'),
             ]
             vars_ = {}
             sc_frame = tk.Frame(win, bg=DT_PANEL)
@@ -12173,11 +12223,19 @@ def show_main_screen(p_name):
     tk.Label(f, text="Směr:").grid(row=r, column=0, sticky='w'); smer_var = tk.StringVar(value="Buy"); sf = tk.Frame(f); sf.grid(row=r, column=1, sticky='w'); tk.Radiobutton(sf, text="BUY", variable=smer_var, value="Buy", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).pack(side='left'); tk.Radiobutton(sf, text="SELL", variable=smer_var, value="Sell", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).pack(side='left'); r+=1
     tk.Label(f, text="ENTRY PRICE:", font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); vstupni_hodnota_entry = tk.Entry(f, width=35); vstupni_hodnota_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="TAKE PROFIT:", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); takeprofit_entry = tk.Entry(f, width=35); takeprofit_entry.grid(row=r, column=1, pady=3); r+=1
+    tk.Label(f, text="  TP @ úrovni:", fg=DT_WIN_FG, font=('Arial', 8)).grid(row=r, column=0, sticky='w')
+    _tp_lvl_f = tk.Frame(f); _tp_lvl_f.grid(row=r, column=1, sticky='w', pady=1)
+    tp_level_combo = ttk.Combobox(_tp_lvl_f, values=FIBO_OPTIONS, width=18); tp_level_combo.pack(side='left')
+    tp_level_note = tk.Entry(_tp_lvl_f, width=13, fg='gray'); tp_level_note.pack(side='left', padx=4); r+=1
     tk.Label(f, text="STOP LOSS:", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); stoploss_entry = tk.Entry(f, width=35); stoploss_entry.grid(row=r, column=1, pady=3); r+=1
+    tk.Label(f, text="  SL @ úrovni:", fg=DT_LOSS_FG, font=('Arial', 8)).grid(row=r, column=0, sticky='w')
+    _sl_lvl_f = tk.Frame(f); _sl_lvl_f.grid(row=r, column=1, sticky='w', pady=1)
+    sl_level_combo = ttk.Combobox(_sl_lvl_f, values=FIBO_OPTIONS, width=18); sl_level_combo.pack(side='left')
+    sl_level_note = tk.Entry(_sl_lvl_f, width=13, fg='gray'); sl_level_note.pack(side='left', padx=4); r+=1
     tk.Label(f, text="Vypočtené RRR:").grid(row=r, column=0, sticky='w'); rrr_entry = tk.Entry(f, width=35); rrr_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="SL v Pipsech:").grid(row=r, column=0, sticky='w'); pips_entry = tk.Entry(f, width=35, state='readonly', fg='blue'); pips_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="HTF Graf / LTF Vstup:").grid(row=r, column=0, sticky='w'); ft = tk.Frame(f); ft.grid(row=r, column=1, sticky='w'); htf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); htf_combo.pack(side='left'); ltf_combo = ttk.Combobox(ft, values=TIMEFRAMES, width=14); ltf_combo.pack(side='left', padx=5); r+=1
-    tk.Label(f, text="Setup (max 3):").grid(row=r, column=0, sticky='w'); fibo_combo = _SetupPicker(f, FIBO_OPTIONS, width=33); fibo_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
+    tk.Label(f, text="Úrovně (max 3):").grid(row=r, column=0, sticky='w'); fibo_combo = _SetupPicker(f, FIBO_OPTIONS, width=33); fibo_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
     tk.Label(f, text="Seance:").grid(row=r, column=0, sticky='w'); session_combo = ttk.Combobox(f, values=SESSIONS_LIST, width=14); session_combo.grid(row=r, column=1, sticky='w', pady=2); r+=1
     
     # NOVÉ NEWS UI
