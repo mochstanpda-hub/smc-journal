@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.142"
+VERSION = "1.5.143"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11614,13 +11614,35 @@ class _SetupPicker:
     def _open_popup(self):
         popup = tk.Toplevel()
         popup.title("Vybrat setupy  (max 3)")
-        popup.resizable(False, False)
+        popup.resizable(False, True)
         try:
             x = self._btn.winfo_rootx()
             y = self._btn.winfo_rooty() + self._btn.winfo_height()
+            # Omeź výšku na dostupnou plochu obrazovky
+            screen_h = popup.winfo_screenheight()
+            max_h = screen_h - y - 60
             popup.geometry(f"+{x}+{y}")
         except Exception:
-            pass
+            max_h = 500
+
+        # Scrollovatelný seznam
+        container = tk.Frame(popup)
+        container.pack(fill='both', expand=True)
+        canvas = tk.Canvas(container, width=200, highlightthickness=0)
+        sb = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        inner = tk.Frame(canvas)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor='nw')
+        inner.bind('<Configure>', lambda e: (
+            canvas.configure(scrollregion=canvas.bbox('all')),
+            canvas.itemconfig(inner_id, width=canvas.winfo_width())
+        ))
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(inner_id, width=e.width))
+        def _on_wheel(e): canvas.yview_scroll(int(-1 * (e.delta / 120)), 'units')
+        canvas.bind('<MouseWheel>', _on_wheel)
+        inner.bind('<MouseWheel>', _on_wheel)
 
         check_vars = {}
         check_btns = {}
@@ -11628,19 +11650,22 @@ class _SetupPicker:
         def _update_state():
             checked = sum(1 for v in check_vars.values() if v.get())
             for val, btn in check_btns.items():
-                if check_vars[val].get():
-                    btn.config(state='normal')
-                else:
-                    btn.config(state='normal' if checked < 3 else 'disabled')
+                btn.config(state='normal' if (check_vars[val].get() or checked < 3) else 'disabled')
 
         for val in self._values:
             var = tk.BooleanVar(value=val in self._selected)
             check_vars[val] = var
-            cb = tk.Checkbutton(popup, text=val, variable=var,
+            cb = tk.Checkbutton(inner, text=val, variable=var,
                                 anchor='w', command=_update_state)
             cb.pack(fill='x', padx=12, pady=2)
+            cb.bind('<MouseWheel>', _on_wheel)
             check_btns[val] = cb
         _update_state()
+
+        # Nastav výšku canvasu na min(obsah, max dostupné místo)
+        popup.update_idletasks()
+        content_h = inner.winfo_reqheight()
+        canvas.config(height=min(content_h, max_h))
 
         def apply():
             self._selected = [v for v, var in check_vars.items() if var.get()]
