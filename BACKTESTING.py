@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.147"
+VERSION = "1.5.148"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.148 | Verze zvýšena
 1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, Daily Open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL; AI prompt přepsán na Volume Profile strategii (US100 + XAUUSD, Mean Reversion, CVD, ON/RTH bias)
 1.5.102 | Verze zvýšena
 1.5.101 | Uživatelské účty — přihlašovací obrazovka po spuštění; každý profil má vlastní data (projekty, konzistence, XP, nastavení); volitelné heslo (PBKDF2-SHA256); navázání na existující data při registraci; badge s jménem v toolbaru; tlačítko Odhlásit se na intro obrazovce
