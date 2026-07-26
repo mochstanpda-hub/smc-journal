@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.145"
+VERSION = "1.5.146"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11988,34 +11988,166 @@ def show_main_screen(p_name):
     tk.Button(f, text="🌍 OTEVŘÍT KALENDÁŘ (FOREX FACTORY)", command=open_external_calendar, bg="#95a5a6", fg="white", font=("Arial", 8)).grid(row=r, column=0, columnspan=2, pady=5); r+=1
 
     def screenshot_prefill(data):
-        """Vyplní formulář hodnotami detekovanými ze screenshotu."""
+        """Vyplní formulář hodnotami ze screenshotu (OCR nebo AI)."""
         def set_entry(widget, val):
-            widget.config(state='normal')
-            widget.delete(0, 'end')
-            widget.insert(0, val)
-        if data.get('symbol'):
-            symbol_combo.set(data['symbol'])
-        if data.get('vstupni_hodnota'):
-            set_entry(vstupni_hodnota_entry, data['vstupni_hodnota'])
-        if data.get('stoploss'):
-            set_entry(stoploss_entry, data['stoploss'])
-        if data.get('takeprofit'):
-            set_entry(takeprofit_entry, data['takeprofit'])
-        if data.get('cas_otevreni'):
-            set_entry(cas_otevreni_entry, data['cas_otevreni'])
-        if data.get('cas_zavreni'):
-            set_entry(cas_zavreni_entry, data['cas_zavreni'])
-        if data.get('timeframe_vstup'):
-            ltf_combo.set(data['timeframe_vstup'])
-        if data.get('smer'):
-            smer_var.set(data['smer'])
-        update_calculated_fields()
-        calculate_auto_rrr()
-        calculate_auto_score()
+            widget.config(state='normal'); widget.delete(0, 'end'); widget.insert(0, val)
+        if data.get('symbol'):        symbol_combo.set(data['symbol'])
+        if data.get('smer'):          smer_var.set(data['smer'])
+        if data.get('vstupni_hodnota'): set_entry(vstupni_hodnota_entry, data['vstupni_hodnota'])
+        if data.get('stoploss'):      set_entry(stoploss_entry, data['stoploss'])
+        if data.get('takeprofit'):    set_entry(takeprofit_entry, data['takeprofit'])
+        if data.get('cas_otevreni'):  set_entry(cas_otevreni_entry, data['cas_otevreni'])
+        if data.get('cas_zavreni'):   set_entry(cas_zavreni_entry, data['cas_zavreni'])
+        if data.get('timeframe_vstup'): ltf_combo.set(data['timeframe_vstup'])
+        if data.get('timeframe_graf'):  htf_combo.set(data['timeframe_graf'])
+        if data.get('fibo'):          fibo_combo.set(data['fibo'])
+        if data.get('session'):       session_combo.set(data['session'])
+        if data.get('duvod'):         set_entry(duvod_entry, data['duvod'])
+        if data.get('poznamka'):      set_entry(poznamka_entry, data['poznamka'])
+        update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
 
-    tk.Button(f, text="📎 ANALYZOVAT SCREENSHOT (auto-fill)",
-              command=lambda: show_screenshot_dialog(screenshot_prefill),
-              bg="#6366f1", fg="white", font=("Arial", 8, "bold")).grid(row=r, column=0, columnspan=2, pady=(0,8)); r+=1
+    def show_ai_screenshot_dialog():
+        """AI-powered analýza screenshotu přes Ollama llava model."""
+        import base64, json as _json, re as _re
+
+        if not _ollama_running():
+            if messagebox.askyesno("Ollama neběží",
+                    "AI (Ollama) není dostupná.\nChceš použít starý OCR způsob?"):
+                show_screenshot_dialog(screenshot_prefill)
+            return
+
+        path = filedialog.askopenfilename(
+            title="Vyber screenshot obchodu",
+            filetypes=[("Obrázky", "*.png *.jpg *.jpeg *.bmp *.webp"), ("Vše", "*.*")]
+        )
+        if not path:
+            return
+
+        # Loading okno
+        loading = tk.Toplevel()
+        loading.title("AI Analýza")
+        loading.geometry("340x130")
+        loading.resizable(False, False)
+        loading.grab_set()
+        tk.Label(loading, text="🤖  AI analyzuje screenshot...",
+                 font=("Arial", 12, "bold")).pack(pady=(20, 6))
+        tk.Label(loading, text="Prosím čekej (5–20 sekund)",
+                 font=("Arial", 9), fg="gray").pack()
+        loading.update()
+
+        with open(path, 'rb') as fh:
+            img_b64 = base64.b64encode(fh.read()).decode('utf-8')
+
+        prompt = (
+            "You are a trading journal assistant. Analyze this TradingView trading chart screenshot "
+            "and extract all visible trading parameters.\n\n"
+            "Return ONLY a valid JSON object with these keys "
+            "(use empty string \"\" for anything not visible):\n"
+            "{\n"
+            "  \"symbol\": \"ticker, e.g. XAUUSD / EURUSD / NAS100 / US30\",\n"
+            "  \"smer\": \"Buy or Sell\",\n"
+            "  \"vstupni_hodnota\": \"entry price as decimal number\",\n"
+            "  \"stoploss\": \"stop loss price as decimal number\",\n"
+            "  \"takeprofit\": \"take profit price as decimal number\",\n"
+            "  \"cas_otevreni\": \"open datetime YYYY-MM-DD HH:MM if visible\",\n"
+            "  \"cas_zavreni\": \"close datetime YYYY-MM-DD HH:MM if visible\",\n"
+            "  \"timeframe_vstup\": \"chart timeframe e.g. 1m 5m 15m 1h 4h\",\n"
+            "  \"fibo\": \"setup or pattern you see, e.g. FVG, Order Block, BOS, CHOCH, MSB\",\n"
+            "  \"session\": \"OVERNIGHT if time 02:00-15:29 UTC+2, RTH if 15:30-22:00\",\n"
+            "  \"duvod\": \"brief entry reason in Czech language (1-2 sentences)\",\n"
+            "  \"poznamka\": \"trade observation in Czech language (1 sentence)\"\n"
+            "}\n\n"
+            "Return ONLY the JSON object. No explanation, no markdown, no extra text."
+        )
+
+        def on_ai_result(raw_text):
+            try: loading.destroy()
+            except Exception: pass
+
+            # Extrahuj JSON
+            result = {}
+            try:
+                result = _json.loads(raw_text.strip())
+            except Exception:
+                m = _re.search(r'\{[\s\S]*\}', raw_text)
+                if m:
+                    try: result = _json.loads(m.group())
+                    except Exception: pass
+
+            if not result:
+                root.after(0, lambda: messagebox.showerror(
+                    "AI Analýza", f"AI nevrátila platný výsledek.\n\n{raw_text[:400]}"))
+                return
+
+            root.after(0, lambda: _show_ai_confirm(result))
+
+        def _show_ai_confirm(result):
+            win = tk.Toplevel()
+            win.title("🤖 AI — detekované hodnoty")
+            win.geometry("500x560")
+            win.configure(bg=DT_PANEL)
+            win.grab_set()
+            win.resizable(False, True)
+
+            tk.Label(win, text="🤖  AI Analýza screenshotu", font=('Segoe UI', 13, 'bold'),
+                     bg=DT_PANEL, fg=DT_TEXT).pack(pady=(14, 2))
+            tk.Label(win, text="Zkontroluj hodnoty a klikni POUŽÍT",
+                     font=('Segoe UI', 9), bg=DT_PANEL, fg=DT_SUBTEXT).pack(pady=(0, 10))
+
+            fields = [
+                ('symbol',           'Symbol:',          '#e2e8f0'),
+                ('smer',             'Směr:',             '#7c3aed'),
+                ('vstupni_hodnota',  'Entry cena:',       '#60a5fa'),
+                ('stoploss',         'Stop Loss:',        '#f87171'),
+                ('takeprofit',       'Take Profit:',      '#4ade80'),
+                ('cas_otevreni',     'Čas otevření:',     '#e2e8f0'),
+                ('cas_zavreni',      'Čas uzavření:',     '#e2e8f0'),
+                ('timeframe_vstup',  'Timeframe:',        '#e2e8f0'),
+                ('fibo',             'Setup:',            '#fbbf24'),
+                ('session',          'Seance:',           '#fbbf24'),
+                ('duvod',            'Důvod vstupu:',     '#a3e635'),
+                ('poznamka',         'Poznámka:',         '#a3e635'),
+            ]
+            vars_ = {}
+            sc_frame = tk.Frame(win, bg=DT_PANEL)
+            sc_frame.pack(fill='both', expand=True, padx=16)
+            for key, label, color in fields:
+                row = tk.Frame(sc_frame, bg=DT_PANEL); row.pack(fill='x', pady=2)
+                tk.Label(row, text=label, width=14, anchor='w',
+                         font=('Segoe UI', 9, 'bold'), bg=DT_PANEL, fg=color).pack(side='left')
+                v = tk.StringVar(value=result.get(key, ''))
+                tk.Entry(row, textvariable=v, font=('Segoe UI', 10),
+                         bg=DT_ENTRY, fg=DT_TEXT, relief='solid', bd=1,
+                         insertbackground='white').pack(side='left', fill='x', expand=True)
+                vars_[key] = v
+
+            def apply():
+                out = {k: v.get().strip() for k, v in vars_.items()}
+                win.destroy()
+                screenshot_prefill(out)
+                # Přidej screenshot do obchodu
+                try:
+                    import shutil
+                    fname = os.path.basename(path)
+                    dst = os.path.join(IMAGES_DIR, fname)
+                    if not os.path.exists(dst): shutil.copy(path, dst)
+                    cur = obrazky_list.get()
+                    obrazky_list.set((cur + ';' + fname).strip(';'))
+                except Exception: pass
+
+            tk.Button(win, text="✅  POUŽÍT — VYPLNIT FORMULÁŘ",
+                      bg='#27ae60', fg='white', font=('Segoe UI', 11, 'bold'),
+                      pady=10, relief='flat', cursor='hand2',
+                      command=apply).pack(fill='x', padx=16, pady=(10, 4))
+            tk.Button(win, text="Zrušit", bg=DT_SURFACE, fg=DT_SUBTEXT,
+                      font=('Segoe UI', 9), relief='flat',
+                      command=win.destroy).pack()
+
+        _ask_ollama_async(prompt, [img_b64], on_ai_result)
+
+    tk.Button(f, text="🤖 ANALYZOVAT SCREENSHOT (AI auto-fill)",
+              command=show_ai_screenshot_dialog,
+              bg="#8e44ad", fg="white", font=("Arial", 8, "bold")).grid(row=r, column=0, columnspan=2, pady=(0,8)); r+=1
     
     tk.Label(f, text="Čas otevření:").grid(row=r, column=0, sticky='w'); cas_otevreni_entry = tk.Entry(f, width=35); cas_otevreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Čas uzavření:").grid(row=r, column=0, sticky='w'); cas_zavreni_entry = tk.Entry(f, width=35); cas_zavreni_entry.grid(row=r, column=1, pady=3); r+=1
