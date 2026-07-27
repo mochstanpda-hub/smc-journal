@@ -60,12 +60,13 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.160"
+VERSION = "1.5.161"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
 1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
+1.5.161 | Claude AI review dialog — po analýze screenshotu se otevře okno s výsledky (upravitelné combobox/entry), uživatel zkontroluje a klikne Použít; lepší prompt s platnými hodnotami pro session/timeframe/setup
 1.5.160 | Claude API screenshot analýza — tlačítko v ZÁPIS, API klíč + výběr modelu v Nastavení → 🤖 Claude AI
 1.5.159 | Odstraněno AI / Ollama (lokální vision modely nejsou dostatečně přesné na obchodní grafy)
 1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, DAY open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL
@@ -11689,18 +11690,29 @@ def _claude_analyze_async(image_path, callback):
               'webp': 'image/webp'}.get(ext, 'image/png')
         with open(image_path, 'rb') as fh:
             img_b64 = base64.b64encode(fh.read()).decode()
+
+        setups = ', '.join(load_setups())
+        timeframes = ', '.join(TIMEFRAMES)
+        sessions = ', '.join(SESSIONS_LIST)
         prompt = (
-            "Analyzuj tento trading screenshot. Vrať POUZE valid JSON bez jakéhokoliv dalšího textu:\n"
+            "Analyzuj tento trading screenshot. Vrať POUZE valid JSON (žádný text před ani za ním).\n\n"
+            f"Platné hodnoty:\n"
+            f"- smer: LONG nebo SHORT\n"
+            f"- timeframe_vstup a timeframe_graf: {timeframes}\n"
+            f"- session: {sessions}\n"
+            f"- setup (fibo): {setups}\n\n"
+            "Pokud hodnotu nelze spolehlivě určit, dej null.\n\n"
             "{\n"
-            '  "symbol": "ticker (US100/XAUUSD/EURUSD/…) nebo null",\n'
+            '  "symbol": "ticker přesně jak je na grafu (US100, XAUUSD, NQ, ES, EURUSD…) nebo null",\n'
             '  "smer": "LONG nebo SHORT nebo null",\n'
-            '  "vstupni_hodnota": číslo nebo null,\n'
+            '  "vstupni_hodnota": číslo (entry price) nebo null,\n'
             '  "stoploss": číslo nebo null,\n'
             '  "takeprofit": číslo nebo null,\n'
             '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            '  "timeframe_vstup": "1m/5m/15m/1h/4h/D nebo null",\n'
-            '  "timeframe_graf": "timeframe grafu nebo null",\n'
-            '  "session": "London/New York/Overnight/Asia nebo null"\n'
+            '  "timeframe_vstup": "jedna z platných hodnot nebo null",\n'
+            '  "timeframe_graf": "jedna z platných hodnot nebo null",\n'
+            '  "session": "jedna z platných hodnot nebo null",\n'
+            '  "fibo": "nejbližší platný setup nebo null"\n'
             "}"
         )
         body = _j.dumps({
@@ -12012,18 +12024,83 @@ def show_main_screen(p_name):
             filetypes=[("Obrázky", "*.png *.jpg *.jpeg *.webp"), ("Vše", "*.*")]
         )
         if not path: return
-        loading = tk.Toplevel(root); loading.title("Claude AI"); loading.geometry("280x70")
+
+        loading = tk.Toplevel(root); loading.title("Claude AI"); loading.geometry("300x70")
         loading.resizable(False, False); loading.grab_set()
         tk.Label(loading, text="⏳  Analyzuji screenshot...", font=('Segoe UI', 10)).pack(expand=True)
         loading.update()
+
         def on_done(data, err):
             loading.destroy()
             if err:
-                messagebox.showerror("Claude AI — chyba", err)
-                return
-            screenshot_prefill(data)
-            filled = [k for k, v in data.items() if v is not None]
-            messagebox.showinfo("Claude AI", f"Vyplněno {len(filled)} polí:\n{', '.join(filled)}")
+                messagebox.showerror("Claude AI — chyba", err); return
+            _show_review_dialog(data)
+
+        def _show_review_dialog(data):
+            """Zobrazí okno s výsledky analýzy — uživatel může upravit před aplikací."""
+            win = tk.Toplevel(root); win.title("Claude AI — kontrola výsledků")
+            win.geometry("480x560"); win.resizable(True, True)
+            win.configure(bg=DT_BG); win.grab_set()
+
+            tk.Label(win, text="🤖  Výsledky analýzy — zkontroluj a uprav",
+                     bg=DT_BG, fg=DT_TEXT, font=('Segoe UI', 11, 'bold')).pack(pady=(14, 4), padx=16, anchor='w')
+            tk.Label(win, text="Hodnoty označené ? nebyly rozpoznány. Uprav je ručně, pak klikni Použít.",
+                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8), wraplength=440, justify='left').pack(padx=16, anchor='w')
+
+            sf = tk.Frame(win, bg=DT_BG); sf.pack(fill='both', expand=True, padx=16, pady=10)
+
+            fields = [
+                ("Symbol",         "symbol",          None),
+                ("Směr",           "smer",            ["LONG", "SHORT"]),
+                ("Entry price",    "vstupni_hodnota", None),
+                ("Stop Loss",      "stoploss",        None),
+                ("Take Profit",    "takeprofit",      None),
+                ("Čas otevření",   "cas_otevreni",    None),
+                ("TF vstupu",      "timeframe_vstup", TIMEFRAMES),
+                ("TF grafu",       "timeframe_graf",  TIMEFRAMES),
+                ("Session",        "session",         SESSIONS_LIST),
+                ("Setup (level)",  "fibo",            load_setups()),
+            ]
+            vars_ = {}
+            for i, (label, key, opts) in enumerate(fields):
+                val = data.get(key)
+                display = str(val) if val is not None else "?"
+                tk.Label(sf, text=label + ":", bg=DT_BG, fg=DT_TEXT,
+                         font=('Segoe UI', 9), width=14, anchor='w').grid(row=i, column=0, sticky='w', pady=3)
+                if opts:
+                    v = tk.StringVar(value=display)
+                    cb = ttk.Combobox(sf, textvariable=v, values=opts, width=28, font=('Segoe UI', 9))
+                    cb.grid(row=i, column=1, sticky='w', padx=6)
+                else:
+                    v = tk.StringVar(value=display)
+                    tk.Entry(sf, textvariable=v, width=30, font=('Segoe UI', 9)).grid(row=i, column=1, sticky='w', padx=6)
+                vars_[key] = v
+
+            def apply_():
+                result = {}
+                for key, v in vars_.items():
+                    val = v.get().strip()
+                    if val and val != "?":
+                        # Zkus převést čísla
+                        if key in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
+                            try: val = float(val.replace(',', '.'))
+                            except ValueError: pass
+                        result[key] = val
+                    else:
+                        result[key] = None
+                screenshot_prefill(result)
+                win.destroy()
+                filled = [k for k, v2 in result.items() if v2 is not None]
+                messagebox.showinfo("Claude AI", f"Vyplněno {len(filled)} polí.")
+
+            btn_row = tk.Frame(win, bg=DT_BG); btn_row.pack(pady=(0, 14), padx=16, fill='x')
+            tk.Button(btn_row, text="✅ Použít", command=apply_,
+                      bg='#15803d', fg='white', font=('Segoe UI', 10, 'bold'),
+                      padx=20, pady=6, relief='flat', cursor='hand2').pack(side='left')
+            tk.Button(btn_row, text="Zrušit", command=win.destroy,
+                      bg=DT_SURFACE, fg=DT_SUBTEXT, font=('Segoe UI', 9),
+                      padx=14, pady=6, relief='flat').pack(side='left', padx=10)
+
         _claude_analyze_async(path, lambda d, e: root.after(0, on_done, d, e))
 
     tk.Button(f, text="📸 ANALYZOVAT SCREENSHOT (Claude AI)",
