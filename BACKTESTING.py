@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.167"
+VERSION = "1.5.168"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12188,7 +12188,9 @@ def show_main_screen(p_name):
         def set_entry(widget, val):
             widget.config(state='normal'); widget.delete(0, 'end'); widget.insert(0, val)
         if data.get('symbol'):        symbol_combo.set(data['symbol'])
-        if data.get('smer'):          smer_var.set(data['smer'])
+        if data.get('smer'):
+            _s = str(data['smer']).upper()
+            smer_var.set('Buy' if _s in ('LONG', 'BUY', 'L') else 'Sell' if _s in ('SHORT', 'SELL', 'S') else data['smer'])
         if data.get('vstupni_hodnota'): set_entry(vstupni_hodnota_entry, data['vstupni_hodnota'])
         if data.get('stoploss'):      set_entry(stoploss_entry, data['stoploss'])
         if data.get('takeprofit'):    set_entry(takeprofit_entry, data['takeprofit'])
@@ -12210,6 +12212,9 @@ def show_main_screen(p_name):
             if isinstance(sll, list): sll = ', '.join(str(x) for x in sll if x)
             if sll: sl_level_combo.set(sll)
         if data.get('sl_level_note') and sl_level_note: set_entry(sl_level_note, data['sl_level_note'])
+        if data.get('vysledek') and vysledek_combo:
+            _v = str(data['vysledek']).upper()
+            vysledek_combo.set('Win' if _v in ('WIN', 'W') else 'Loss' if _v in ('LOSS', 'L') else 'BE' if _v == 'BE' else data['vysledek'])
         update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
 
     def show_claude_screenshot_dialog():
