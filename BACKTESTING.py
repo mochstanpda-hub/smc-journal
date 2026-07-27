@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.152"
+VERSION = "1.5.153"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.153 | Vision model fallback přepracován: preferuje největší dostupný model (llava:34b > llama3.2-vision:11b > llava:7b) místo prvního v seznamu
 1.5.152 | Záložka 🤖 CHAT — lokální AI chatbot (qwen2.5:7b); A+C paměť: ai_memory.json (insight po každém obchodu) + ai_summary.txt (komprese každých 10 obchodů); kontext: obchody, stats, Volume Profile strategie
 1.5.151 | AI prompt přepsán na 2-krokový formát s ? placeholdery — llava:7b přestane vracet popisy polí místo hodnot
 1.5.150 | "Daily Open" přejmenován na "DAY open" (úrovně, scoring, AI prompt, setups_config)
