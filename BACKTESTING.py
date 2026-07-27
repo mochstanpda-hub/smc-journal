@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.154"
+VERSION = "1.5.155"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.155 | AI chybový log — při selhání AI vyskočí debug okno s modelem, HTTP kódem a detailem chyby místo obecného messagebox
 1.5.154 | Vision model omezen na max 13b (RTX 4060 / 8 GB VRAM) — llava:34b způsoboval HTTP 500; výchozí model změněn na llama3.2-vision:11b
 1.5.153 | Vision model fallback přepracován: preferuje největší dostupný model (llava:34b > llama3.2-vision:11b > llava:7b) místo prvního v seznamu
 1.5.152 | Záložka 🤖 CHAT — lokální AI chatbot (qwen2.5:7b); A+C paměť: ai_memory.json (insight po každém obchodu) + ai_summary.txt (komprese každých 10 obchodů); kontext: obchody, stats, Volume Profile strategie
@@ -11703,23 +11704,38 @@ def _ask_ollama_async(prompt, images_b64, callback):
     import threading, json as _json, urllib.request as _req
 
     def _worker():
+        model_used = _ollama_get_active_model()
         try:
             messages = [{"role": "user", "content": prompt}]
             if images_b64:
                 messages[0]["images"] = images_b64
             body = _json.dumps({
-                "model": _ollama_get_active_model(),
+                "model": model_used,
                 "messages": messages,
                 "stream": False,
                 "options": {"num_ctx": 4096},
             }).encode('utf-8')
             r = _req.Request(OLLAMA_URL + "/api/chat", data=body,
                              headers={"Content-Type": "application/json"})
-            with _req.urlopen(r, timeout=180) as resp:
-                data = _json.loads(resp.read())
-            text = data.get("message", {}).get("content", "(prázdná odpověď)")
+            try:
+                with _req.urlopen(r, timeout=180) as resp:
+                    raw = resp.read()
+                    data = _json.loads(raw)
+                text = data.get("message", {}).get("content", "(prázdná odpověď)")
+            except _req.HTTPError as he:
+                body_err = ""
+                try: body_err = he.read().decode('utf-8', errors='replace')[:600]
+                except Exception: pass
+                text = (f"__AI_ERROR__\n"
+                        f"Model: {model_used}\n"
+                        f"HTTP {he.code}: {he.reason}\n"
+                        f"Dostupné modely: {_ollama_list_models()}\n"
+                        f"Detail: {body_err}")
         except Exception as e:
-            text = f"Chyba při komunikaci s AI:\n{e}"
+            text = (f"__AI_ERROR__\n"
+                    f"Model: {model_used}\n"
+                    f"Chyba: {e}\n"
+                    f"Dostupné modely: {_ollama_list_models()}")
         callback(text)
 
     threading.Thread(target=_worker, daemon=True).start()
@@ -12558,6 +12574,23 @@ def show_main_screen(p_name):
             try: loading.destroy()
             except Exception: pass
 
+            # Zobraz debug okno při chybě
+            if raw_text.startswith("__AI_ERROR__"):
+                def _show_ai_error_log():
+                    w = tk.Toplevel(); w.title("🤖 AI — Chybový log"); w.geometry("620x380")
+                    w.configure(bg='#0f172a'); w.resizable(True, True)
+                    tk.Label(w, text="AI CHYBA — debug log", font=('Segoe UI', 11, 'bold'),
+                             bg='#0f172a', fg='#f87171').pack(pady=(12, 4))
+                    t = tk.Text(w, bg='#1e293b', fg='#e2e8f0', font=('Consolas', 9),
+                                wrap='word', padx=10, pady=8)
+                    t.pack(fill='both', expand=True, padx=10, pady=(0, 8))
+                    t.insert('end', raw_text.replace("__AI_ERROR__\n", ""))
+                    t.config(state='disabled')
+                    tk.Button(w, text="Zavřít", command=w.destroy,
+                              bg='#1e293b', fg='#94a3b8', relief='flat').pack(pady=(0, 10))
+                root.after(0, _show_ai_error_log)
+                return
+
             # Extrahuj JSON
             result = {}
             try:
@@ -12569,8 +12602,17 @@ def show_main_screen(p_name):
                     except Exception: pass
 
             if not result:
-                root.after(0, lambda: messagebox.showerror(
-                    "AI Analýza", f"AI nevrátila platný výsledek.\n\n{raw_text[:400]}"))
+                def _show_parse_err():
+                    w = tk.Toplevel(); w.title("AI — neplatná odpověď"); w.geometry("580x300")
+                    w.configure(bg='#0f172a')
+                    tk.Label(w, text="AI nevrátila platný JSON", font=('Segoe UI', 10, 'bold'),
+                             bg='#0f172a', fg='#fbbf24').pack(pady=(12, 4))
+                    t = tk.Text(w, bg='#1e293b', fg='#e2e8f0', font=('Consolas', 9), wrap='word', padx=8, pady=6)
+                    t.pack(fill='both', expand=True, padx=10, pady=(0, 8))
+                    t.insert('end', f"Model: {_ollama_get_active_model()}\n\nRaw odpověď:\n{raw_text[:800]}")
+                    t.config(state='disabled')
+                    tk.Button(w, text="Zavřít", command=w.destroy, bg='#1e293b', fg='#94a3b8', relief='flat').pack(pady=(0, 8))
+                root.after(0, _show_parse_err)
                 return
 
             # Zkontroluj jestli AI vrátila prázdné hodnoty — ukaz debug info
@@ -12578,8 +12620,7 @@ def show_main_screen(p_name):
             if filled <= 1:
                 def _show_debug():
                     msg = (f"AI vrátila JSON ale bez dat ({filled} vyplněných polí).\n\n"
-                           f"Pravděpodobná příčina: model llava:7b je příliš malý.\n"
-                           f"Zkus: ollama pull llava:13b\n\n"
+                           f"Model: {_ollama_get_active_model()}\n\n"
                            f"Raw odpověď AI:\n{raw_text[:600]}")
                     if messagebox.askyesno("AI — prázdný výsledek",
                                            msg + "\n\nChceš přesto otevřít formulář (s prázdnými hodnotami)?"):
