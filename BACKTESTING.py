@@ -60,12 +60,13 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.162"
+VERSION = "1.5.163"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
 1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
+1.5.163 | TP@úroveň a SL@úroveň: multi-select (max 3) místo combobox, nové hodnoty LEVEL_OPTIONS (pod/nad VWAP, pod/nad VWAP ±1σ); Claude prompt a review dialog aktualizovány
 1.5.162 | Claude AI prompt přepsán — naučen logice SHORT/LONG (SL>entry>TP), čtení časů z osy X, TP@level/SL@level matching, fibo jako pole max 3; review dialog přidán čas uzavření, tp_level, sl_level
 1.5.161 | Claude AI review dialog — po analýze screenshotu se otevře okno s výsledky (upravitelné combobox/entry), uživatel zkontroluje a klikne Použít; lepší prompt s platnými hodnotami pro session/timeframe/setup
 1.5.160 | Claude API screenshot analýza — tlačítko v ZÁPIS, API klíč + výběr modelu v Nastavení → 🤖 Claude AI
@@ -2176,6 +2177,16 @@ FIBO_OPTIONS = [
     "DAY open",
 ]
 SESSIONS_LIST = ["OVERNIGHT", "RTH"]
+LEVEL_OPTIONS = [
+    "ON VAH", "ON VAL", "ON POC", "ON High", "ON Low",
+    "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
+    "PDH", "PDL",
+    "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
+    "pod VWAP", "nad VWAP",
+    "pod VWAP +1σ", "nad VWAP +1σ",
+    "pod VWAP -1σ", "nad VWAP -1σ",
+    "DAY open",
+]
 
 # Globální soubor pro vlastní setupy (nezávislý na projektu)
 SETUPS_FILE = os.path.join(_APP_DIR, 'setups_config.json')
@@ -11710,9 +11721,9 @@ def _claude_analyze_async(image_path, callback):
             f"   Platné hodnoty session: {sessions}\n"
             f"7. FIBO/SETUP: Pojmenované úrovně kde entry leží nebo se k nim obchod vztahuje.\n"
             f"   Platné hodnoty (max 3, vrať jako pole): {setups}\n"
-            "8. TP@LEVEL a SL@LEVEL: Z pojmenovaných čar viditelných na grafu (ON VAH, RTH VAL, VWAP, PDH…)\n"
-            "   vyber tu, která je NEJBLÍŽE nebo NA které přímo leží TP respektive SL.\n"
-            "   Hodnoty musí být z tohoto seznamu: " + setups + "\n\n"
+            "8. TP@LEVEL a SL@LEVEL: Z pojmenovaných čar viditelných na grafu vyber úrovně NEJBLÍŽE nebo NA kterých leží TP resp. SL.\n"
+            "   Lze zadat až 3 hodnoty jako pole. Použij relativní hodnoty ('pod VWAP', 'nad VWAP') pokud TP/SL leží\n"
+            "   těsně pod nebo nad VWAP linií (zelená křivka). Platné hodnoty: " + ', '.join(LEVEL_OPTIONS) + "\n\n"
             "Pokud hodnotu nelze spolehlivě určit → null.\n\n"
             "{\n"
             '  "symbol": "ticker nebo null",\n'
@@ -11726,8 +11737,8 @@ def _claude_analyze_async(image_path, callback):
             f'  "timeframe_graf": "jedna z: {timeframes} nebo null",\n'
             f'  "session": "jedna z: {sessions} nebo null",\n'
             '  "fibo": ["setup1"] nebo ["setup1","setup2"] nebo null,\n'
-            '  "tp_level": "nejbližší pojmenovaná úroveň k TP nebo null",\n'
-            '  "sl_level": "nejbližší pojmenovaná úroveň k SL nebo null"\n'
+            '  "tp_level": ["úroveň1"] nebo ["úroveň1","úroveň2"] nebo null,\n'
+            '  "sl_level": ["úroveň1"] nebo ["úroveň1","úroveň2"] nebo null\n'
             "}"
         )
         body = _j.dumps({
@@ -11763,7 +11774,8 @@ def _claude_analyze_async(image_path, callback):
 
 class _SetupPicker:
     """Jedno pole + popup se zaškrtávacími políčky pro multi-výběr setupu (max 3)."""
-    def __init__(self, parent, values=(), width=33):
+    def __init__(self, parent, values=(), width=33, title="Vybrat setupy (max 3)"):
+        self._title = title
         self._values = list(values)
         self._selected = []
         self._frame = tk.Frame(parent)
@@ -11777,7 +11789,7 @@ class _SetupPicker:
 
     def _open_popup(self):
         popup = tk.Toplevel()
-        popup.title("Vybrat setupy  (max 3)")
+        popup.title(self._title)
         popup.resizable(False, True)
         try:
             x = self._btn.winfo_rootx()
@@ -12024,9 +12036,15 @@ def show_main_screen(p_name):
         if data.get('session'):       session_combo.set(data['session'])
         if data.get('duvod'):         set_entry(duvod_entry, data['duvod'])
         if data.get('poznamka'):      set_entry(poznamka_entry, data['poznamka'])
-        if data.get('tp_level') and tp_level_combo:  tp_level_combo.set(data['tp_level'])
+        if tp_level_combo:
+            tpl = data.get('tp_level')
+            if isinstance(tpl, list): tpl = ', '.join(str(x) for x in tpl if x)
+            if tpl: tp_level_combo.set(tpl)
         if data.get('tp_level_note') and tp_level_note: set_entry(tp_level_note, data['tp_level_note'])
-        if data.get('sl_level') and sl_level_combo:  sl_level_combo.set(data['sl_level'])
+        if sl_level_combo:
+            sll = data.get('sl_level')
+            if isinstance(sll, list): sll = ', '.join(str(x) for x in sll if x)
+            if sll: sl_level_combo.set(sll)
         if data.get('sl_level_note') and sl_level_note: set_entry(sl_level_note, data['sl_level_note'])
         update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
 
@@ -12066,12 +12084,13 @@ def show_main_screen(p_name):
 
             _setups = load_setups()
 
-            # fibo může být list — zobrazíme jako text oddělený " / "
-            fibo_raw = data.get('fibo')
-            if isinstance(fibo_raw, list):
-                fibo_display = ' / '.join(str(x) for x in fibo_raw if x)
-            else:
-                fibo_display = str(fibo_raw) if fibo_raw else "?"
+            def _list_to_str(val):
+                if isinstance(val, list): return ', '.join(str(x) for x in val if x)
+                return str(val) if val else "?"
+
+            fibo_display   = _list_to_str(data.get('fibo'))
+            tp_lvl_display = _list_to_str(data.get('tp_level'))
+            sl_lvl_display = _list_to_str(data.get('sl_level'))
 
             fields = [
                 ("Symbol",          "symbol",          None,        None),
@@ -12085,8 +12104,8 @@ def show_main_screen(p_name):
                 ("TF grafu",        "timeframe_graf",  TIMEFRAMES,  None),
                 ("Session",         "session",         SESSIONS_LIST, None),
                 ("Setup (max 3, oddělené /)", "fibo",  _setups,     fibo_display),
-                ("TP @ úroveň",     "tp_level",        _setups,     None),
-                ("SL @ úroveň",     "sl_level",        _setups,     None),
+                ("TP @ úroveň (max 3, /)", "tp_level",   LEVEL_OPTIONS, tp_lvl_display),
+                ("SL @ úroveň (max 3, /)", "sl_level",  LEVEL_OPTIONS, sl_lvl_display),
             ]
             vars_ = {}
             for i, (label, key, opts, override) in enumerate(fields):
@@ -12160,12 +12179,12 @@ def show_main_screen(p_name):
     tk.Label(f, text="TAKE PROFIT:", fg=DT_WIN_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); takeprofit_entry = tk.Entry(f, width=35); takeprofit_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="  TP @ úrovni:", fg=DT_WIN_FG, font=('Arial', 8)).grid(row=r, column=0, sticky='w')
     _tp_lvl_f = tk.Frame(f); _tp_lvl_f.grid(row=r, column=1, sticky='w', pady=1)
-    tp_level_combo = ttk.Combobox(_tp_lvl_f, values=FIBO_OPTIONS, width=18); tp_level_combo.pack(side='left')
-    tp_level_note = tk.Entry(_tp_lvl_f, width=13, fg='gray'); tp_level_note.pack(side='left', padx=4); r+=1
+    tp_level_combo = _SetupPicker(_tp_lvl_f, values=LEVEL_OPTIONS, width=22, title="TP @ úroveň (max 3)"); tp_level_combo.pack(side='left')
+    tp_level_note = tk.Entry(_tp_lvl_f, width=11, fg='gray'); tp_level_note.pack(side='left', padx=4); r+=1
     tk.Label(f, text="STOP LOSS:", fg=DT_LOSS_FG, font=('Arial', 9, 'bold')).grid(row=r, column=0, sticky='w'); stoploss_entry = tk.Entry(f, width=35); stoploss_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="  SL @ úrovni:", fg=DT_LOSS_FG, font=('Arial', 8)).grid(row=r, column=0, sticky='w')
     _sl_lvl_f = tk.Frame(f); _sl_lvl_f.grid(row=r, column=1, sticky='w', pady=1)
-    sl_level_combo = ttk.Combobox(_sl_lvl_f, values=FIBO_OPTIONS, width=18); sl_level_combo.pack(side='left')
+    sl_level_combo = _SetupPicker(_sl_lvl_f, values=LEVEL_OPTIONS, width=22, title="SL @ úroveň (max 3)"); sl_level_combo.pack(side='left')
     sl_level_note = tk.Entry(_sl_lvl_f, width=13, fg='gray'); sl_level_note.pack(side='left', padx=4); r+=1
     tk.Label(f, text="Vypočtené RRR:").grid(row=r, column=0, sticky='w'); rrr_entry = tk.Entry(f, width=35); rrr_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="SL v Pipsech:").grid(row=r, column=0, sticky='w'); pips_entry = tk.Entry(f, width=35, state='readonly', fg='blue'); pips_entry.grid(row=r, column=1, pady=3); r+=1
