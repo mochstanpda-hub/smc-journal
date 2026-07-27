@@ -60,12 +60,13 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.161"
+VERSION = "1.5.162"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
 1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
+1.5.162 | Claude AI prompt přepsán — naučen logice SHORT/LONG (SL>entry>TP), čtení časů z osy X, TP@level/SL@level matching, fibo jako pole max 3; review dialog přidán čas uzavření, tp_level, sl_level
 1.5.161 | Claude AI review dialog — po analýze screenshotu se otevře okno s výsledky (upravitelné combobox/entry), uživatel zkontroluje a klikne Použít; lepší prompt s platnými hodnotami pro session/timeframe/setup
 1.5.160 | Claude API screenshot analýza — tlačítko v ZÁPIS, API klíč + výběr modelu v Nastavení → 🤖 Claude AI
 1.5.159 | Odstraněno AI / Ollama (lokální vision modely nejsou dostatečně přesné na obchodní grafy)
@@ -11695,24 +11696,38 @@ def _claude_analyze_async(image_path, callback):
         timeframes = ', '.join(TIMEFRAMES)
         sessions = ', '.join(SESSIONS_LIST)
         prompt = (
-            "Analyzuj tento trading screenshot. Vrať POUZE valid JSON (žádný text před ani za ním).\n\n"
-            f"Platné hodnoty:\n"
-            f"- smer: LONG nebo SHORT\n"
-            f"- timeframe_vstup a timeframe_graf: {timeframes}\n"
-            f"- session: {sessions}\n"
-            f"- setup (fibo): {setups}\n\n"
-            "Pokud hodnotu nelze spolehlivě určit, dej null.\n\n"
+            "Jsi expert na čtení trading grafů z TradingView. Analyzuj screenshot a vrať POUZE valid JSON.\n\n"
+            "PRAVIDLA — přečti pozorně:\n"
+            "1. SMĚR: Zkontroluj logiku cen: pokud SL > entry > TP → SHORT. Pokud TP > entry > SL → LONG.\n"
+            "   Ověř barvou zóny (červená/tmavá = SHORT bearish, zelená = LONG bullish) nebo labely BUY/SELL.\n"
+            "2. ENTRY, SL, TP: Hledej explicitní labely 'entry', 'stop loss'/'SL', 'take profit'/'TP'.\n"
+            "   Nikdy nepřehazuj tyto hodnoty — SL musí být výše než entry pro SHORT.\n"
+            "3. ČAS OTEVŘENÍ/UZAVŘENÍ: Čti z osy X grafu. Formát výstupu: YYYY-MM-DD HH:MM.\n"
+            "   Pokud je na screenshotu datum jako 'Mon 27 Jul 26', převeď na 2026-07-27.\n"
+            "4. SYMBOL: Přesně jak je v záhlaví grafu (XAUUSD, US100, NQ, EURUSD…).\n"
+            "5. TIMEFRAME: Z nadpisu grafu (3m, 5m, 15m, 1h, 4h, D).\n"
+            "6. SESSION: RTH = New York session (cca 15:30–22:00 UTC+2). Ostatní = OVERNIGHT.\n"
+            f"   Platné hodnoty session: {sessions}\n"
+            f"7. FIBO/SETUP: Pojmenované úrovně kde entry leží nebo se k nim obchod vztahuje.\n"
+            f"   Platné hodnoty (max 3, vrať jako pole): {setups}\n"
+            "8. TP@LEVEL a SL@LEVEL: Z pojmenovaných čar viditelných na grafu (ON VAH, RTH VAL, VWAP, PDH…)\n"
+            "   vyber tu, která je NEJBLÍŽE nebo NA které přímo leží TP respektive SL.\n"
+            "   Hodnoty musí být z tohoto seznamu: " + setups + "\n\n"
+            "Pokud hodnotu nelze spolehlivě určit → null.\n\n"
             "{\n"
-            '  "symbol": "ticker přesně jak je na grafu (US100, XAUUSD, NQ, ES, EURUSD…) nebo null",\n'
+            '  "symbol": "ticker nebo null",\n'
             '  "smer": "LONG nebo SHORT nebo null",\n'
-            '  "vstupni_hodnota": číslo (entry price) nebo null,\n'
+            '  "vstupni_hodnota": číslo nebo null,\n'
             '  "stoploss": číslo nebo null,\n'
             '  "takeprofit": číslo nebo null,\n'
             '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            '  "timeframe_vstup": "jedna z platných hodnot nebo null",\n'
-            '  "timeframe_graf": "jedna z platných hodnot nebo null",\n'
-            '  "session": "jedna z platných hodnot nebo null",\n'
-            '  "fibo": "nejbližší platný setup nebo null"\n'
+            '  "cas_zavreni": "YYYY-MM-DD HH:MM nebo null",\n'
+            f'  "timeframe_vstup": "jedna z: {timeframes} nebo null",\n'
+            f'  "timeframe_graf": "jedna z: {timeframes} nebo null",\n'
+            f'  "session": "jedna z: {sessions} nebo null",\n'
+            '  "fibo": ["setup1"] nebo ["setup1","setup2"] nebo null,\n'
+            '  "tp_level": "nejbližší pojmenovaná úroveň k TP nebo null",\n'
+            '  "sl_level": "nejbližší pojmenovaná úroveň k SL nebo null"\n'
             "}"
         )
         body = _j.dumps({
@@ -12039,55 +12054,67 @@ def show_main_screen(p_name):
         def _show_review_dialog(data):
             """Zobrazí okno s výsledky analýzy — uživatel může upravit před aplikací."""
             win = tk.Toplevel(root); win.title("Claude AI — kontrola výsledků")
-            win.geometry("480x560"); win.resizable(True, True)
+            win.geometry("500x640"); win.resizable(True, True)
             win.configure(bg=DT_BG); win.grab_set()
 
             tk.Label(win, text="🤖  Výsledky analýzy — zkontroluj a uprav",
                      bg=DT_BG, fg=DT_TEXT, font=('Segoe UI', 11, 'bold')).pack(pady=(14, 4), padx=16, anchor='w')
-            tk.Label(win, text="Hodnoty označené ? nebyly rozpoznány. Uprav je ručně, pak klikni Použít.",
-                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8), wraplength=440, justify='left').pack(padx=16, anchor='w')
+            tk.Label(win, text="Hodnoty označené ? nebyly rozpoznány. Uprav ručně, pak klikni Použít.",
+                     bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8), wraplength=460, justify='left').pack(padx=16, anchor='w')
 
             sf = tk.Frame(win, bg=DT_BG); sf.pack(fill='both', expand=True, padx=16, pady=10)
 
+            _setups = load_setups()
+
+            # fibo může být list — zobrazíme jako text oddělený " / "
+            fibo_raw = data.get('fibo')
+            if isinstance(fibo_raw, list):
+                fibo_display = ' / '.join(str(x) for x in fibo_raw if x)
+            else:
+                fibo_display = str(fibo_raw) if fibo_raw else "?"
+
             fields = [
-                ("Symbol",         "symbol",          None),
-                ("Směr",           "smer",            ["LONG", "SHORT"]),
-                ("Entry price",    "vstupni_hodnota", None),
-                ("Stop Loss",      "stoploss",        None),
-                ("Take Profit",    "takeprofit",      None),
-                ("Čas otevření",   "cas_otevreni",    None),
-                ("TF vstupu",      "timeframe_vstup", TIMEFRAMES),
-                ("TF grafu",       "timeframe_graf",  TIMEFRAMES),
-                ("Session",        "session",         SESSIONS_LIST),
-                ("Setup (level)",  "fibo",            load_setups()),
+                ("Symbol",          "symbol",          None,        None),
+                ("Směr",            "smer",            ["LONG","SHORT"], None),
+                ("Entry price",     "vstupni_hodnota", None,        None),
+                ("Stop Loss",       "stoploss",        None,        None),
+                ("Take Profit",     "takeprofit",      None,        None),
+                ("Čas otevření",    "cas_otevreni",    None,        None),
+                ("Čas uzavření",    "cas_zavreni",     None,        None),
+                ("TF vstupu",       "timeframe_vstup", TIMEFRAMES,  None),
+                ("TF grafu",        "timeframe_graf",  TIMEFRAMES,  None),
+                ("Session",         "session",         SESSIONS_LIST, None),
+                ("Setup (max 3, oddělené /)", "fibo",  _setups,     fibo_display),
+                ("TP @ úroveň",     "tp_level",        _setups,     None),
+                ("SL @ úroveň",     "sl_level",        _setups,     None),
             ]
             vars_ = {}
-            for i, (label, key, opts) in enumerate(fields):
-                val = data.get(key)
-                display = str(val) if val is not None else "?"
+            for i, (label, key, opts, override) in enumerate(fields):
+                val = override if override is not None else data.get(key)
+                if key == 'fibo':
+                    display = fibo_display
+                else:
+                    display = str(val) if val is not None else "?"
                 tk.Label(sf, text=label + ":", bg=DT_BG, fg=DT_TEXT,
-                         font=('Segoe UI', 9), width=14, anchor='w').grid(row=i, column=0, sticky='w', pady=3)
+                         font=('Segoe UI', 9), width=22, anchor='w').grid(row=i, column=0, sticky='w', pady=3)
+                v = tk.StringVar(value=display)
                 if opts:
-                    v = tk.StringVar(value=display)
-                    cb = ttk.Combobox(sf, textvariable=v, values=opts, width=28, font=('Segoe UI', 9))
+                    cb = ttk.Combobox(sf, textvariable=v, values=opts, width=26, font=('Segoe UI', 9))
                     cb.grid(row=i, column=1, sticky='w', padx=6)
                 else:
-                    v = tk.StringVar(value=display)
-                    tk.Entry(sf, textvariable=v, width=30, font=('Segoe UI', 9)).grid(row=i, column=1, sticky='w', padx=6)
+                    tk.Entry(sf, textvariable=v, width=28, font=('Segoe UI', 9)).grid(row=i, column=1, sticky='w', padx=6)
                 vars_[key] = v
 
             def apply_():
                 result = {}
                 for key, v in vars_.items():
                     val = v.get().strip()
-                    if val and val != "?":
-                        # Zkus převést čísla
-                        if key in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
-                            try: val = float(val.replace(',', '.'))
-                            except ValueError: pass
-                        result[key] = val
-                    else:
-                        result[key] = None
+                    if not val or val == "?":
+                        result[key] = None; continue
+                    if key in ('vstupni_hodnota', 'stoploss', 'takeprofit'):
+                        try: val = float(val.replace(',', '.'))
+                        except ValueError: pass
+                    result[key] = val
                 screenshot_prefill(result)
                 win.destroy()
                 filled = [k for k, v2 in result.items() if v2 is not None]
