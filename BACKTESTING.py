@@ -60,12 +60,13 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.159"
+VERSION = "1.5.160"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
 1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
+1.5.160 | Claude API screenshot analýza — tlačítko v ZÁPIS, API klíč + výběr modelu v Nastavení → 🤖 Claude AI
 1.5.159 | Odstraněno AI / Ollama (lokální vision modely nejsou dostatečně přesné na obchodní grafy)
 1.5.147 | Úrovně místo ICT/FVG setupů: FIBO_OPTIONS nahrazeno Volume Profile + VWAP úrovněmi (ON/RTH VAH/VAL/POC/High/Low, PDH/PDL, VWAP ±1σ ±2σ, DAY open); přidána pole TP@úroveň a SL@úroveň (combobox + text) vedle cen TP/SL
 1.5.102 | Verze zvýšena
@@ -11611,6 +11612,41 @@ def open_settings_window(initial_tab=0):
               bg='#15803d', fg='white', font=('Segoe UI', 10, 'bold'),
               padx=16, pady=8, relief='flat', cursor='hand2').pack(anchor='w', pady=(14, 0))
 
+    # ── Tab: Claude AI ────────────────────────────────────────────────────────
+    t_claude = ttk.Frame(nb); nb.add(t_claude, text=' 🤖 Claude AI ')
+    _cl_outer = tk.Frame(t_claude, bg=DT_BG, padx=28, pady=24)
+    _cl_outer.pack(fill='both', expand=True)
+    tk.Label(_cl_outer, text="Claude AI — analýza screenshotu", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 4))
+    tk.Label(_cl_outer, text="Zadej Anthropic API klíč (začíná sk-ant-...). Klíč se uloží lokálně v global_settings.json.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 9), wraplength=560, justify='left').pack(anchor='w', pady=(0, 16))
+    row_key = tk.Frame(_cl_outer, bg=DT_BG); row_key.pack(anchor='w', fill='x')
+    tk.Label(row_key, text="API klíč:", bg=DT_BG, fg=DT_TEXT, font=('Segoe UI', 10), width=12, anchor='w').pack(side='left')
+    _api_key_var = tk.StringVar(value=load_global_settings().get('anthropic_api_key', ''))
+    _api_key_entry = tk.Entry(row_key, textvariable=_api_key_var, width=55, show='*', font=('Segoe UI', 9))
+    _api_key_entry.pack(side='left', padx=6)
+    _show_key_var = tk.BooleanVar(value=False)
+    def _toggle_key_vis():
+        _api_key_entry.config(show='' if _show_key_var.get() else '*')
+    tk.Checkbutton(row_key, text="Zobrazit", variable=_show_key_var, command=_toggle_key_vis,
+                   bg=DT_BG, fg=DT_TEXT, selectcolor=DT_SURFACE, activebackground=DT_BG).pack(side='left', padx=4)
+    row_model = tk.Frame(_cl_outer, bg=DT_BG); row_model.pack(anchor='w', fill='x', pady=(12, 0))
+    tk.Label(row_model, text="Model:", bg=DT_BG, fg=DT_TEXT, font=('Segoe UI', 10), width=12, anchor='w').pack(side='left')
+    _model_opts = ["claude-haiku-4-5-20251001", "claude-sonnet-4-5", "claude-opus-5"]
+    _model_var = tk.StringVar(value=load_global_settings().get('claude_model', 'claude-haiku-4-5-20251001'))
+    ttk.Combobox(row_model, textvariable=_model_var, values=_model_opts, width=35, state='readonly').pack(side='left', padx=6)
+    tk.Label(_cl_outer, text="Haiku = nejlevnější (~0.001 USD/screenshot)  |  Sonnet = přesnější  |  Opus = nejlepší",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(4, 16))
+    def _save_claude_settings():
+        gs = load_global_settings()
+        gs['anthropic_api_key'] = _api_key_var.get().strip()
+        gs['claude_model'] = _model_var.get()
+        save_global_settings(gs)
+        messagebox.showinfo("Uloženo", "Claude AI nastavení uloženo.", parent=sw)
+    tk.Button(_cl_outer, text="💾  Uložit", command=_save_claude_settings,
+              bg='#1d4ed8', fg='white', font=('Segoe UI', 10, 'bold'),
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
+
     nb.select(initial_tab)
 
 
@@ -11626,6 +11662,76 @@ def open_project_by_name(mode, name):
     current_mode = mode
     show_main_screen(name)
 
+
+
+# ==============================================================================
+# CLAUDE API — AI analýza screenshotu
+# ==============================================================================
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+
+def _claude_api_key():
+    return load_global_settings().get('anthropic_api_key', '').strip()
+
+def _claude_model():
+    return load_global_settings().get('claude_model', 'claude-haiku-4-5-20251001')
+
+def _claude_analyze_async(image_path, callback):
+    """Odešle screenshot na Claude API, zavolá callback(data_dict, error_str)."""
+    import threading, base64, json as _j, urllib.request as _req
+
+    def _worker():
+        key = _claude_api_key()
+        if not key:
+            callback(None, "API klíč není nastaven.\nPřidej ho v Nastavení → 🤖 Claude AI.")
+            return
+        ext = image_path.lower().rsplit('.', 1)[-1]
+        mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+              'webp': 'image/webp'}.get(ext, 'image/png')
+        with open(image_path, 'rb') as fh:
+            img_b64 = base64.b64encode(fh.read()).decode()
+        prompt = (
+            "Analyzuj tento trading screenshot. Vrať POUZE valid JSON bez jakéhokoliv dalšího textu:\n"
+            "{\n"
+            '  "symbol": "ticker (US100/XAUUSD/EURUSD/…) nebo null",\n'
+            '  "smer": "LONG nebo SHORT nebo null",\n'
+            '  "vstupni_hodnota": číslo nebo null,\n'
+            '  "stoploss": číslo nebo null,\n'
+            '  "takeprofit": číslo nebo null,\n'
+            '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
+            '  "timeframe_vstup": "1m/5m/15m/1h/4h/D nebo null",\n'
+            '  "timeframe_graf": "timeframe grafu nebo null",\n'
+            '  "session": "London/New York/Overnight/Asia nebo null"\n'
+            "}"
+        )
+        body = _j.dumps({
+            "model": _claude_model(),
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": mt, "data": img_b64}},
+                {"type": "text", "text": prompt}
+            ]}]
+        }).encode('utf-8')
+        req = _req.Request(CLAUDE_API_URL, data=body, headers={
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        })
+        try:
+            with _req.urlopen(req, timeout=30) as resp:
+                text = _j.loads(resp.read())['content'][0]['text']
+            import re as _re
+            m = _re.search(r'\{.*\}', text, _re.DOTALL)
+            if m:
+                callback(_j.loads(m.group()), None)
+            else:
+                callback(None, f"Nepodařilo se parsovat odpověď:\n{text[:400]}")
+        except _req.HTTPError as e:
+            err = e.read().decode('utf-8', errors='replace')[:400]
+            callback(None, f"API chyba {e.code}:\n{err}")
+        except Exception as e:
+            callback(None, f"Chyba: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 class _SetupPicker:
@@ -11896,6 +12002,33 @@ def show_main_screen(p_name):
         if data.get('sl_level') and sl_level_combo:  sl_level_combo.set(data['sl_level'])
         if data.get('sl_level_note') and sl_level_note: set_entry(sl_level_note, data['sl_level_note'])
         update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
+
+    def show_claude_screenshot_dialog():
+        if not _claude_api_key():
+            messagebox.showwarning("Claude AI", "API klíč není nastaven.\nPřidej ho v Nastavení → 🤖 Claude AI.")
+            return
+        path = filedialog.askopenfilename(
+            title="Vyber screenshot obchodu",
+            filetypes=[("Obrázky", "*.png *.jpg *.jpeg *.webp"), ("Vše", "*.*")]
+        )
+        if not path: return
+        loading = tk.Toplevel(root); loading.title("Claude AI"); loading.geometry("280x70")
+        loading.resizable(False, False); loading.grab_set()
+        tk.Label(loading, text="⏳  Analyzuji screenshot...", font=('Segoe UI', 10)).pack(expand=True)
+        loading.update()
+        def on_done(data, err):
+            loading.destroy()
+            if err:
+                messagebox.showerror("Claude AI — chyba", err)
+                return
+            screenshot_prefill(data)
+            filled = [k for k, v in data.items() if v is not None]
+            messagebox.showinfo("Claude AI", f"Vyplněno {len(filled)} polí:\n{', '.join(filled)}")
+        _claude_analyze_async(path, lambda d, e: root.after(0, on_done, d, e))
+
+    tk.Button(f, text="📸 ANALYZOVAT SCREENSHOT (Claude AI)",
+              command=show_claude_screenshot_dialog,
+              bg="#1d4ed8", fg="white", font=("Arial", 8, "bold")).grid(row=r, column=0, columnspan=2, pady=(0, 8)); r+=1
 
     tk.Label(f, text="Čas otevření:").grid(row=r, column=0, sticky='w'); cas_otevreni_entry = tk.Entry(f, width=35); cas_otevreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Čas uzavření:").grid(row=r, column=0, sticky='w'); cas_zavreni_entry = tk.Entry(f, width=35); cas_zavreni_entry.grid(row=r, column=1, pady=3); r+=1
