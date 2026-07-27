@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.168"
+VERSION = "1.5.169"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12329,8 +12329,30 @@ def show_main_screen(p_name):
             with open(path, 'r', encoding='utf-8') as fh:
                 data = _j.load(fh)
             screenshot_prefill(data)
+
+            # Hledej obrázky ve stejné složce jako JSON
+            folder = os.path.dirname(path)
+            img_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'}
+            img_files = [f for f in os.listdir(folder)
+                         if os.path.splitext(f)[1].lower() in img_exts]
+            copied = []
+            if img_files and IMAGES_DIR:
+                os.makedirs(IMAGES_DIR, exist_ok=True)
+                for fname in img_files:
+                    src = os.path.join(folder, fname)
+                    dst = os.path.join(IMAGES_DIR, fname)
+                    if not os.path.exists(dst):
+                        shutil.copy2(src, dst)
+                    if fname not in (obrazky_list.get() or '').split(';'):
+                        existing = obrazky_list.get().strip(';')
+                        obrazky_list.set((existing + ';' + fname).strip(';'))
+                    copied.append(fname)
+
             filled = [k for k, v in data.items() if v not in (None, '', [])]
-            messagebox.showinfo("JSON načten", f"Vyplněno {len(filled)} polí z:\n{os.path.basename(path)}")
+            msg = f"Vyplněno {len(filled)} polí."
+            if copied:
+                msg += f"\nNačteny obrázky ({len(copied)}): {', '.join(copied)}"
+            messagebox.showinfo("JSON načten", msg)
         except Exception as e:
             messagebox.showerror("Chyba", f"Nelze načíst JSON:\n{e}")
 
