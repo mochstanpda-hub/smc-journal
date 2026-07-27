@@ -11670,14 +11670,15 @@ def _ollama_get_active_model():
     for m in available:
         if m == preferred or m.startswith(preferred.split(':')[0] + ':'):
             return m
-    # Fallback: největší dostupný vision model (podle počtu parametrů v názvu)
+    # Fallback: největší vision model který se vejde do 8 GB VRAM (max ~13b)
     def _model_size(name):
         import re as _re
         m = _re.search(r'(\d+)b', name.lower())
         return int(m.group(1)) if m else 0
     vision = [m for m in available if any(k in m for k in ('llava', 'vision', 'minicpm', 'moondream'))]
-    if vision:
-        return max(vision, key=_model_size)  # preferuj větší = přesnější
+    vision_ok = [m for m in vision if _model_size(m) <= 13] or vision
+    if vision_ok:
+        return max(vision_ok, key=_model_size)  # největší co se vejde do VRAM
     return available[0]
 
 def _trade_context_text(t):
