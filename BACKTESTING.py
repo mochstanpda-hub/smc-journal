@@ -60,11 +60,12 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.155"
+VERSION = "1.5.156"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
+1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
 1.5.155 | AI chybový log — při selhání AI vyskočí debug okno s modelem, HTTP kódem a detailem chyby místo obecného messagebox
 1.5.154 | Vision model omezen na max 13b (RTX 4060 / 8 GB VRAM) — llava:34b způsoboval HTTP 500; výchozí model změněn na llama3.2-vision:11b
 1.5.153 | Vision model fallback přepracován: preferuje největší dostupný model (llava:34b > llama3.2-vision:11b > llava:7b) místo prvního v seznamu
@@ -11639,7 +11640,7 @@ def open_project_by_name(mode, name):
 # AI ASISTENT — Ollama lokální AI
 # ==============================================================================
 OLLAMA_URL        = "http://localhost:11434"
-OLLAMA_MODEL      = "llama3.2-vision:11b"  # vision model pro screenshoty (RTX 4060 = 8 GB VRAM)
+OLLAMA_MODEL      = "llava:13b"  # vision model pro screenshoty (RTX 4060 = 8 GB VRAM)
 OLLAMA_CHAT_MODEL = "qwen2.5:7b"  # chatbot model (text)
 
 def _ollama_running():
@@ -11677,7 +11678,9 @@ def _ollama_get_active_model():
         import re as _re
         m = _re.search(r'(\d+)b', name.lower())
         return int(m.group(1)) if m else 0
-    vision = [m for m in available if any(k in m for k in ('llava', 'vision', 'minicpm', 'moondream'))]
+    # llama3.2-vision používá architekturu mllama — nepodporováno v Ollama 0.32.x
+    vision = [m for m in available if any(k in m for k in ('llava', 'minicpm', 'moondream'))
+              or ('vision' in m and 'llama3.2' not in m)]
     vision_ok = [m for m in vision if _model_size(m) <= 13] or vision
     if vision_ok:
         return max(vision_ok, key=_model_size)  # největší co se vejde do VRAM
