@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.156"
+VERSION = "1.5.157"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11640,7 +11640,7 @@ def open_project_by_name(mode, name):
 # AI ASISTENT — Ollama lokální AI
 # ==============================================================================
 OLLAMA_URL        = "http://localhost:11434"
-OLLAMA_MODEL      = "llava:13b"  # vision model pro screenshoty (RTX 4060 = 8 GB VRAM)
+OLLAMA_MODEL      = "llava:7b"  # vision model pro screenshoty (jediný fungující na RTX 4060 / 8 GB)
 OLLAMA_CHAT_MODEL = "qwen2.5:7b"  # chatbot model (text)
 
 def _ollama_running():
@@ -11681,7 +11681,8 @@ def _ollama_get_active_model():
     # llama3.2-vision používá architekturu mllama — nepodporováno v Ollama 0.32.x
     vision = [m for m in available if any(k in m for k in ('llava', 'minicpm', 'moondream'))
               or ('vision' in m and 'llama3.2' not in m)]
-    vision_ok = [m for m in vision if _model_size(m) <= 13] or vision
+    # llava:13b selhává na CUDA_Host buffer (3.4 GB pinned RAM), llava:7b = max fungující
+    vision_ok = [m for m in vision if _model_size(m) <= 7] or vision
     if vision_ok:
         return max(vision_ok, key=_model_size)  # největší co se vejde do VRAM
     return available[0]
