@@ -60,12 +60,14 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.166"
+VERSION = "1.5.167"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
 CHANGELOG = """\
 1.5.156 | llama3.2-vision vyloučen z vision fallbacku (mllama architektura nepodporována v Ollama 0.32.x); výchozí model llava:13b
+1.5.167 | Nastavení → 🤖 Claude AI: tlačítko Exportovat kontext — generuje .md soubor z aktuálních LEVEL_OPTIONS/FIBO/TIMEFRAMES, vždy v sync s programem
+1.5.166 | Tlačítko 📂 Načíst analýzu (JSON) v ZÁPIS — načte trade_analysis.json z Claude projektu a vyplní formulář
 1.5.163 | TP@úroveň a SL@úroveň: multi-select (max 3) místo combobox, nové hodnoty LEVEL_OPTIONS (pod/nad VWAP, pod/nad VWAP ±1σ); Claude prompt a review dialog aktualizovány
 1.5.162 | Claude AI prompt přepsán — naučen logice SHORT/LONG (SL>entry>TP), čtení časů z osy X, TP@level/SL@level matching, fibo jako pole max 3; review dialog přidán čas uzavření, tp_level, sl_level
 1.5.161 | Claude AI review dialog — po analýze screenshotu se otevře okno s výsledky (upravitelné combobox/entry), uživatel zkontroluje a klikne Použít; lepší prompt s platnými hodnotami pro session/timeframe/setup
@@ -11656,9 +11658,164 @@ def open_settings_window(initial_tab=0):
         gs['claude_model'] = _model_var.get()
         save_global_settings(gs)
         messagebox.showinfo("Uloženo", "Claude AI nastavení uloženo.", parent=sw)
-    tk.Button(_cl_outer, text="💾  Uložit", command=_save_claude_settings,
+
+    def _export_claude_context():
+        setups      = load_setups()
+        tfs         = TIMEFRAMES
+        sessions    = SESSIONS_LIST
+        levels      = LEVEL_OPTIONS
+        version_str = VERSION
+
+        def _fmt(lst): return ', '.join(lst)
+
+        content = f"""# Claude Trade Analyzer — Kontext projektu
+# Vygenerováno automaticky z BACKTESTING.py v{version_str}
+
+## Účel
+Analyzuješ trading screenshoty z TradingView. Po analýze vypíšeš výsledky do chatu
+a vytvoříš soubor `trade_analysis.json` který uživatel načte do BACKTESTING.py.
+
+---
+
+## Jak analyzovat screenshot (TradingView)
+
+### KROK 1 — Ceny na pravé cenové ose
+Na pravé vertikální ose jsou 3 ceny se zvýrazněným pozadím:
+- **MODRÁ** = Entry (vstupni_hodnota)
+- **ČERVENÁ** = Stop Loss
+- **ZELENÁ** = Take Profit
+
+### KROK 2 — Směr obchodu
+- Stop Loss > Entry > Take Profit → **SHORT**
+- Take Profit > Entry > Stop Loss → **LONG**
+
+### KROK 3 — Časy na dolní ose (X osa)
+Zvýrazněné časové labely = čas otevření a uzavření.
+Datum `Mon 27 Jul 26` → `2026-07-27`. Formát výstupu: `YYYY-MM-DD HH:MM`
+
+### KROK 4 — Záhlaví grafu (levý horní roh)
+Symbol (XAUUSD, US100, NQ…) a timeframe (3m, 5m, 1h…).
+
+### KROK 5 — Pojmenované horizontální čáry
+Labely na okrajích grafu: ON VAH, RTH VAL, VWAP, PDH, DAY open atd.
+- Která je nejblíže **Take Profit** ceně? → `tp_level`
+- Která je nejblíže **Stop Loss** ceně? → `sl_level`
+- Kde leží **Entry**? → `fibo` (max 3)
+- Pokud TP/SL leží těsně pod/nad zelenou VWAP křivkou → `"pod VWAP"` / `"nad VWAP"`
+
+### KROK 6 — Session
+Pravý dolní roh: `RTH` → session = `"RTH"`, jinak `"OVERNIGHT"`.
+
+---
+
+## Platné hodnoty polí
+
+### smer
+```
+LONG, SHORT
+```
+
+### timeframe_vstup, timeframe_graf
+```
+{_fmt(tfs)}
+```
+
+### session
+```
+{_fmt(sessions)}
+```
+
+### fibo — setup/úrovně vstupu (max 3, jako pole)
+```
+{_fmt(setups)}
+```
+
+### tp_level, sl_level — kde leží TP/SL (max 3, jako pole)
+```
+{_fmt(levels)}
+```
+
+---
+
+## Výstupní JSON schéma
+
+```json
+{{
+  "symbol": "XAUUSD",
+  "smer": "SHORT",
+  "vstupni_hodnota": 4088.89,
+  "stoploss": 4094.21,
+  "takeprofit": 4072.81,
+  "cas_otevreni": "2026-07-27 18:41",
+  "cas_zavreni": "2026-07-27 19:41",
+  "timeframe_vstup": "3m",
+  "timeframe_graf": "3m",
+  "session": "RTH",
+  "fibo": ["pod VWAP", "ON POC"],
+  "tp_level": ["RTH VAL"],
+  "sl_level": ["RTH High"],
+  "tp_level_note": "",
+  "sl_level_note": "",
+  "duvod": "Stručný popis setupu",
+  "poznamka": ""
+}}
+```
+
+### Popis polí
+
+| Pole | Typ | Popis |
+|---|---|---|
+| `symbol` | string | Ticker z grafu |
+| `smer` | string | LONG nebo SHORT |
+| `vstupni_hodnota` | number | Entry (modrá na pravé ose) |
+| `stoploss` | number | Stop Loss (červená na pravé ose) |
+| `takeprofit` | number | Take Profit (zelená na pravé ose) |
+| `cas_otevreni` | string | YYYY-MM-DD HH:MM |
+| `cas_zavreni` | string | YYYY-MM-DD HH:MM nebo null |
+| `timeframe_vstup` | string | Z platných hodnot výše |
+| `timeframe_graf` | string | Z platných hodnot výše |
+| `session` | string | RTH nebo OVERNIGHT |
+| `fibo` | array | Úrovně kde leží entry (max 3) |
+| `tp_level` | array | Úrovně kde leží TP (max 3) |
+| `sl_level` | array | Úrovně kde leží SL (max 3) |
+| `tp_level_note` | string | Poznámka k TP (volitelné) |
+| `sl_level_note` | string | Poznámka k SL (volitelné) |
+| `duvod` | string | Důvod vstupu — stručně |
+| `poznamka` | string | Libovolná poznámka |
+
+---
+
+## Instrukce pro výstup
+
+1. Analyzuj screenshot
+2. Vypiš výsledky přehledně do chatu
+3. Ulož soubor `trade_analysis.json`
+4. Uživatel ho načte v BACKTESTING.py → ZÁPIS → **📂 Načíst analýzu (JSON)**
+"""
+
+        path = filedialog.asksaveasfilename(
+            parent=sw,
+            title="Uložit kontext pro Claude projekt",
+            initialfile="claude_trade_analyzer_context.md",
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("Vše", "*.*")]
+        )
+        if not path: return
+        try:
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(content)
+            messagebox.showinfo("Exportováno", f"Kontext uložen:\n{path}\n\nNahraj ho do Claude projektu jako projektový dokument.", parent=sw)
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nelze uložit: {e}", parent=sw)
+
+    btn_row_cl = tk.Frame(_cl_outer, bg=DT_BG); btn_row_cl.pack(anchor='w', pady=(0, 0))
+    tk.Button(btn_row_cl, text="💾  Uložit", command=_save_claude_settings,
               bg='#1d4ed8', fg='white', font=('Segoe UI', 10, 'bold'),
-              padx=18, pady=8, relief='flat', cursor='hand2').pack(anchor='w')
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(side='left')
+    tk.Button(btn_row_cl, text="📄  Exportovat kontext pro Claude projekt",
+              command=_export_claude_context,
+              bg='#7c3aed', fg='white', font=('Segoe UI', 10, 'bold'),
+              padx=18, pady=8, relief='flat', cursor='hand2').pack(side='left', padx=(10, 0))
 
     nb.select(initial_tab)
 
