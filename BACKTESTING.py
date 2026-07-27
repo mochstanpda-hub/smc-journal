@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.165"
+VERSION = "1.5.166"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12156,9 +12156,29 @@ def show_main_screen(p_name):
 
         _claude_analyze_async(path, lambda d, e: root.after(0, on_done, d, e))
 
-    tk.Button(f, text="📸 ANALYZOVAT SCREENSHOT (Claude AI)",
+    def load_from_json():
+        import json as _j
+        path = filedialog.askopenfilename(
+            title="Načíst analýzu (JSON)",
+            filetypes=[("JSON soubory", "*.json"), ("Vše", "*.*")]
+        )
+        if not path: return
+        try:
+            with open(path, 'r', encoding='utf-8') as fh:
+                data = _j.load(fh)
+            screenshot_prefill(data)
+            filled = [k for k, v in data.items() if v not in (None, '', [])]
+            messagebox.showinfo("JSON načten", f"Vyplněno {len(filled)} polí z:\n{os.path.basename(path)}")
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nelze načíst JSON:\n{e}")
+
+    btn_row_ai = tk.Frame(f); btn_row_ai.grid(row=r, column=0, columnspan=2, pady=(0, 8)); r+=1
+    tk.Button(btn_row_ai, text="📂 Načíst analýzu (JSON)",
+              command=load_from_json,
+              bg="#15803d", fg="white", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 6))
+    tk.Button(btn_row_ai, text="📸 Claude AI (API)",
               command=show_claude_screenshot_dialog,
-              bg="#1d4ed8", fg="white", font=("Arial", 8, "bold")).grid(row=r, column=0, columnspan=2, pady=(0, 8)); r+=1
+              bg="#1d4ed8", fg="white", font=("Arial", 8, "bold")).pack(side='left')
 
     tk.Label(f, text="Čas otevření:").grid(row=r, column=0, sticky='w'); cas_otevreni_entry = tk.Entry(f, width=35); cas_otevreni_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Čas uzavření:").grid(row=r, column=0, sticky='w'); cas_zavreni_entry = tk.Entry(f, width=35); cas_zavreni_entry.grid(row=r, column=1, pady=3); r+=1
