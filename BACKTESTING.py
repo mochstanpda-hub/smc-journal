@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.157"
+VERSION = "1.5.158"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11669,10 +11669,15 @@ def _ollama_get_active_model():
     available = _ollama_list_models()
     if not available:
         return preferred
-    # Exact match nebo prefix match (llava:34b může být uložen jako llava:34b-...)
+    # Exact match
     for m in available:
-        if m == preferred or m.startswith(preferred.split(':')[0] + ':'):
+        if m == preferred:
             return m
+    # Prefix match jen pokud preferred nemá tag (např. "llava" → "llava:7b")
+    if ':' not in preferred:
+        for m in available:
+            if m.startswith(preferred + ':'):
+                return m
     # Fallback: největší vision model který se vejde do 8 GB VRAM (max ~13b)
     def _model_size(name):
         import re as _re
