@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.163"
+VERSION = "1.5.165"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11645,7 +11645,7 @@ def open_settings_window(initial_tab=0):
                    bg=DT_BG, fg=DT_TEXT, selectcolor=DT_SURFACE, activebackground=DT_BG).pack(side='left', padx=4)
     row_model = tk.Frame(_cl_outer, bg=DT_BG); row_model.pack(anchor='w', fill='x', pady=(12, 0))
     tk.Label(row_model, text="Model:", bg=DT_BG, fg=DT_TEXT, font=('Segoe UI', 10), width=12, anchor='w').pack(side='left')
-    _model_opts = ["claude-haiku-4-5-20251001", "claude-sonnet-4-5", "claude-opus-5"]
+    _model_opts = ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-5"]
     _model_var = tk.StringVar(value=load_global_settings().get('claude_model', 'claude-haiku-4-5-20251001'))
     ttk.Combobox(row_model, textvariable=_model_var, values=_model_opts, width=35, state='readonly').pack(side='left', padx=6)
     tk.Label(_cl_outer, text="Haiku = nejlevnější (~0.001 USD/screenshot)  |  Sonnet = přesnější  |  Opus = nejlepší",
@@ -11706,39 +11706,46 @@ def _claude_analyze_async(image_path, callback):
         setups = ', '.join(load_setups())
         timeframes = ', '.join(TIMEFRAMES)
         sessions = ', '.join(SESSIONS_LIST)
+        level_opts = ', '.join(LEVEL_OPTIONS)
         prompt = (
-            "Jsi expert na čtení trading grafů z TradingView. Analyzuj screenshot a vrať POUZE valid JSON.\n\n"
-            "PRAVIDLA — přečti pozorně:\n"
-            "1. SMĚR: Zkontroluj logiku cen: pokud SL > entry > TP → SHORT. Pokud TP > entry > SL → LONG.\n"
-            "   Ověř barvou zóny (červená/tmavá = SHORT bearish, zelená = LONG bullish) nebo labely BUY/SELL.\n"
-            "2. ENTRY, SL, TP: Hledej explicitní labely 'entry', 'stop loss'/'SL', 'take profit'/'TP'.\n"
-            "   Nikdy nepřehazuj tyto hodnoty — SL musí být výše než entry pro SHORT.\n"
-            "3. ČAS OTEVŘENÍ/UZAVŘENÍ: Čti z osy X grafu. Formát výstupu: YYYY-MM-DD HH:MM.\n"
-            "   Pokud je na screenshotu datum jako 'Mon 27 Jul 26', převeď na 2026-07-27.\n"
-            "4. SYMBOL: Přesně jak je v záhlaví grafu (XAUUSD, US100, NQ, EURUSD…).\n"
-            "5. TIMEFRAME: Z nadpisu grafu (3m, 5m, 15m, 1h, 4h, D).\n"
-            "6. SESSION: RTH = New York session (cca 15:30–22:00 UTC+2). Ostatní = OVERNIGHT.\n"
-            f"   Platné hodnoty session: {sessions}\n"
-            f"7. FIBO/SETUP: Pojmenované úrovně kde entry leží nebo se k nim obchod vztahuje.\n"
-            f"   Platné hodnoty (max 3, vrať jako pole): {setups}\n"
-            "8. TP@LEVEL a SL@LEVEL: Z pojmenovaných čar viditelných na grafu vyber úrovně NEJBLÍŽE nebo NA kterých leží TP resp. SL.\n"
-            "   Lze zadat až 3 hodnoty jako pole. Použij relativní hodnoty ('pod VWAP', 'nad VWAP') pokud TP/SL leží\n"
-            "   těsně pod nebo nad VWAP linií (zelená křivka). Platné hodnoty: " + ', '.join(LEVEL_OPTIONS) + "\n\n"
-            "Pokud hodnotu nelze spolehlivě určit → null.\n\n"
+            "Analyze this TradingView trading chart. Return ONLY valid JSON, no other text.\n\n"
+            "STEP 1 — Find prices on the RIGHT PRICE AXIS (vertical scale on right edge):\n"
+            "  Look for exactly 3 price labels with colored backgrounds on the right axis:\n"
+            "  - BLUE background price = Entry (vstupni_hodnota)\n"
+            "  - RED background price = Stop Loss\n"
+            "  - GREEN background price = Take Profit\n"
+            "  Read the exact numeric values of these 3 prices.\n\n"
+            "STEP 2 — Determine direction:\n"
+            "  If Stop Loss > Entry > Take Profit → SHORT\n"
+            "  If Take Profit > Entry > Stop Loss → LONG\n\n"
+            "STEP 3 — Find times on BOTTOM AXIS (X axis):\n"
+            "  Look for highlighted time labels (colored box on time axis) — these mark trade open and close.\n"
+            f"  Convert dates like 'Mon 27 Jul 26' → '2026-07-27'. Output format: YYYY-MM-DD HH:MM\n\n"
+            "STEP 4 — Read from chart header (top left):\n"
+            "  Symbol (e.g. XAUUSD, US100, NQ) and timeframe (e.g. 3m, 5m, 1h).\n\n"
+            "STEP 5 — Named horizontal lines visible on chart (labeled on left or right side):\n"
+            "  Examples: ON VAH, RTH VAL, VWAP, PDH, DAY open, RTH High, etc.\n"
+            "  - Which named line is CLOSEST to Take Profit price? → tp_level\n"
+            "  - Which named line is CLOSEST to Stop Loss price? → sl_level\n"
+            "  - Where is Entry relative to named lines? → fibo/setup (max 3)\n"
+            f"  Use 'pod VWAP' or 'nad VWAP' if TP/SL is just below/above the green VWAP curve.\n"
+            f"  Valid level values: {level_opts}\n\n"
+            "STEP 6 — Bottom right corner: 'RTH' = RTH session, otherwise OVERNIGHT.\n\n"
+            "Return ONLY this JSON:\n"
             "{\n"
-            '  "symbol": "ticker nebo null",\n'
-            '  "smer": "LONG nebo SHORT nebo null",\n'
-            '  "vstupni_hodnota": číslo nebo null,\n'
-            '  "stoploss": číslo nebo null,\n'
-            '  "takeprofit": číslo nebo null,\n'
-            '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            '  "cas_zavreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            f'  "timeframe_vstup": "jedna z: {timeframes} nebo null",\n'
-            f'  "timeframe_graf": "jedna z: {timeframes} nebo null",\n'
-            f'  "session": "jedna z: {sessions} nebo null",\n'
-            '  "fibo": ["setup1"] nebo ["setup1","setup2"] nebo null,\n'
-            '  "tp_level": ["úroveň1"] nebo ["úroveň1","úroveň2"] nebo null,\n'
-            '  "sl_level": ["úroveň1"] nebo ["úroveň1","úroveň2"] nebo null\n'
+            '  "symbol": "exact ticker or null",\n'
+            '  "smer": "LONG or SHORT or null",\n'
+            '  "vstupni_hodnota": number from BLUE axis label or null,\n'
+            '  "stoploss": number from RED axis label or null,\n'
+            '  "takeprofit": number from GREEN axis label or null,\n'
+            '  "cas_otevreni": "YYYY-MM-DD HH:MM or null",\n'
+            '  "cas_zavreni": "YYYY-MM-DD HH:MM or null",\n'
+            f'  "timeframe_vstup": one of [{timeframes}] or null,\n'
+            f'  "timeframe_graf": one of [{timeframes}] or null,\n'
+            f'  "session": "RTH" or "OVERNIGHT" or null,\n'
+            '  "fibo": ["level"] or ["l1","l2","l3"] or null,\n'
+            '  "tp_level": ["level"] or ["l1","l2"] or null,\n'
+            '  "sl_level": ["level"] or ["l1","l2"] or null\n'
             "}"
         )
         body = _j.dumps({
@@ -11764,10 +11771,10 @@ def _claude_analyze_async(image_path, callback):
             else:
                 callback(None, f"Nepodařilo se parsovat odpověď:\n{text[:400]}")
         except _req.HTTPError as e:
-            err = e.read().decode('utf-8', errors='replace')[:400]
-            callback(None, f"API chyba {e.code}:\n{err}")
+            err = e.read().decode('utf-8', errors='replace')[:600]
+            callback(None, f"API chyba {e.code} ({_claude_model()}):\n{err}")
         except Exception as e:
-            callback(None, f"Chyba: {e}")
+            callback(None, f"Chyba ({type(e).__name__}): {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
