@@ -11669,11 +11669,15 @@ def _ollama_get_active_model():
     for m in available:
         if m == preferred or m.startswith(preferred.split(':')[0] + ':'):
             return m
-    # Fallback: první dostupný llava nebo vision model
-    for m in available:
-        if 'llava' in m or 'vision' in m or 'minicpm' in m or 'moondream' in m:
-            return m
-    return available[0]  # cokoliv co je nainstalované
+    # Fallback: největší dostupný vision model (podle počtu parametrů v názvu)
+    def _model_size(name):
+        import re as _re
+        m = _re.search(r'(\d+)b', name.lower())
+        return int(m.group(1)) if m else 0
+    vision = [m for m in available if any(k in m for k in ('llava', 'vision', 'minicpm', 'moondream'))]
+    if vision:
+        return max(vision, key=_model_size)  # preferuj větší = přesnější
+    return available[0]
 
 def _trade_context_text(t):
     """Sestaví textový kontext obchodu pro AI."""
