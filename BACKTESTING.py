@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.169"
+VERSION = "1.5.170"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2176,6 +2176,7 @@ FIBO_OPTIONS = [
     "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
     "PDH", "PDL",
     "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
+    "MO VWAP",
     "DAY open",
 ]
 SESSIONS_LIST = ["OVERNIGHT", "RTH"]
@@ -2187,6 +2188,7 @@ LEVEL_OPTIONS = [
     "pod VWAP", "nad VWAP",
     "pod VWAP +1σ", "nad VWAP +1σ",
     "pod VWAP -1σ", "nad VWAP -1σ",
+    "MO VWAP", "pod MO VWAP", "nad MO VWAP",
     "DAY open",
 ]
 
