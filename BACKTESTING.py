@@ -11637,7 +11637,7 @@ def open_project_by_name(mode, name):
 # AI ASISTENT — Ollama lokální AI
 # ==============================================================================
 OLLAMA_URL        = "http://localhost:11434"
-OLLAMA_MODEL      = "llava:34b"    # vision model pro screenshoty
+OLLAMA_MODEL      = "llama3.2-vision:11b"  # vision model pro screenshoty (RTX 4060 = 8 GB VRAM)
 OLLAMA_CHAT_MODEL = "qwen2.5:7b"  # chatbot model (text)
 
 def _ollama_running():
