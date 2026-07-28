@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.176"
+VERSION = "1.5.178"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11773,7 +11773,7 @@ def open_settings_window(initial_tab=0):
     row_postrehy = tk.Frame(_cl_outer, bg=DT_BG); row_postrehy.pack(anchor='w', fill='x')
     tk.Label(row_postrehy, text="Postřehy (cesta k souboru .md):", bg=DT_BG, fg=DT_TEXT,
              font=('Segoe UI', 10), width=30, anchor='w').pack(side='left')
-    _postrehy_var = tk.StringVar(value=load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy.md'))
+    _postrehy_var = tk.StringVar(value=load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy_api.md'))
     tk.Entry(row_postrehy, textvariable=_postrehy_var, width=40, font=('Segoe UI', 9)).pack(side='left', padx=6)
     def _browse_postrehy():
         p = filedialog.askopenfilename(title="Vyber soubor s postřehy", filetypes=[("Markdown", "*.md"), ("Vše", "*.*")])
@@ -11993,7 +11993,7 @@ def _claude_analyze_async(image_path, callback):
             img_b64 = base64.b64encode(fh.read()).decode()
 
         # Načti postřehy z Claude projektu jako kontext
-        postrehy_path = load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy.md')
+        postrehy_path = load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy_api.md')
         postrehy_ctx = ""
         try:
             if os.path.exists(postrehy_path):
@@ -12011,11 +12011,20 @@ def _claude_analyze_async(image_path, callback):
         system_prompt = (
             "Jsi expert na čtení TradingView grafů a IBT trading (Market Profile, Volume Profile, Orderflow). "
             "Výstupem je VŽDY pouze čistý JSON objekt — žádný text před ani za ním, žádný markdown, žádné vysvětlování.\n\n"
-            "Pravidla čtení grafu:\n"
-            "CENY: Na pravé vertikální ose jsou 3 ceny se zvýrazněným pozadím: MODRÁ=Entry, ČERVENÁ=Stop Loss, ZELENÁ=Take Profit. "
-            "Čti přesná čísla těchto labelů. IGNORUJ ceny v levém horním rohu — to jsou aktuální bid/ask, ne parametry obchodu.\n"
-            "SMĚR: SL > Entry > TP → SHORT. TP > Entry > SL → LONG.\n"
-            "TIMEFRAME: čti ze záhlaví grafu (levý horní roh, číslo+písmeno: 3m, 5m, 1h...).\n"
+            "## CENY NA PRAVÉ OSE\n"
+            "Na pravé vertikální ose jsou 3 labely se zvýrazněným pozadím (modrá/červená/zelená). "
+            "IGNORUJ ceny v levém horním rohu (bid/ask) — ty nejsou parametry obchodu.\n"
+            "Přečti všechny 3 číselné hodnoty z pravé osy.\n\n"
+            "## SMĚR A PŘIŘAZENÍ TP/SL — KLÍČOVÉ PRAVIDLO\n"
+            "1. Entry = label se MODROU/AZUROVOU barvou pozadí na pravé ose.\n"
+            "2. Urči směr z VIZUÁLNÍHO TVARU trade boxu/šipky na grafu:\n"
+            "   - Trade box nebo šipka míří NAHORU od entry → LONG\n"
+            "   - Trade box nebo šipka míří DOLŮ od entry → SHORT\n"
+            "3. Přiřaď TP a SL podle směru (NIKOLI podle barvy labelů — barvy se liší dle nastavení):\n"
+            "   - LONG: TP = VYŠŠÍ cena než entry, SL = NIŽŠÍ cena než entry\n"
+            "   - SHORT: TP = NIŽŠÍ cena než entry, SL = VYŠŠÍ cena než entry\n\n"
+            "## OSTATNÍ POLE\n"
+            "TIMEFRAME: záhlaví grafu vlevo nahoře (číslo+písmeno: 3m, 5m, 1h...).\n"
             "ČASY: zvýrazněné labely na dolní ose X. Formát: YYYY-MM-DD HH:MM.\n"
             "SESSION: pravý dolní roh — 'RTH' → RTH, jinak → OVERNIGHT.\n"
             "ÚROVNĚ: pojmenované horizontální čáry na okrajích grafu (ON VAH, RTH VAL, VWAP, MO VWAP, PDH...). "
