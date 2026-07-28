@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.184"
+VERSION = "1.5.185"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2063,6 +2063,7 @@ filter_val_var = None
 editing_trade_index = None
 best_performers_frame = None
 _api_last_screenshot_path = None   # screenshot vybraný přes API analýzu
+_json_last_loaded_path    = None   # cesta k naposledy načtenému JSON souboru
 
 # Globální proměnná pro filtr statistik
 stats_symbol_var = None
@@ -6783,7 +6784,7 @@ def _save_trades_file(trades, reference_trade=None):
         w.writerows(trades)
 
 def pridat_obchod():
-    global editing_trade_index, _api_last_screenshot_path
+    global editing_trade_index, _api_last_screenshot_path, _json_last_loaded_path
     if not DATA_FILE: messagebox.showerror("Chyba", "Není vybrán žádný projekt!"); return
 
     try:
@@ -6864,6 +6865,38 @@ def pridat_obchod():
                     messagebox.showinfo("OK", f"Obchod uložen (chyba auto-save složky: {_ex})")
                 finally:
                     _api_last_screenshot_path = None
+            elif _json_last_loaded_path:
+                try:
+                    import json as _jj2, shutil as _sh3, re as _re4
+                    _json_folder = load_global_settings().get('json_trades_folder', '').strip()
+                    if _json_folder and os.path.isdir(_json_folder):
+                        _existing2 = [x for x in os.listdir(_json_folder)
+                                      if os.path.isdir(os.path.join(_json_folder, x))
+                                      and _re4.match(r'^\d+', x)]
+                        _num2 = len(_existing2) + 1
+                        _sym2 = d.get('symbol', 'TRADE')
+                        _date2 = (d.get('cas_otevreni', '') or '')[:10]
+                        _folder_name2 = f"{_num2}-{_sym2} {_date2}".strip()
+                        _trade_dir2 = os.path.join(_json_folder, _folder_name2)
+                        os.makedirs(_trade_dir2, exist_ok=True)
+                        # Uložit JSON s daty z formuláře
+                        _json_out = os.path.join(_trade_dir2, 'trade_analysis.json')
+                        with open(_json_out, 'w', encoding='utf-8') as _jf2:
+                            _jj2.dump(d, _jf2, ensure_ascii=False, indent=2)
+                        # Kopírovat obrázky ze složky původního JSON
+                        _src_folder = os.path.dirname(_json_last_loaded_path)
+                        _img_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'}
+                        for _fn in os.listdir(_src_folder):
+                            if os.path.splitext(_fn)[1].lower() in _img_exts:
+                                _sh3.copy2(os.path.join(_src_folder, _fn),
+                                           os.path.join(_trade_dir2, _fn))
+                        messagebox.showinfo("OK", f"Obchod uložen.\nSložka: {_folder_name2}")
+                    else:
+                        messagebox.showinfo("OK", "Obchod uložen.")
+                except Exception as _ex2:
+                    messagebox.showinfo("OK", f"Obchod uložen (chyba auto-save složky: {_ex2})")
+                finally:
+                    _json_last_loaded_path = None
             else:
                 messagebox.showinfo("OK", "Obchod uložen.")
             try: award_xp_for_trade(d, is_edit=False, parent_win=root)
@@ -11827,6 +11860,20 @@ def open_settings_window(initial_tab=0):
     tk.Button(row_apifolder, text="📁", command=_browse_apifolder, font=('Segoe UI', 9),
               bg=DT_SURFACE, fg=DT_TEXT, relief='flat').pack(side='left')
     tk.Label(_cl_outer, text="Sem se budou ukládat obchody z API analýzy (JSON + screenshot). Povinné pro spuštění analýzy.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 12))
+
+    # Složka pro ukládání JSON obchodů
+    row_jsonfolder = tk.Frame(_cl_outer, bg=DT_BG); row_jsonfolder.pack(anchor='w', fill='x')
+    tk.Label(row_jsonfolder, text="Složka pro JSON obchody:", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 10), width=30, anchor='w').pack(side='left')
+    _jsonfolder_var = tk.StringVar(value=load_global_settings().get('json_trades_folder', ''))
+    tk.Entry(row_jsonfolder, textvariable=_jsonfolder_var, width=40, font=('Segoe UI', 9)).pack(side='left', padx=6)
+    def _browse_jsonfolder():
+        p = filedialog.askdirectory(title="Vyber složku pro ukládání JSON obchodů")
+        if p: _jsonfolder_var.set(p)
+    tk.Button(row_jsonfolder, text="📁", command=_browse_jsonfolder, font=('Segoe UI', 9),
+              bg=DT_SURFACE, fg=DT_TEXT, relief='flat').pack(side='left')
+    tk.Label(_cl_outer, text="Sem se budou ukládat obchody načtené přes JSON analýzu (kopie JSON + screenshot).",
              bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 16))
 
     def _save_claude_settings():
@@ -11835,6 +11882,7 @@ def open_settings_window(initial_tab=0):
         gs['claude_model'] = _model_var.get()
         gs['postrehy_file'] = _postrehy_var.get().strip()
         gs['api_trades_folder'] = _apifolder_var.get().strip()
+        gs['json_trades_folder'] = _jsonfolder_var.get().strip()
         save_global_settings(gs)
         messagebox.showinfo("Uloženo", "Claude AI nastavení uloženo.", parent=sw)
 
@@ -12600,6 +12648,7 @@ def show_main_screen(p_name):
         _claude_analyze_async(path, lambda d, e: root.after(0, on_done, d, e))
 
     def load_from_json():
+        global _json_last_loaded_path
         import json as _j
         _gs = load_global_settings()
         _init_dir = _gs.get('json_last_folder', '')
@@ -12611,6 +12660,7 @@ def show_main_screen(p_name):
             initialdir=_init_dir or None
         )
         if not path: return
+        _json_last_loaded_path = path
         _gs['json_last_folder'] = os.path.dirname(path)
         save_global_settings(_gs)
         try:
