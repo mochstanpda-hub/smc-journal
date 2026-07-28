@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.183"
+VERSION = "1.5.184"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12081,6 +12081,11 @@ def _claude_analyze_async(image_path, callback):
             f"Platné hodnoty fibo (entry): {entry_opts}. "
             f"Platné hodnoty tp_level/sl_level: {level_opts}. "
             "Pokud TP/SL těsně pod/nad VWAP křivkou → 'pod VWAP'/'nad VWAP'.\n"
+            "VÝSLEDEK OBCHODU (pole vysledek): Urči z toho, kam cena po vstupu dojela:\n"
+            "  - WIN: svíčky uvnitř trade boxu dosáhly TP ceny (zóna profitu je vyplněna — sytá barva sahá až k TP).\n"
+            "  - LOSS: svíčky dosáhly SL ceny (zóna ztráty vyplněna).\n"
+            "  - BE: obchod uzavřen na entry ceně (break even).\n"
+            "  - null: nelze určit (obchod stále otevřen nebo výsledek není vidět).\n"
             "AI NÁZOR: 2-4 věty hodnocení setupu z pohledu IBT tradera + verdikt DOBRÝ/PRŮMĚRNÝ/ŠPATNÝ SETUP.\n"
             + postrehy_ctx
         )
@@ -12091,7 +12096,7 @@ def _claude_analyze_async(image_path, callback):
             "Žádný text před ani za JSON. Žádný markdown. Žádné vysvětlování.\n"
             "Pole: symbol, smer, vstupni_hodnota, stoploss, takeprofit, "
             "cas_otevreni, cas_zavreni, timeframe_vstup, timeframe_graf, session, "
-            "fibo, tp_level, sl_level, duvod, poznamka, ai_nazor. "
+            "fibo, tp_level, sl_level, vysledek, duvod, poznamka, ai_nazor. "
             "Hodnotu null použij pokud nelze určit."
         )
 
@@ -12516,6 +12521,7 @@ def show_main_screen(p_name):
                 ("TF vstupu",       "timeframe_vstup", TIMEFRAMES,  None),
                 ("TF grafu",        "timeframe_graf",  TIMEFRAMES,  None),
                 ("Session",         "session",         SESSIONS_LIST, None),
+                ("Výsledek",        "vysledek",        ["Win", "Loss", "BE"], None),
                 ("Setup (max 3, oddělené /)", "fibo",  _setups,     fibo_display),
                 ("TP @ úroveň (max 3, /)", "tp_level",   LEVEL_OPTIONS, tp_lvl_display),
                 ("SL @ úroveň (max 3, /)", "sl_level",  LEVEL_OPTIONS, sl_lvl_display),
