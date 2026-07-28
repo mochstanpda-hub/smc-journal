@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.186"
+VERSION = "1.5.187"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2179,21 +2179,14 @@ FIBO_OPTIONS = [
     "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
     "PDH", "PDL",
     "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
-    "MO VWAP",
-    "DAY open",
-]
-SESSIONS_LIST = ["OVERNIGHT", "RTH"]
-LEVEL_OPTIONS = [
-    "ON VAH", "ON VAL", "ON POC", "ON High", "ON Low",
-    "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
-    "PDH", "PDL",
-    "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
     "pod VWAP", "nad VWAP",
     "pod VWAP +1σ", "nad VWAP +1σ",
     "pod VWAP -1σ", "nad VWAP -1σ",
     "MO VWAP", "pod MO VWAP", "nad MO VWAP",
     "DAY open",
 ]
+SESSIONS_LIST = ["OVERNIGHT", "RTH"]
+LEVEL_OPTIONS = FIBO_OPTIONS  # jeden seznam pro setup i TP/SL — spravuje se v Nastavení
 
 # Globální soubor pro vlastní setupy (nezávislý na projektu)
 SETUPS_FILE = os.path.join(_APP_DIR, 'setups_config.json')
@@ -5151,13 +5144,15 @@ def setup_lists_manager_ui(parent):
              font=("Arial", 8), fg="#95a5a6").pack(anchor="w", pady=(0, 6))
 
     def _refresh_fibo_combos():
-        """Aktualizuj dropdown ve formuláři po změně setupů."""
-        global FIBO_OPTIONS
-        FIBO_OPTIONS = load_setups()
+        """Aktualizuj všechny pickery po změně setupů (FIBO_OPTIONS = LEVEL_OPTIONS = stejný objekt)."""
+        _new = load_setups()
+        FIBO_OPTIONS[:] = _new  # in-place — LEVEL_OPTIONS je tentýž objekt, aktualizuje se tím taky
         if fibo_combo:
-            fibo_combo['values'] = FIBO_OPTIONS
-        if qs_setup_var := globals().get('qs_setup_var'):
-            pass  # quick-save combo se vytváří dynamicky
+            fibo_combo._values = list(_new)
+        if tp_level_combo:
+            tp_level_combo._values = list(_new)
+        if sl_level_combo:
+            sl_level_combo._values = list(_new)
 
     def add_setup():
         val = entry_setup.get().strip().upper()
