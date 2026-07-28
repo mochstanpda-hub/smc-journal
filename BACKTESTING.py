@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.181"
+VERSION = "1.5.182"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12080,18 +12080,17 @@ def _claude_analyze_async(image_path, callback):
                     if entry and sl and tp and abs(sl - entry) > 0 and abs(tp - entry) > 0:
                         long_ok  = tp > entry > sl
                         short_ok = sl > entry > tp
+                        _swapped = False
                         def _swap_sl_tp(d):
                             d['stoploss'], d['takeprofit'] = d['takeprofit'], d['stoploss']
                             d['sl_level'], d['tp_level'] = d.get('tp_level', ''), d.get('sl_level', '')
 
                         # Krok 1: oprav zjevnou nekonzistenci (AI řekne LONG ale TP < entry, apod.)
                         if smer == 'LONG' and not long_ok:
-                            _swap_sl_tp(data)
-                            sl, tp = tp, sl
+                            _swap_sl_tp(data); sl, tp = tp, sl; _swapped = True
                             data['smer'] = 'LONG' if tp > entry else 'SHORT'
                         elif smer == 'SHORT' and not short_ok:
-                            _swap_sl_tp(data)
-                            sl, tp = tp, sl
+                            _swap_sl_tp(data); sl, tp = tp, sl; _swapped = True
                             data['smer'] = 'SHORT' if sl > entry else 'LONG'
                         # Krok 2: RRR pojistka — pokud je RRR nesmyslně nízké a prohození ho opraví
                         sl2  = float(str(data.get('stoploss', sl)).replace(',', '.'))
@@ -12099,8 +12098,17 @@ def _claude_analyze_async(image_path, callback):
                         rr_current = abs(tp2 - entry) / abs(sl2 - entry)
                         rr_flipped = abs(sl2 - entry) / abs(tp2 - entry)
                         if rr_current < 0.7 and rr_flipped > 1.0:
-                            _swap_sl_tp(data)
+                            _swap_sl_tp(data); _swapped = True
                             data['smer'] = 'SHORT' if tp2 > entry else 'LONG'
+                        # Krok 3: pokud jsme prohodili, oprav směrová slova v duvod/poznamka/ai_nazor
+                        if _swapped:
+                            _final = data.get('smer', 'LONG').upper()
+                            _wrong = 'SHORT' if _final == 'LONG' else 'LONG'
+                            for _field in ('duvod', 'poznamka', 'ai_nazor'):
+                                _v = data.get(_field, '')
+                                if isinstance(_v, str) and _wrong in _v.upper():
+                                    import re as _re2
+                                    data[_field] = _re2.sub(_wrong, _final, _v, flags=_re2.IGNORECASE)
                 except Exception:
                     pass
                 callback(data, None)
