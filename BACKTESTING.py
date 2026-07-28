@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.187"
+VERSION = "1.5.188"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12237,16 +12237,6 @@ class _SetupPicker:
         popup = tk.Toplevel()
         popup.title(self._title)
         popup.resizable(False, True)
-        try:
-            x = self._btn.winfo_rootx()
-            y = self._btn.winfo_rooty() + self._btn.winfo_height()
-            # Omeź výšku na dostupnou plochu obrazovky
-            screen_h = popup.winfo_screenheight()
-            max_h = screen_h - y - 60
-            popup.geometry(f"+{x}+{y}")
-        except Exception:
-            max_h = 500
-
         # Scrollovatelný seznam
         container = tk.Frame(popup)
         container.pack(fill='both', expand=True)
@@ -12284,11 +12274,6 @@ class _SetupPicker:
             check_btns[val] = cb
         _update_state()
 
-        # Nastav výšku canvasu na min(obsah, max dostupné místo)
-        popup.update_idletasks()
-        content_h = inner.winfo_reqheight()
-        canvas.config(height=min(content_h, max_h))
-
         def apply():
             self._selected = [v for v, var in check_vars.items() if var.get()]
             self._display_var.set(', '.join(self._selected))
@@ -12300,6 +12285,45 @@ class _SetupPicker:
                   bg='#2ecc71', fg='white', font=('Arial', 9, 'bold')).pack(fill='x', padx=10, pady=(6, 10))
         popup.bind('<Return>', lambda e: apply())
         popup.bind('<Escape>', lambda e: popup.destroy())
+
+        # Pozicování — po sestavení obsahu změříme a případně posuneme okno nahoru
+        popup.update_idletasks()
+        content_h = inner.winfo_reqheight()
+        screen_w  = popup.winfo_screenwidth()
+        screen_h  = popup.winfo_screenheight()
+        TASKBAR   = 56  # Windows taskbar rezerva
+        avail_h   = screen_h - TASKBAR
+
+        try:
+            btn_x      = self._btn.winfo_rootx()
+            btn_y_bot  = self._btn.winfo_rooty() + self._btn.winfo_height()
+            btn_y_top  = self._btn.winfo_rooty()
+        except Exception:
+            btn_x = 100; btn_y_bot = 300; btn_y_top = 280
+
+        # Výška canvasu: vejdi se do místa pod tlačítkem (nebo nad) minus potvrzovací button
+        CONFIRM_H  = 46
+        space_down = avail_h - btn_y_bot - CONFIRM_H - 10
+        space_up   = btn_y_top - CONFIRM_H - 10
+        max_canvas = max(80, min(content_h, space_down if space_down >= space_up else space_up))
+        canvas.config(height=max_canvas)
+
+        popup.update_idletasks()
+        popup_h = popup.winfo_reqheight()
+        popup_w = popup.winfo_reqwidth()
+
+        # Y: zkus pod tlačítkem, pokud by přeteklo → zkus nad, pokud ani to → zarovnej dolů
+        y = btn_y_bot
+        if y + popup_h > avail_h:
+            y_above = btn_y_top - popup_h
+            y = y_above if y_above >= 0 else max(0, avail_h - popup_h)
+
+        # X: nepřetékej doprava
+        x = btn_x
+        if x + popup_w > screen_w - 4:
+            x = max(0, screen_w - popup_w - 4)
+
+        popup.geometry(f"+{x}+{y}")
         popup.grab_set()
         popup.focus_set()
 
