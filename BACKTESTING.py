@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.171"
+VERSION = "1.5.172"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2117,6 +2117,7 @@ tags_entry = None # NOVÉ: Štítky
 zisk_mena_entry = None  # Ručně zadaná částka zisku/ztráty v domácí měně
 tp_level_combo = None; tp_level_note = None  # TP @ úroveň
 sl_level_combo = None; sl_level_note = None  # SL @ úroveň
+ai_nazor_entry = None  # AI názor na obchod
 details_text = None; image_frame = None; gallery_inner = None
 checklist_display_label = None
 
@@ -2142,7 +2143,7 @@ COL_TRANSLATION = {
     "smer": "Směr", "vstupni_hodnota": "Vstup", "stoploss": "Stop Loss",
     "takeprofit": "Take Profit", "rrr": "RRR", "pips": "Pips", "session": "Seance",
     "timeframe_graf": "HTF Graf", "timeframe_vstup": "LTF Vstup", "fibo": "Setup/Fibo",
-    "duvod": "Důvod", "poznamka": "Poznámka", "vysledek": "Výsledek",
+    "duvod": "Důvod", "poznamka": "Poznámka", "ai_nazor": "AI názor", "vysledek": "Výsledek",
     "den_tydne": "Den", "delka_obchodu": "Délka", "slippage": "Slippage", "kvalita": "Kvalita",
     "news": "News (Impact)", "news_event": "Fundament (Zpráva)", "checklist_ratio": "✅ Pravidla",
     "tags": "Štítky (Tags)",
@@ -6813,6 +6814,7 @@ def pridat_obchod():
             'tp_level_note': tp_level_note.get() if tp_level_note else '',
             'sl_level': sl_level_combo.get() if sl_level_combo else '',
             'sl_level_note': sl_level_note.get() if sl_level_note else '',
+            'ai_nazor': ai_nazor_entry.get('1.0', 'end-1c').strip() if ai_nazor_entry else '',
         }
         trades = load_data()
         if editing_trade_index is not None:
@@ -6928,6 +6930,7 @@ def reset_form():
     if tp_level_note: tp_level_note.delete(0, tk.END)
     if sl_level_combo: sl_level_combo.set('')
     if sl_level_note: sl_level_note.delete(0, tk.END)
+    if ai_nazor_entry: ai_nazor_entry.delete('1.0', tk.END)
     if accounts_combo:
         vals = get_account_dropdown_values()
         accounts_combo['values'] = vals
@@ -7259,6 +7262,8 @@ def naci_obchod_pro_upravu():
     if tp_level_note: tp_level_note.delete(0, tk.END); tp_level_note.insert(0, t.get('tp_level_note', ''))
     if sl_level_combo: sl_level_combo.set(t.get('sl_level', ''))
     if sl_level_note: sl_level_note.delete(0, tk.END); sl_level_note.insert(0, t.get('sl_level_note', ''))
+    if ai_nazor_entry:
+        ai_nazor_entry.delete('1.0', tk.END); ai_nazor_entry.insert('1.0', t.get('ai_nazor', ''))
     update_calculated_fields(); calculate_auto_score(); save_btn.config(text="AKTUALIZOVAT OBCHOD", bg="#e67e22")
 
 # ==============================================================================
@@ -12313,6 +12318,8 @@ def show_main_screen(p_name):
         if data.get('session'):       session_combo.set(data['session'])
         if data.get('duvod'):         set_entry(duvod_entry, data['duvod'])
         if data.get('poznamka'):      set_entry(poznamka_entry, data['poznamka'])
+        if data.get('ai_nazor') and ai_nazor_entry:
+            ai_nazor_entry.delete('1.0', tk.END); ai_nazor_entry.insert('1.0', data['ai_nazor'])
         if tp_level_combo:
             tpl = data.get('tp_level')
             if isinstance(tpl, list): tpl = ', '.join(str(x) for x in tpl if x)
@@ -12537,6 +12544,13 @@ def show_main_screen(p_name):
     
     tk.Label(f, text="Důvod vstupu:").grid(row=r, column=0, sticky='w'); duvod_entry = tk.Entry(f, width=35); duvod_entry.grid(row=r, column=1, pady=3); r+=1
     tk.Label(f, text="Poznámka:").grid(row=r, column=0, sticky='w'); poznamka_entry = tk.Entry(f, width=35); poznamka_entry.grid(row=r, column=1, pady=3); r+=1
+    tk.Label(f, text="AI názor:", font=("Arial", 8, "bold"), fg="#6366f1").grid(row=r, column=0, sticky='nw', pady=(4, 0))
+    _ai_f = tk.Frame(f); _ai_f.grid(row=r, column=1, sticky='w', pady=(4, 2)); r+=1
+    ai_nazor_entry = tk.Text(_ai_f, width=34, height=3, font=("Arial", 9), wrap='word',
+                             relief='flat', bd=2, highlightthickness=1, highlightbackground='#6366f1')
+    ai_nazor_entry.pack(side='left')
+    _ai_sb = tk.Scrollbar(_ai_f, command=ai_nazor_entry.yview); _ai_sb.pack(side='left', fill='y')
+    ai_nazor_entry.config(yscrollcommand=_ai_sb.set)
 
     # ── Zisk / Ztráta — jen v REAL módu ──────────────────────────────────────
     if current_mode != "BACKTEST":
