@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.172"
+VERSION = "1.5.174"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -11767,11 +11767,27 @@ def open_settings_window(initial_tab=0):
     _model_var = tk.StringVar(value=load_global_settings().get('claude_model', 'claude-haiku-4-5-20251001'))
     ttk.Combobox(row_model, textvariable=_model_var, values=_model_opts, width=35, state='readonly').pack(side='left', padx=6)
     tk.Label(_cl_outer, text="Haiku = nejlevnější (~0.001 USD/screenshot)  |  Sonnet = přesnější  |  Opus = nejlepší",
-             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(4, 16))
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(4, 12))
+
+    # Postřehy — cesta k souboru
+    row_postrehy = tk.Frame(_cl_outer, bg=DT_BG); row_postrehy.pack(anchor='w', fill='x')
+    tk.Label(row_postrehy, text="Postřehy (cesta k souboru .md):", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 10), width=30, anchor='w').pack(side='left')
+    _postrehy_var = tk.StringVar(value=load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy.md'))
+    tk.Entry(row_postrehy, textvariable=_postrehy_var, width=40, font=('Segoe UI', 9)).pack(side='left', padx=6)
+    def _browse_postrehy():
+        p = filedialog.askopenfilename(title="Vyber soubor s postřehy", filetypes=[("Markdown", "*.md"), ("Vše", "*.*")])
+        if p: _postrehy_var.set(p)
+    tk.Button(row_postrehy, text="📁", command=_browse_postrehy, font=('Segoe UI', 9),
+              bg=DT_SURFACE, fg=DT_TEXT, relief='flat').pack(side='left')
+    tk.Label(_cl_outer, text="Soubor s postřehy z Claude projektu — API ho přiloží jako kontext ke každé analýze.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 16))
+
     def _save_claude_settings():
         gs = load_global_settings()
         gs['anthropic_api_key'] = _api_key_var.get().strip()
         gs['claude_model'] = _model_var.get()
+        gs['postrehy_file'] = _postrehy_var.get().strip()
         save_global_settings(gs)
         messagebox.showinfo("Uloženo", "Claude AI nastavení uloženo.", parent=sw)
 
@@ -11976,54 +11992,89 @@ def _claude_analyze_async(image_path, callback):
         with open(image_path, 'rb') as fh:
             img_b64 = base64.b64encode(fh.read()).decode()
 
-        setups = ', '.join(load_setups())
-        timeframes = ', '.join(TIMEFRAMES)
-        sessions = ', '.join(SESSIONS_LIST)
-        level_opts = ', '.join(LEVEL_OPTIONS)
+        # Načti postřehy z Claude projektu jako kontext
+        postrehy_path = load_global_settings().get('postrehy_file', r'E:\vstupy\data\claude_postrehy.md')
+        postrehy_ctx = ""
+        try:
+            if os.path.exists(postrehy_path):
+                with open(postrehy_path, 'r', encoding='utf-8') as _pf:
+                    _txt = _pf.read().strip()
+                if _txt:
+                    postrehy_ctx = f"\n\n## Postřehy a zkušenosti z předchozích obchodů\n{_txt}\n"
+        except Exception:
+            pass
+
+        timeframes  = ', '.join(TIMEFRAMES)
+        level_opts  = ', '.join(LEVEL_OPTIONS)
+        entry_opts  = ', '.join(FIBO_OPTIONS)
+
         prompt = (
-            "Analyze this TradingView trading chart. Return ONLY valid JSON, no other text.\n\n"
-            "STEP 1 — Find prices on the RIGHT PRICE AXIS (vertical scale on right edge):\n"
-            "  Look for exactly 3 price labels with colored backgrounds on the right axis:\n"
-            "  - BLUE background price = Entry (vstupni_hodnota)\n"
-            "  - RED background price = Stop Loss\n"
-            "  - GREEN background price = Take Profit\n"
-            "  Read the exact numeric values of these 3 prices.\n\n"
-            "STEP 2 — Determine direction:\n"
-            "  If Stop Loss > Entry > Take Profit → SHORT\n"
-            "  If Take Profit > Entry > Stop Loss → LONG\n\n"
-            "STEP 3 — Find times on BOTTOM AXIS (X axis):\n"
-            "  Look for highlighted time labels (colored box on time axis) — these mark trade open and close.\n"
-            f"  Convert dates like 'Mon 27 Jul 26' → '2026-07-27'. Output format: YYYY-MM-DD HH:MM\n\n"
-            "STEP 4 — Read from chart header (top left):\n"
-            "  Symbol (e.g. XAUUSD, US100, NQ) and timeframe (e.g. 3m, 5m, 1h).\n\n"
-            "STEP 5 — Named horizontal lines visible on chart (labeled on left or right side):\n"
-            "  Examples: ON VAH, RTH VAL, VWAP, PDH, DAY open, RTH High, etc.\n"
-            "  - Which named line is CLOSEST to Take Profit price? → tp_level\n"
-            "  - Which named line is CLOSEST to Stop Loss price? → sl_level\n"
-            "  - Where is Entry relative to named lines? → fibo/setup (max 3)\n"
-            f"  Use 'pod VWAP' or 'nad VWAP' if TP/SL is just below/above the green VWAP curve.\n"
-            f"  Valid level values: {level_opts}\n\n"
-            "STEP 6 — Bottom right corner: 'RTH' = RTH session, otherwise OVERNIGHT.\n\n"
-            "Return ONLY this JSON:\n"
+            "Jsi zkušený IBT trader (Intraday Initial Balance Trading) specializovaný na Market Profile, "
+            "Volume Profile a Orderflow. Analyzuješ screenshot obchodu z TradingView.\n"
+            "Vrať POUZE validní JSON, žádný jiný text.\n"
+            + postrehy_ctx +
+            "\n## KROK 1 — Ceny na pravé cenové ose\n"
+            "Na pravé vertikální ose jsou 3 ceny se zvýrazněným pozadím:\n"
+            "- MODRÁ = Entry (vstupni_hodnota)\n"
+            "- ČERVENÁ = Stop Loss\n"
+            "- ZELENÁ = Take Profit\n"
+            "Přečti přesné číselné hodnoty.\n\n"
+            "## KROK 2 — Směr obchodu\n"
+            "Stop Loss > Entry > Take Profit → SHORT\n"
+            "Take Profit > Entry > Stop Loss → LONG\n\n"
+            "## KROK 3 — Časy na dolní ose (X osa)\n"
+            "Zvýrazněné časové labely na ose X označují otevření a uzavření.\n"
+            "Datum jako 'Mon 27 Jul 26' převeď na '2026-07-27'. Formát: YYYY-MM-DD HH:MM\n\n"
+            "## KROK 4 — Záhlaví grafu (levý horní roh)\n"
+            "Symbol (XAUUSD, US100, NQ, EURUSD...) a timeframe (3m, 5m, 1h...).\n\n"
+            "## KROK 5 — Pojmenované horizontální čáry\n"
+            "Viditelné labely na okrajích: ON VAH, RTH VAL, VWAP, MO VWAP, PDH, DAY open...\n"
+            "- Která čára leží nejblíže Take Profit? → tp_level (max 3, pole)\n"
+            "- Která čára leží nejblíže Stop Loss? → sl_level (max 3, pole)\n"
+            "- U které čáry leží Entry? → fibo (max 3, pole)\n"
+            "TP/SL těsně pod/nad VWAP → použij 'pod VWAP' / 'nad VWAP'\n"
+            "U Monthly VWAP → 'MO VWAP', 'pod MO VWAP', 'nad MO VWAP'\n"
+            f"Platné hodnoty pro fibo: {entry_opts}\n"
+            f"Platné hodnoty pro tp_level/sl_level: {level_opts}\n\n"
+            "## KROK 6 — Session\n"
+            "Pravý dolní roh: 'RTH' → RTH, jinak → OVERNIGHT\n\n"
+            "## KROK 7 — AI názor (pole ai_nazor)\n"
+            "Napiš 2-4 věty jako zkušený IBT trader:\n"
+            "- Je entry dobře umístěna vůči kontextu (VWAP, session úrovně, profil)?\n"
+            "- Je RRR přijatelné?\n"
+            "- Co by mohlo setup invalidovat?\n"
+            "- Celkový verdikt: DOBRÝ SETUP / PRŮMĚRNÝ SETUP / ŠPATNÝ SETUP\n\n"
+            "Vrať POUZE tento JSON (null pokud hodnotu nelze určit):\n"
             "{\n"
-            '  "symbol": "exact ticker or null",\n'
-            '  "smer": "LONG or SHORT or null",\n'
-            '  "vstupni_hodnota": number from BLUE axis label or null,\n'
-            '  "stoploss": number from RED axis label or null,\n'
-            '  "takeprofit": number from GREEN axis label or null,\n'
-            '  "cas_otevreni": "YYYY-MM-DD HH:MM or null",\n'
-            '  "cas_zavreni": "YYYY-MM-DD HH:MM or null",\n'
-            f'  "timeframe_vstup": one of [{timeframes}] or null,\n'
-            f'  "timeframe_graf": one of [{timeframes}] or null,\n'
-            f'  "session": "RTH" or "OVERNIGHT" or null,\n'
-            '  "fibo": ["level"] or ["l1","l2","l3"] or null,\n'
-            '  "tp_level": ["level"] or ["l1","l2"] or null,\n'
-            '  "sl_level": ["level"] or ["l1","l2"] or null\n'
+            '  "symbol": "ticker nebo null",\n'
+            '  "smer": "LONG nebo SHORT nebo null",\n'
+            '  "vstupni_hodnota": číslo nebo null,\n'
+            '  "stoploss": číslo nebo null,\n'
+            '  "takeprofit": číslo nebo null,\n'
+            '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
+            '  "cas_zavreni": "YYYY-MM-DD HH:MM nebo null",\n'
+            f'  "timeframe_vstup": z [{timeframes}] nebo null,\n'
+            f'  "timeframe_graf": z [{timeframes}] nebo null,\n'
+            '  "session": "RTH" nebo "OVERNIGHT" nebo null,\n'
+            '  "fibo": ["uroven"] nebo ["u1","u2","u3"] nebo null,\n'
+            '  "tp_level": ["uroven"] nebo null,\n'
+            '  "sl_level": ["uroven"] nebo null,\n'
+            '  "duvod": "stručný popis setupu nebo null",\n'
+            '  "poznamka": "RRR a další poznámky nebo null",\n'
+            '  "ai_nazor": "2-4 věty + verdikt nebo null"\n'
             "}"
+        )
+        system_prompt = (
+            "Jsi expert na čtení TradingView grafů a IBT trading (Market Profile, Volume Profile, Orderflow). "
+            "Tvým úkolem je přesně přečíst čísla z grafu — zejména ceny na PRAVÉ CENOVÉ OSE "
+            "(barevné labely: modrá=entry, červená=SL, zelená=TP) a timeframe ze záhlaví grafu (levý horní roh). "
+            "IGNORUJ ceny v levém horním rohu (bid/ask kurzovní ceny — ty nejsou parametry obchodu). "
+            "Vrátíš vždy POUZE validní JSON bez jakéhokoliv dalšího textu."
         )
         body = _j.dumps({
             "model": _claude_model(),
-            "max_tokens": 512,
+            "max_tokens": 1024,
+            "system": system_prompt,
             "messages": [{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": mt, "data": img_b64}},
                 {"type": "text", "text": prompt}
@@ -12393,6 +12444,8 @@ def show_main_screen(p_name):
                 ("Setup (max 3, oddělené /)", "fibo",  _setups,     fibo_display),
                 ("TP @ úroveň (max 3, /)", "tp_level",   LEVEL_OPTIONS, tp_lvl_display),
                 ("SL @ úroveň (max 3, /)", "sl_level",  LEVEL_OPTIONS, sl_lvl_display),
+                ("Důvod vstupu",    "duvod",           None,        None),
+                ("Poznámka",        "poznamka",        None,        None),
             ]
             vars_ = {}
             for i, (label, key, opts, override) in enumerate(fields):
@@ -12411,6 +12464,19 @@ def show_main_screen(p_name):
                     tk.Entry(sf, textvariable=v, width=28, font=('Segoe UI', 9)).grid(row=i, column=1, sticky='w', padx=6)
                 vars_[key] = v
 
+            # AI názor — zobrazit jako čitelný text pod formulářem
+            ai_val = data.get('ai_nazor', '')
+            if ai_val:
+                ai_fr = tk.Frame(win, bg=DT_BG); ai_fr.pack(fill='x', padx=16, pady=(0, 6))
+                tk.Label(ai_fr, text="🤖 AI názor:", bg=DT_BG, fg='#6366f1',
+                         font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+                ai_box = tk.Text(ai_fr, width=55, height=4, font=('Segoe UI', 8),
+                                 wrap='word', bg=DT_SURFACE, fg=DT_TEXT,
+                                 relief='flat', bd=4, state='normal')
+                ai_box.insert('1.0', ai_val)
+                ai_box.config(state='disabled')
+                ai_box.pack(fill='x')
+
             def apply_():
                 result = {}
                 for key, v in vars_.items():
@@ -12421,6 +12487,8 @@ def show_main_screen(p_name):
                         try: val = float(val.replace(',', '.'))
                         except ValueError: pass
                     result[key] = val
+                if ai_val:
+                    result['ai_nazor'] = ai_val
                 screenshot_prefill(result)
                 win.destroy()
                 filled = [k for k, v2 in result.items() if v2 is not None]
