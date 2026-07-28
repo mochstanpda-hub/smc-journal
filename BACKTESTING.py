@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.188"
+VERSION = "1.5.189"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2183,7 +2183,7 @@ FIBO_OPTIONS = [
     "pod VWAP +1σ", "nad VWAP +1σ",
     "pod VWAP -1σ", "nad VWAP -1σ",
     "MO VWAP", "pod MO VWAP", "nad MO VWAP",
-    "DAY open",
+    "day open",
 ]
 SESSIONS_LIST = ["OVERNIGHT", "RTH"]
 LEVEL_OPTIONS = FIBO_OPTIONS  # jeden seznam pro setup i TP/SL — spravuje se v Nastavení
@@ -5155,11 +5155,11 @@ def setup_lists_manager_ui(parent):
             sl_level_combo._values = list(_new)
 
     def add_setup():
-        val = entry_setup.get().strip().upper()
+        val = entry_setup.get().strip()
         if not val:
             messagebox.showwarning("Setupy", "Zadej název setupu."); return
         setups = load_setups()
-        if val in [s.upper() for s in setups]:
+        if val.upper() in [s.upper() for s in setups]:
             messagebox.showwarning("Setupy", f"Setup '{val}' již existuje."); return
         setups.append(val)
         save_setups(setups)
