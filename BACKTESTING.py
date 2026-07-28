@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.170"
+VERSION = "1.5.171"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4212,7 +4212,7 @@ def update_statistics():
     # --- STATISTICS VARIABLES ---
     stats = {
         'total': 0, 'wins': 0, 'profit_r': 0.0, 'gross_profit': 0.0, 'gross_loss': 0.0,
-        'total_rrr_potential': 0.0, 
+        'total_rrr_potential': 0.0,
         'days': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0, 'rrr_sum': 0.0}),
         'sessions': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0, 'rrr_sum': 0.0}),
         'setups': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0, 'rrr_sum': 0.0}),
@@ -4222,11 +4222,15 @@ def update_statistics():
         'monthly': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0}),
         'combinations': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0}),
         'rolling': [],
-        'duration': {'all': [], 'win': [], 'loss': []}
+        'duration': {'all': [], 'win': [], 'loss': []},
+        'levels_entry': defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0}),
+        'levels_tp':    defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0}),
+        'levels_sl':    defaultdict(lambda: {'wins': 0, 'count': 0, 'r': 0.0}),
     }
-    
+
     heatmap_data = [[0.0 for _ in range(5)] for _ in range(24)]
     days_map = {"Pondělí":0, "Úterý":1, "Středa":2, "Čtvrtek":3, "Pátek":4}
+    hour_session_wr = defaultdict(lambda: defaultdict(lambda: {'wins': 0, 'count': 0}))
     
     cnt_win = 0
     cnt_loss = 0
@@ -4324,6 +4328,9 @@ def update_statistics():
         else: equity_curve.append(equity_curve[-1] + realized_r)
             
         if d_idx != -1 and h_idx != -1: heatmap_data[h_idx][d_idx] += realized_r
+        if h_idx != -1 and session:
+            hour_session_wr[h_idx][session]['count'] += 1
+            if is_win: hour_session_wr[h_idx][session]['wins'] += 1
 
         # Agregace
         stats['days'][raw_day]['count'] += 1
@@ -4360,7 +4367,6 @@ def update_statistics():
         
         # NOVÉ: Zpracování TAGŮ
         if tags_str:
-            # Rozdělení podle mezer nebo čárek
             tag_list = tags_str.replace(',', ' ').split()
             for tag in tag_list:
                 clean_tag = tag.strip()
@@ -4369,6 +4375,24 @@ def update_statistics():
                     stats['tags'][clean_tag]['r'] += realized_r
                     stats['tags'][clean_tag]['rrr_sum'] += rrr_val
                     if is_win: stats['tags'][clean_tag]['wins'] += 1
+
+        # Zpracování úrovní (entry/fibo, tp_level, sl_level)
+        def _parse_lvls(val):
+            if not val: return []
+            if isinstance(val, list): return [str(v).strip() for v in val if str(v).strip()]
+            return [v.strip() for v in str(val).replace(';', ',').split(',') if v.strip()]
+        for lv in _parse_lvls(t.get('fibo', '')):
+            stats['levels_entry'][lv]['count'] += 1
+            stats['levels_entry'][lv]['r'] += realized_r
+            if is_win: stats['levels_entry'][lv]['wins'] += 1
+        for lv in _parse_lvls(t.get('tp_level', '')):
+            stats['levels_tp'][lv]['count'] += 1
+            stats['levels_tp'][lv]['r'] += realized_r
+            if is_win: stats['levels_tp'][lv]['wins'] += 1
+        for lv in _parse_lvls(t.get('sl_level', '')):
+            stats['levels_sl'][lv]['count'] += 1
+            stats['levels_sl'][lv]['r'] += realized_r
+            if is_win: stats['levels_sl'][lv]['wins'] += 1
 
     # === VÝPOČTY METRIK ===
     winrate = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
@@ -4610,6 +4634,54 @@ def update_statistics():
             ])
         _stat_card(_col_r, "SMĚR OBCHODU", ["Směr", "WR%", "R celkem", "Počet"], _dir_rows)
 
+        # ENTRY ÚROVNĚ (fibo)
+        if stats['levels_entry']:
+            _lvl_e_rows = []
+            for lk in sorted(stats['levels_entry'].keys()):
+                v = stats['levels_entry'][lk]
+                if v['count'] == 0: continue
+                wr2 = v['wins'] / v['count'] * 100
+                _lvl_e_rows.append([
+                    (lk, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            if _lvl_e_rows:
+                _stat_card(_col_l, "ENTRY ÚROVNĚ", ["Úroveň", "WR%", "R celkem", "Počet"], _lvl_e_rows, accent='#0369a1')
+
+        # TP ÚROVNĚ
+        if stats['levels_tp']:
+            _lvl_tp_rows = []
+            for lk in sorted(stats['levels_tp'].keys()):
+                v = stats['levels_tp'][lk]
+                if v['count'] == 0: continue
+                wr2 = v['wins'] / v['count'] * 100
+                _lvl_tp_rows.append([
+                    (lk, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            if _lvl_tp_rows:
+                _stat_card(_col_r, "TP ÚROVNĚ", ["Úroveň", "WR%", "R celkem", "Počet"], _lvl_tp_rows, accent='#15803d')
+
+        # SL ÚROVNĚ
+        if stats['levels_sl']:
+            _lvl_sl_rows = []
+            for lk in sorted(stats['levels_sl'].keys()):
+                v = stats['levels_sl'][lk]
+                if v['count'] == 0: continue
+                wr2 = v['wins'] / v['count'] * 100
+                _lvl_sl_rows.append([
+                    (lk, DT_TEXT),
+                    (f"{wr2:.1f}%", _wr_fg(wr2)),
+                    (f"{v['r']:+.2f}", _r_fg(v['r'])),
+                    (str(v['count']), DT_SUBTEXT),
+                ])
+            if _lvl_sl_rows:
+                _stat_card(_col_r, "SL ÚROVNĚ", ["Úroveň", "WR%", "R celkem", "Počet"], _lvl_sl_rows, accent='#b91c1c')
+
         # MĚSÍČNÍ PŘEHLED (full width)
         if stats['monthly']:
             _mo_rows = []
@@ -4726,26 +4798,63 @@ def update_statistics():
 
     # Heatmap
     if stats['total'] > 0:
-        fig_hm = plt.Figure(figsize=(8, 4), dpi=100)
-        ax_hm = fig_hm.add_subplot(111)
+        fig_hm = plt.Figure(figsize=(14, 4), dpi=100)
+
+        # --- levý subplot: R ziskovost × hodina × den ---
+        ax_hm = fig_hm.add_subplot(121)
         flat_data = [item for sublist in heatmap_data for item in sublist]
         max_val = max(flat_data) if flat_data else 1
         min_val = min(flat_data) if flat_data else -1
-        limit = max(abs(max_val), abs(min_val))
-        if limit == 0: limit = 1
+        limit = max(abs(max_val), abs(min_val)) or 1
         im = ax_hm.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', interpolation='nearest', vmin=-limit, vmax=limit)
         ax_hm.set_xticks(range(5))
         ax_hm.set_xticklabels(['Po', 'Út', 'St', 'Čt', 'Pá'])
         ax_hm.set_yticks(range(0, 24, 2))
         ax_hm.set_yticklabels([f"{h:02d}:00" for h in range(0, 24, 2)])
-        ax_hm.set_title("HEATMAPA ZISKOVOSTI (Čas vs Den)", color=DT_TEXT, fontsize=10)
+        ax_hm.set_title("ZISKOVOST (R): Hodina × Den", color=DT_TEXT, fontsize=9)
         cbar = fig_hm.colorbar(im, ax=ax_hm, pad=0.02)
         cbar.ax.yaxis.set_tick_params(color=DT_TEXT)
         plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color=DT_TEXT)
-        fig_hm.patch.set_facecolor('#ffffff')
         ax_hm.set_facecolor('#f8fafc')
-        ax_hm.tick_params(colors=DT_TEXT)
+        ax_hm.tick_params(colors=DT_TEXT, labelsize=7)
         for spine in ax_hm.spines.values(): spine.set_color('#cbd5e1')
+
+        # --- pravý subplot: WR% × hodina × session ---
+        ax_hm2 = fig_hm.add_subplot(122)
+        _sessions_order = sorted(hour_session_wr[0].keys()) if hour_session_wr else ['OVERNIGHT', 'RTH']
+        _all_sessions = sorted({s for h in hour_session_wr for s in hour_session_wr[h]})
+        if not _all_sessions: _all_sessions = ['OVERNIGHT', 'RTH']
+        _hs_grid = []
+        for h in range(24):
+            row = []
+            for s in _all_sessions:
+                cell = hour_session_wr[h].get(s, {'wins': 0, 'count': 0})
+                row.append(cell['wins'] / cell['count'] * 100 if cell['count'] > 0 else float('nan'))
+            _hs_grid.append(row)
+        import numpy as np
+        _hs_arr = np.array(_hs_grid, dtype=float)
+        im2 = ax_hm2.imshow(_hs_arr, cmap='RdYlGn', aspect='auto', interpolation='nearest', vmin=0, vmax=100)
+        ax_hm2.set_xticks(range(len(_all_sessions)))
+        ax_hm2.set_xticklabels(_all_sessions, fontsize=8)
+        ax_hm2.set_yticks(range(0, 24, 2))
+        ax_hm2.set_yticklabels([f"{h:02d}:00" for h in range(0, 24, 2)])
+        ax_hm2.set_title("WINRATE %: Hodina × Session", color=DT_TEXT, fontsize=9)
+        # popisky hodnot v buňkách
+        for h in range(24):
+            for si, s in enumerate(_all_sessions):
+                cell = hour_session_wr[h].get(s, {'wins': 0, 'count': 0})
+                if cell['count'] > 0:
+                    ax_hm2.text(si, h, f"{cell['wins']}/{cell['count']}", ha='center', va='center',
+                                fontsize=6, color='black')
+        cbar2 = fig_hm.colorbar(im2, ax=ax_hm2, pad=0.02)
+        cbar2.ax.yaxis.set_tick_params(color=DT_TEXT)
+        plt.setp(plt.getp(cbar2.ax.axes, 'yticklabels'), color=DT_TEXT)
+        ax_hm2.set_facecolor('#f8fafc')
+        ax_hm2.tick_params(colors=DT_TEXT, labelsize=7)
+        for spine in ax_hm2.spines.values(): spine.set_color('#cbd5e1')
+
+        fig_hm.patch.set_facecolor('#ffffff')
+        fig_hm.tight_layout(pad=1.5)
         canvas_hm = FigureCanvasTkAgg(fig_hm, master=heatmap_graph_frame)
         canvas_hm.draw()
         canvas_hm.get_tk_widget().pack(fill='both', expand=True)
@@ -12322,11 +12431,18 @@ def show_main_screen(p_name):
 
     def load_from_json():
         import json as _j
+        _gs = load_global_settings()
+        _init_dir = _gs.get('json_last_folder', '')
+        if _init_dir and not os.path.isdir(_init_dir):
+            _init_dir = ''
         path = filedialog.askopenfilename(
             title="Načíst analýzu (JSON)",
-            filetypes=[("JSON soubory", "*.json"), ("Vše", "*.*")]
+            filetypes=[("JSON soubory", "*.json"), ("Vše", "*.*")],
+            initialdir=_init_dir or None
         )
         if not path: return
+        _gs['json_last_folder'] = os.path.dirname(path)
+        save_global_settings(_gs)
         try:
             with open(path, 'r', encoding='utf-8') as fh:
                 data = _j.load(fh)
