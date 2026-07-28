@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.182"
+VERSION = "1.5.183"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2060,8 +2060,9 @@ root = None
 save_btn = None     
 filter_col_var = None
 filter_val_var = None
-editing_trade_index = None 
+editing_trade_index = None
 best_performers_frame = None
+_api_last_screenshot_path = None   # screenshot vybraný přes API analýzu
 
 # Globální proměnná pro filtr statistik
 stats_symbol_var = None
@@ -6782,7 +6783,7 @@ def _save_trades_file(trades, reference_trade=None):
         w.writerows(trades)
 
 def pridat_obchod():
-    global editing_trade_index
+    global editing_trade_index, _api_last_screenshot_path
     if not DATA_FILE: messagebox.showerror("Chyba", "Není vybrán žádný projekt!"); return
 
     try:
@@ -6833,7 +6834,38 @@ def pridat_obchod():
             trades.append(d)
             _save_trades_file(trades, d)
             _dbg_log('TRADE', f"NOVÝ: {d.get('symbol')} {d.get('smer')} výsledek={d.get('vysledek')} zisk={d.get('zisk_mena')} projekt={os.path.basename(DATA_FILE)}")
-            messagebox.showinfo("OK", "Obchod uložen.")
+            # Auto-save API obchodu do složky (jen pokud byl analyzován přes API)
+            if _api_last_screenshot_path:
+                try:
+                    import json as _jj, shutil as _sh2, re as _re3
+                    _api_folder = load_global_settings().get('api_trades_folder', '').strip()
+                    if _api_folder and os.path.isdir(_api_folder):
+                        # Číslo = počet existujících podsložek + 1
+                        _existing = [x for x in os.listdir(_api_folder)
+                                     if os.path.isdir(os.path.join(_api_folder, x))
+                                     and _re3.match(r'^\d+', x)]
+                        _num = len(_existing) + 1
+                        _sym = d.get('symbol', 'TRADE')
+                        _date = (d.get('cas_otevreni', '') or '')[:10]
+                        _folder_name = f"{_num}-{_sym} {_date}".strip()
+                        _trade_dir = os.path.join(_api_folder, _folder_name)
+                        os.makedirs(_trade_dir, exist_ok=True)
+                        # Uložit JSON
+                        _json_path = os.path.join(_trade_dir, 'trade_analysis.json')
+                        with open(_json_path, 'w', encoding='utf-8') as _jf:
+                            _jj.dump(d, _jf, ensure_ascii=False, indent=2)
+                        # Kopírovat screenshot
+                        _sc_dst = os.path.join(_trade_dir, os.path.basename(_api_last_screenshot_path))
+                        _sh2.copy2(_api_last_screenshot_path, _sc_dst)
+                        messagebox.showinfo("OK", f"Obchod uložen.\nSložka: {_folder_name}")
+                    else:
+                        messagebox.showinfo("OK", "Obchod uložen.")
+                except Exception as _ex:
+                    messagebox.showinfo("OK", f"Obchod uložen (chyba auto-save složky: {_ex})")
+                finally:
+                    _api_last_screenshot_path = None
+            else:
+                messagebox.showinfo("OK", "Obchod uložen.")
             try: award_xp_for_trade(d, is_edit=False, parent_win=root)
             except Exception: pass
 
@@ -11781,6 +11813,20 @@ def open_settings_window(initial_tab=0):
     tk.Button(row_postrehy, text="📁", command=_browse_postrehy, font=('Segoe UI', 9),
               bg=DT_SURFACE, fg=DT_TEXT, relief='flat').pack(side='left')
     tk.Label(_cl_outer, text="Soubor s postřehy z Claude projektu — API ho přiloží jako kontext ke každé analýze.",
+             bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 12))
+
+    # Složka pro ukládání API obchodů
+    row_apifolder = tk.Frame(_cl_outer, bg=DT_BG); row_apifolder.pack(anchor='w', fill='x')
+    tk.Label(row_apifolder, text="Složka pro API obchody:", bg=DT_BG, fg=DT_TEXT,
+             font=('Segoe UI', 10), width=30, anchor='w').pack(side='left')
+    _apifolder_var = tk.StringVar(value=load_global_settings().get('api_trades_folder', ''))
+    tk.Entry(row_apifolder, textvariable=_apifolder_var, width=40, font=('Segoe UI', 9)).pack(side='left', padx=6)
+    def _browse_apifolder():
+        p = filedialog.askdirectory(title="Vyber složku pro ukládání API obchodů")
+        if p: _apifolder_var.set(p)
+    tk.Button(row_apifolder, text="📁", command=_browse_apifolder, font=('Segoe UI', 9),
+              bg=DT_SURFACE, fg=DT_TEXT, relief='flat').pack(side='left')
+    tk.Label(_cl_outer, text="Sem se budou ukládat obchody z API analýzy (JSON + screenshot). Povinné pro spuštění analýzy.",
              bg=DT_BG, fg=DT_SUBTEXT, font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 16))
 
     def _save_claude_settings():
@@ -11788,6 +11834,7 @@ def open_settings_window(initial_tab=0):
         gs['anthropic_api_key'] = _api_key_var.get().strip()
         gs['claude_model'] = _model_var.get()
         gs['postrehy_file'] = _postrehy_var.get().strip()
+        gs['api_trades_folder'] = _apifolder_var.get().strip()
         save_global_settings(gs)
         messagebox.showinfo("Uloženo", "Claude AI nastavení uloženo.", parent=sw)
 
@@ -12407,14 +12454,22 @@ def show_main_screen(p_name):
         update_calculated_fields(); calculate_auto_rrr(); calculate_auto_score()
 
     def show_claude_screenshot_dialog():
+        global _api_last_screenshot_path
         if not _claude_api_key():
             messagebox.showwarning("Claude AI", "API klíč není nastaven.\nPřidej ho v Nastavení → 🤖 Claude AI.")
+            return
+        _gs = load_global_settings()
+        if not _gs.get('api_trades_folder', '').strip():
+            messagebox.showerror("Claude AI — chybí nastavení",
+                "Nejprve v Nastavení → 🤖 Claude AI určete složku pro ukládání API obchodů.\n"
+                "Bez ní nelze analýzu spustit.")
             return
         path = filedialog.askopenfilename(
             title="Vyber screenshot obchodu",
             filetypes=[("Obrázky", "*.png *.jpg *.jpeg *.webp"), ("Vše", "*.*")]
         )
         if not path: return
+        _api_last_screenshot_path = path
 
         loading = tk.Toplevel(root); loading.title("Claude AI"); loading.geometry("300x70")
         loading.resizable(False, False); loading.grab_set()
@@ -12510,6 +12565,20 @@ def show_main_screen(p_name):
                 if ai_val:
                     result['ai_nazor'] = ai_val
                 screenshot_prefill(result)
+                # Přiřadit screenshot k obchodu
+                if _api_last_screenshot_path and IMAGES_DIR:
+                    try:
+                        import shutil as _sh
+                        os.makedirs(IMAGES_DIR, exist_ok=True)
+                        fname = os.path.basename(_api_last_screenshot_path)
+                        dst = os.path.join(IMAGES_DIR, fname)
+                        if not os.path.exists(dst):
+                            _sh.copy2(_api_last_screenshot_path, dst)
+                        existing = obrazky_list.get().strip(';')
+                        if fname not in existing.split(';'):
+                            obrazky_list.set((existing + ';' + fname).strip(';'))
+                    except Exception:
+                        pass
                 win.destroy()
                 filled = [k for k, v2 in result.items() if v2 is not None]
                 messagebox.showinfo("Claude AI", f"Vyplněno {len(filled)} polí.")
