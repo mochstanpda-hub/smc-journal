@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.179"
+VERSION = "1.5.180"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12077,17 +12077,35 @@ def _claude_analyze_async(image_path, callback):
                     sl    = float(str(data.get('stoploss', 0)).replace(',', '.'))
                     tp    = float(str(data.get('takeprofit', 0)).replace(',', '.'))
                     smer  = str(data.get('smer', '')).upper()
-                    if entry and sl and tp:
+                    if entry and sl and tp and abs(sl - entry) > 0 and abs(tp - entry) > 0:
                         long_ok  = tp > entry > sl
                         short_ok = sl > entry > tp
+                        # Krok 1: oprav zjevnou nekonzistenci (AI řekne LONG ale TP < entry, apod.)
                         if smer == 'LONG' and not long_ok:
                             data['stoploss'], data['takeprofit'] = data['takeprofit'], data['stoploss']
-                            if sl > entry:  # původní SL byl nad entry → SHORT logika → opravíme i směr
+                            sl, tp = tp, sl
+                            if tp > entry:
                                 data['smer'] = 'LONG'
+                            else:
+                                data['smer'] = 'SHORT'
                         elif smer == 'SHORT' and not short_ok:
                             data['stoploss'], data['takeprofit'] = data['takeprofit'], data['stoploss']
-                        elif not long_ok and not short_ok:
-                            pass  # nelze určit, necháme jak je
+                            sl, tp = tp, sl
+                            if sl > entry:
+                                data['smer'] = 'SHORT'
+                            else:
+                                data['smer'] = 'LONG'
+                        # Krok 2: RRR pojistka — pokud je RRR nesmyslně nízké a prohození ho opraví
+                        sl2  = float(str(data.get('stoploss', sl)).replace(',', '.'))
+                        tp2  = float(str(data.get('takeprofit', tp)).replace(',', '.'))
+                        rr_current = abs(tp2 - entry) / abs(sl2 - entry)
+                        rr_flipped = abs(sl2 - entry) / abs(tp2 - entry)
+                        if rr_current < 0.7 and rr_flipped > 1.0:
+                            data['stoploss'], data['takeprofit'] = data['takeprofit'], data['stoploss']
+                            if tp2 > entry:
+                                data['smer'] = 'SHORT'
+                            else:
+                                data['smer'] = 'LONG'
                 except Exception:
                     pass
                 callback(data, None)
