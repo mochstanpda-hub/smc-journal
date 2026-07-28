@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.185"
+VERSION = "1.5.186"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12315,7 +12315,20 @@ class _SetupPicker:
         return self._display_var.get()
 
     def set(self, val):
-        self._selected = [p.strip() for p in str(val).split(',') if p.strip()] if val else []
+        if not val:
+            self._selected = []
+        elif isinstance(val, list):
+            # Správné JSON pole ["ON POC", "RTH POC"]
+            self._selected = [str(v).strip().strip("'\"") for v in val if str(v).strip()]
+        else:
+            v = str(val).strip()
+            if v.startswith('[') and v.endswith(']'):
+                # Python list repr: "['ON POC', 'RTH POC', 'VWAP']"
+                inner = v[1:-1]
+                self._selected = [x.strip().strip("'\"") for x in inner.split(',') if x.strip()]
+            else:
+                # Čárkou nebo lomítkem oddělený string: "ON POC, RTH POC" nebo "ON POC/RTH POC"
+                self._selected = [x.strip().strip("'\"") for x in v.replace('/', ',').split(',') if x.strip()]
         self._display_var.set(', '.join(self._selected))
 
     def __setitem__(self, key, value):
