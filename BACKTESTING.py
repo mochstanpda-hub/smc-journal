@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.174"
+VERSION = "1.5.175"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12008,77 +12008,43 @@ def _claude_analyze_async(image_path, callback):
         level_opts  = ', '.join(LEVEL_OPTIONS)
         entry_opts  = ', '.join(FIBO_OPTIONS)
 
-        prompt = (
-            "Jsi zkušený IBT trader (Intraday Initial Balance Trading) specializovaný na Market Profile, "
-            "Volume Profile a Orderflow. Analyzuješ screenshot obchodu z TradingView.\n"
-            "Vrať POUZE validní JSON, žádný jiný text.\n"
-            + postrehy_ctx +
-            "\n## KROK 1 — Ceny na pravé cenové ose\n"
-            "Na pravé vertikální ose jsou 3 ceny se zvýrazněným pozadím:\n"
-            "- MODRÁ = Entry (vstupni_hodnota)\n"
-            "- ČERVENÁ = Stop Loss\n"
-            "- ZELENÁ = Take Profit\n"
-            "Přečti přesné číselné hodnoty.\n\n"
-            "## KROK 2 — Směr obchodu\n"
-            "Stop Loss > Entry > Take Profit → SHORT\n"
-            "Take Profit > Entry > Stop Loss → LONG\n\n"
-            "## KROK 3 — Časy na dolní ose (X osa)\n"
-            "Zvýrazněné časové labely na ose X označují otevření a uzavření.\n"
-            "Datum jako 'Mon 27 Jul 26' převeď na '2026-07-27'. Formát: YYYY-MM-DD HH:MM\n\n"
-            "## KROK 4 — Záhlaví grafu (levý horní roh)\n"
-            "Symbol (XAUUSD, US100, NQ, EURUSD...) a timeframe (3m, 5m, 1h...).\n\n"
-            "## KROK 5 — Pojmenované horizontální čáry\n"
-            "Viditelné labely na okrajích: ON VAH, RTH VAL, VWAP, MO VWAP, PDH, DAY open...\n"
-            "- Která čára leží nejblíže Take Profit? → tp_level (max 3, pole)\n"
-            "- Která čára leží nejblíže Stop Loss? → sl_level (max 3, pole)\n"
-            "- U které čáry leží Entry? → fibo (max 3, pole)\n"
-            "TP/SL těsně pod/nad VWAP → použij 'pod VWAP' / 'nad VWAP'\n"
-            "U Monthly VWAP → 'MO VWAP', 'pod MO VWAP', 'nad MO VWAP'\n"
-            f"Platné hodnoty pro fibo: {entry_opts}\n"
-            f"Platné hodnoty pro tp_level/sl_level: {level_opts}\n\n"
-            "## KROK 6 — Session\n"
-            "Pravý dolní roh: 'RTH' → RTH, jinak → OVERNIGHT\n\n"
-            "## KROK 7 — AI názor (pole ai_nazor)\n"
-            "Napiš 2-4 věty jako zkušený IBT trader:\n"
-            "- Je entry dobře umístěna vůči kontextu (VWAP, session úrovně, profil)?\n"
-            "- Je RRR přijatelné?\n"
-            "- Co by mohlo setup invalidovat?\n"
-            "- Celkový verdikt: DOBRÝ SETUP / PRŮMĚRNÝ SETUP / ŠPATNÝ SETUP\n\n"
-            "Vrať POUZE tento JSON (null pokud hodnotu nelze určit):\n"
-            "{\n"
-            '  "symbol": "ticker nebo null",\n'
-            '  "smer": "LONG nebo SHORT nebo null",\n'
-            '  "vstupni_hodnota": číslo nebo null,\n'
-            '  "stoploss": číslo nebo null,\n'
-            '  "takeprofit": číslo nebo null,\n'
-            '  "cas_otevreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            '  "cas_zavreni": "YYYY-MM-DD HH:MM nebo null",\n'
-            f'  "timeframe_vstup": z [{timeframes}] nebo null,\n'
-            f'  "timeframe_graf": z [{timeframes}] nebo null,\n'
-            '  "session": "RTH" nebo "OVERNIGHT" nebo null,\n'
-            '  "fibo": ["uroven"] nebo ["u1","u2","u3"] nebo null,\n'
-            '  "tp_level": ["uroven"] nebo null,\n'
-            '  "sl_level": ["uroven"] nebo null,\n'
-            '  "duvod": "stručný popis setupu nebo null",\n'
-            '  "poznamka": "RRR a další poznámky nebo null",\n'
-            '  "ai_nazor": "2-4 věty + verdikt nebo null"\n'
-            "}"
-        )
         system_prompt = (
             "Jsi expert na čtení TradingView grafů a IBT trading (Market Profile, Volume Profile, Orderflow). "
-            "Tvým úkolem je přesně přečíst čísla z grafu — zejména ceny na PRAVÉ CENOVÉ OSE "
-            "(barevné labely: modrá=entry, červená=SL, zelená=TP) a timeframe ze záhlaví grafu (levý horní roh). "
-            "IGNORUJ ceny v levém horním rohu (bid/ask kurzovní ceny — ty nejsou parametry obchodu). "
-            "Vrátíš vždy POUZE validní JSON bez jakéhokoliv dalšího textu."
+            "Výstupem je VŽDY pouze čistý JSON objekt — žádný text před ani za ním, žádný markdown, žádné vysvětlování.\n\n"
+            "Pravidla čtení grafu:\n"
+            "CENY: Na pravé vertikální ose jsou 3 ceny se zvýrazněným pozadím: MODRÁ=Entry, ČERVENÁ=Stop Loss, ZELENÁ=Take Profit. "
+            "Čti přesná čísla těchto labelů. IGNORUJ ceny v levém horním rohu — to jsou aktuální bid/ask, ne parametry obchodu.\n"
+            "SMĚR: SL > Entry > TP → SHORT. TP > Entry > SL → LONG.\n"
+            "TIMEFRAME: čti ze záhlaví grafu (levý horní roh, číslo+písmeno: 3m, 5m, 1h...).\n"
+            "ČASY: zvýrazněné labely na dolní ose X. Formát: YYYY-MM-DD HH:MM.\n"
+            "SESSION: pravý dolní roh — 'RTH' → RTH, jinak → OVERNIGHT.\n"
+            "ÚROVNĚ: pojmenované horizontální čáry na okrajích grafu (ON VAH, RTH VAL, VWAP, MO VWAP, PDH...). "
+            f"Platné hodnoty fibo (entry): {entry_opts}. "
+            f"Platné hodnoty tp_level/sl_level: {level_opts}. "
+            "Pokud TP/SL těsně pod/nad VWAP křivkou → 'pod VWAP'/'nad VWAP'.\n"
+            "AI NÁZOR: 2-4 věty hodnocení setupu z pohledu IBT tradera + verdikt DOBRÝ/PRŮMĚRNÝ/ŠPATNÝ SETUP.\n"
+            + postrehy_ctx
         )
+
+        user_text = (
+            "Analyzuj tento TradingView screenshot a vrať JSON s těmito poli "
+            "(null pokud nelze určit):\n"
+            '{"symbol","smer","vstupni_hodnota","stoploss","takeprofit",'
+            '"cas_otevreni","cas_zavreni","timeframe_vstup","timeframe_graf","session",'
+            '"fibo","tp_level","sl_level","duvod","poznamka","ai_nazor"}'
+        )
+
         body = _j.dumps({
             "model": _claude_model(),
             "max_tokens": 1024,
             "system": system_prompt,
-            "messages": [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": mt, "data": img_b64}},
-                {"type": "text", "text": prompt}
-            ]}]
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mt, "data": img_b64}},
+                    {"type": "text", "text": user_text}
+                ]},
+                {"role": "assistant", "content": "{"}
+            ]
         }).encode('utf-8')
         req = _req.Request(CLAUDE_API_URL, data=body, headers={
             "x-api-key": key,
@@ -12088,8 +12054,10 @@ def _claude_analyze_async(image_path, callback):
         try:
             with _req.urlopen(req, timeout=30) as resp:
                 text = _j.loads(resp.read())['content'][0]['text']
+            # Prefill přidal '{' — model vrátil zbytek; spojíme a extrahujeme JSON
+            full = '{' + text if not text.lstrip().startswith('{') else text
             import re as _re
-            m = _re.search(r'\{.*\}', text, _re.DOTALL)
+            m = _re.search(r'\{.*\}', full, _re.DOTALL)
             if m:
                 callback(_j.loads(m.group()), None)
             else:
