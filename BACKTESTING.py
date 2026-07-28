@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.175"
+VERSION = "1.5.176"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12027,11 +12027,13 @@ def _claude_analyze_async(image_path, callback):
         )
 
         user_text = (
-            "Analyzuj tento TradingView screenshot a vrať JSON s těmito poli "
-            "(null pokud nelze určit):\n"
-            '{"symbol","smer","vstupni_hodnota","stoploss","takeprofit",'
-            '"cas_otevreni","cas_zavreni","timeframe_vstup","timeframe_graf","session",'
-            '"fibo","tp_level","sl_level","duvod","poznamka","ai_nazor"}'
+            "Analyzuj tento TradingView screenshot.\n"
+            "Výstup musí být VÝHRADNĚ validní JSON objekt — začínající { a končící }. "
+            "Žádný text před ani za JSON. Žádný markdown. Žádné vysvětlování.\n"
+            "Pole: symbol, smer, vstupni_hodnota, stoploss, takeprofit, "
+            "cas_otevreni, cas_zavreni, timeframe_vstup, timeframe_graf, session, "
+            "fibo, tp_level, sl_level, duvod, poznamka, ai_nazor. "
+            "Hodnotu null použij pokud nelze určit."
         )
 
         body = _j.dumps({
@@ -12042,8 +12044,7 @@ def _claude_analyze_async(image_path, callback):
                 {"role": "user", "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mt, "data": img_b64}},
                     {"type": "text", "text": user_text}
-                ]},
-                {"role": "assistant", "content": "{"}
+                ]}
             ]
         }).encode('utf-8')
         req = _req.Request(CLAUDE_API_URL, data=body, headers={
@@ -12054,10 +12055,8 @@ def _claude_analyze_async(image_path, callback):
         try:
             with _req.urlopen(req, timeout=30) as resp:
                 text = _j.loads(resp.read())['content'][0]['text']
-            # Prefill přidal '{' — model vrátil zbytek; spojíme a extrahujeme JSON
-            full = '{' + text if not text.lstrip().startswith('{') else text
             import re as _re
-            m = _re.search(r'\{.*\}', full, _re.DOTALL)
+            m = _re.search(r'\{.*\}', text, _re.DOTALL)
             if m:
                 callback(_j.loads(m.group()), None)
             else:
