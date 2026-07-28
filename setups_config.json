@@ -16,5 +16,14 @@
   "VWAP -1σ",
   "VWAP +2σ",
   "VWAP -2σ",
-  "DAY open"
+  "pod VWAP",
+  "nad VWAP",
+  "pod VWAP +1σ",
+  "nad VWAP +1σ",
+  "pod VWAP -1σ",
+  "nad VWAP -1σ",
+  "MO VWAP",
+  "pod MO VWAP",
+  "nad MO VWAP",
+  "day open"
 ]
