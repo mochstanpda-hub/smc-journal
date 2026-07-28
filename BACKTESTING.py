@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.178"
+VERSION = "1.5.179"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -12015,14 +12015,17 @@ def _claude_analyze_async(image_path, callback):
             "Na pravé vertikální ose jsou 3 labely se zvýrazněným pozadím (modrá/červená/zelená). "
             "IGNORUJ ceny v levém horním rohu (bid/ask) — ty nejsou parametry obchodu.\n"
             "Přečti všechny 3 číselné hodnoty z pravé osy.\n\n"
-            "## SMĚR A PŘIŘAZENÍ TP/SL — KLÍČOVÉ PRAVIDLO\n"
-            "1. Entry = label se MODROU/AZUROVOU barvou pozadí na pravé ose.\n"
-            "2. Urči směr z VIZUÁLNÍHO TVARU trade boxu/šipky na grafu:\n"
-            "   - Trade box nebo šipka míří NAHORU od entry → LONG\n"
-            "   - Trade box nebo šipka míří DOLŮ od entry → SHORT\n"
-            "3. Přiřaď TP a SL podle směru (NIKOLI podle barvy labelů — barvy se liší dle nastavení):\n"
-            "   - LONG: TP = VYŠŠÍ cena než entry, SL = NIŽŠÍ cena než entry\n"
-            "   - SHORT: TP = NIŽŠÍ cena než entry, SL = VYŠŠÍ cena než entry\n\n"
+            "## SMĚR A PŘIŘAZENÍ TP/SL — NEJDŮLEŽITĚJŠÍ PRAVIDLO\n"
+            "NIKDY nepoužívej barvy labelů na pravé ose k určení TP/SL — barvy se liší dle nastavení grafu a jsou nespolehlivé.\n"
+            "Postupuj takto:\n"
+            "1. Entry = label se MODROU/AZUROVOU barvou na pravé ose.\n"
+            "2. Urči směr z PRŮHLEDNÉ BAREVNÉ ZÓNY na grafu (velká plocha):\n"
+            "   - Průhledná zóna je NAD entry (teal/azurová plocha nahoře) → LONG\n"
+            "   - Průhledná zóna je POD entry (červenohnědá plocha dole) → SHORT\n"
+            "3. Přiřaď ceny VÝHRADNĚ podle směru:\n"
+            "   - LONG: vyšší cena = TP, nižší cena = SL\n"
+            "   - SHORT: nižší cena = TP, vyšší cena = SL\n"
+            "4. Zkontroluj konzistenci: LONG → TP > entry > SL. SHORT → SL > entry > TP.\n\n"
             "## OSTATNÍ POLE\n"
             "TIMEFRAME: záhlaví grafu vlevo nahoře (číslo+písmeno: 3m, 5m, 1h...).\n"
             "ČASY: zvýrazněné labely na dolní ose X. Formát: YYYY-MM-DD HH:MM.\n"
@@ -12067,7 +12070,27 @@ def _claude_analyze_async(image_path, callback):
             import re as _re
             m = _re.search(r'\{.*\}', text, _re.DOTALL)
             if m:
-                callback(_j.loads(m.group()), None)
+                data = _j.loads(m.group())
+                # Pojistka: zkontroluj konzistenci TP/SL s entry a směrem
+                try:
+                    entry = float(str(data.get('vstupni_hodnota', 0)).replace(',', '.'))
+                    sl    = float(str(data.get('stoploss', 0)).replace(',', '.'))
+                    tp    = float(str(data.get('takeprofit', 0)).replace(',', '.'))
+                    smer  = str(data.get('smer', '')).upper()
+                    if entry and sl and tp:
+                        long_ok  = tp > entry > sl
+                        short_ok = sl > entry > tp
+                        if smer == 'LONG' and not long_ok:
+                            data['stoploss'], data['takeprofit'] = data['takeprofit'], data['stoploss']
+                            if sl > entry:  # původní SL byl nad entry → SHORT logika → opravíme i směr
+                                data['smer'] = 'LONG'
+                        elif smer == 'SHORT' and not short_ok:
+                            data['stoploss'], data['takeprofit'] = data['takeprofit'], data['stoploss']
+                        elif not long_ok and not short_ok:
+                            pass  # nelze určit, necháme jak je
+                except Exception:
+                    pass
+                callback(data, None)
             else:
                 callback(None, f"Nepodařilo se parsovat odpověď:\n{text[:400]}")
         except _req.HTTPError as e:
