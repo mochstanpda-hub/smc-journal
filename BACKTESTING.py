@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.190"
+VERSION = "1.5.191"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -4951,8 +4951,12 @@ def update_calculated_fields():
                 delka_obchodu_entry.config(state='normal'); delka_obchodu_entry.delete(0, tk.END); delka_obchodu_entry.insert(0, duration_str); delka_obchodu_entry.config(state='readonly')
         except: pass
     try:
-        sym = symbol_combo.get().upper(); v = float(vstupni_hodnota_entry.get().replace(',','.')); sl = float(stoploss_entry.get().replace(',','.')); tp = float(takeprofit_entry.get().replace(',','.')); risk_dist = abs(v - sl); reward_dist = abs(tp - v); multiplier = 100 if ("JPY" in sym) else 10000 
-        if "XAU" in sym or "US30" in sym or "DAX" in sym: multiplier = 10
+        sym = symbol_combo.get().upper(); v = float(vstupni_hodnota_entry.get().replace(',','.')); sl = float(stoploss_entry.get().replace(',','.')); tp = float(takeprofit_entry.get().replace(',','.')); risk_dist = abs(v - sl); reward_dist = abs(tp - v)
+        _IDX = ("US100","NAS100","US30","US500","SP500","UK100","GER40","DAX","DE40","DE30","JP225","AUS200","NQ","ES","YM")
+        if any(s in sym for s in _IDX): multiplier = 1
+        elif "XAU" in sym or "XAG" in sym: multiplier = 10
+        elif "JPY" in sym: multiplier = 100
+        else: multiplier = 10000
         pips = round(risk_dist * multiplier, 1); pips_entry.config(state='normal'); pips_entry.delete(0, tk.END); pips_entry.insert(0, str(pips)); pips_entry.config(state='readonly')
         if risk_dist > 0: rrr = reward_dist / risk_dist; rrr_entry.delete(0, tk.END); rrr_entry.insert(0, f"{rrr:.2f}")
     except: pass
@@ -4967,10 +4971,11 @@ def calculate_auto_rrr(event=None):
         if risk <= 0: return
         rrr = reward / risk
         rrr_entry.delete(0, tk.END); rrr_entry.insert(0, f"{rrr:.2f}")
-        sym = symbol_combo.get() if symbol_combo else ''
-        if sym in ('XAUUSD', 'XAGUSD'): mult = 10
-        elif sym in ('NAS100', 'US30', 'SP500', 'GER40', 'UK100'): mult = 1
-        elif 'JPY' in sym: mult = 100
+        sym = (symbol_combo.get() if symbol_combo else '').upper()
+        _IDX = ("US100","NAS100","US30","US500","SP500","UK100","GER40","DAX","DE40","DE30","JP225","AUS200","NQ","ES","YM")
+        if any(s in sym for s in _IDX): mult = 1
+        elif "XAU" in sym or "XAG" in sym: mult = 10
+        elif "JPY" in sym: mult = 100
         else: mult = 10000
         pips_entry.config(state='normal')
         pips_entry.delete(0, tk.END); pips_entry.insert(0, f"{risk * mult:.1f}")
