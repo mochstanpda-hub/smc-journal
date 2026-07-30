@@ -33,7 +33,7 @@ Hledej zvýrazněné časové labely (barevný box na časové ose) — označuj
 
 ### KROK 5 — Pojmenované horizontální čáry na grafu
 Viditelné labely na levém nebo pravém okraji grafu: ON VAH, ON VAL, ON POC, ON High, ON Low,
-RTH High, RTH VAH, RTH POC, RTH VAL, RTH Low, PDH, PDL, VWAP, DAY open, atd.
+RTH High, RTH VAH, RTH POC, RTH VAL, RTH Low, PDH, PDL, Mon High, VWAP, day open, atd.
 
 Urči:
 - Která čára je **nejblíže nebo na ní leží Take Profit**? → `tp_level`
@@ -70,21 +70,26 @@ OVERNIGHT, RTH
 ```
 ON VAH, ON VAL, ON POC, ON High, ON Low,
 RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low,
-PDH, PDL,
+PDH, PDL, Mon High,
 VWAP, VWAP +1σ, VWAP -1σ, VWAP +2σ, VWAP -2σ,
-DAY open
+pod VWAP, nad VWAP,
+pod VWAP +1σ, nad VWAP +1σ,
+pod VWAP -1σ, nad VWAP -1σ,
+MO VWAP, pod MO VWAP, nad MO VWAP,
+day open
 ```
 
 ### `tp_level` a `sl_level` — úrovně kde leží TP/SL (max 3 hodnoty jako pole)
 ```
 ON VAH, ON VAL, ON POC, ON High, ON Low,
 RTH VAH, RTH VAL, RTH POC, RTH High, RTH Low,
-PDH, PDL,
+PDH, PDL, Mon High,
 VWAP, VWAP +1σ, VWAP -1σ, VWAP +2σ, VWAP -2σ,
 pod VWAP, nad VWAP,
 pod VWAP +1σ, nad VWAP +1σ,
 pod VWAP -1σ, nad VWAP -1σ,
-DAY open
+MO VWAP, pod MO VWAP, nad MO VWAP,
+day open
 ```
 
 ---
