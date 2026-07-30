@@ -15,8 +15,41 @@ import zipfile
 import random
 import math
 try:
-    from replay_tab import setup_replay_tab as _setup_replay_tab
-    _HAS_REPLAY = True
+    import importlib.util as _ilu
+    _rp_candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'replay_tab.py'),
+    ] if '__file__' in dir() else []
+    _rp_candidates += [
+        os.path.join(os.path.dirname(sys.executable), 'replay_tab.py'),
+        os.path.join(os.getcwd(), 'replay_tab.py'),
+    ]
+    _rp = next((p for p in _rp_candidates if os.path.exists(p)), None)
+    if not _rp and _rp_candidates:
+        # Chybí → stáhni z GitHubu do složky programu
+        try:
+            import urllib.request as _ur
+            _req = _ur.Request(
+                "https://raw.githubusercontent.com/mochstanpda-hub/"
+                "smc-journal/main/replay_tab.py",
+                headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+            with _ur.urlopen(_req, timeout=20) as _r:
+                _txt = _r.read().decode('utf-8')
+            compile(_txt, 'replay_tab.py', 'exec')   # ověř, že není poškozený
+            if len(_txt) > 5000:
+                _dst = _rp_candidates[0]
+                with open(_dst, 'w', encoding='utf-8') as _f:
+                    _f.write(_txt)
+                _rp = _dst
+        except Exception:
+            pass
+    if _rp:
+        _spec = _ilu.spec_from_file_location('replay_tab', _rp)
+        _rmod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_rmod)
+        _setup_replay_tab = _rmod.setup_replay_tab
+        _HAS_REPLAY = True
+    else:
+        _HAS_REPLAY = False
 except Exception:
     _HAS_REPLAY = False
 
@@ -65,7 +98,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.192"
+VERSION = "1.5.197"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -126,6 +159,37 @@ CHANGELOG = """\
 """
 
 UPDATE_URL = "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/BACKTESTING.py"
+
+# Doplňkové moduly, které se stahují spolu s hlavním souborem
+COMPANION_FILES = {
+    'replay_tab.py': "https://raw.githubusercontent.com/mochstanpda-hub/smc-journal/main/replay_tab.py",
+}
+
+
+def _update_companion_files(app_dir):
+    """Stáhne/aktualizuje doplňkové moduly. Vrací seznam aktualizovaných."""
+    done = []
+    for fname, url in COMPANION_FILES.items():
+        try:
+            req = urllib.request.Request(
+                url, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                txt = r.read().decode('utf-8')
+            if len(txt) < 5000:
+                continue
+            compile(txt, fname, 'exec')       # poškozený soubor nezapisuj
+            dst = os.path.join(app_dir, fname)
+            if os.path.exists(dst):
+                with open(dst, 'r', encoding='utf-8') as f:
+                    if f.read() == txt:
+                        continue              # beze změny
+                shutil.copy2(dst, dst + '.backup')
+            with open(dst, 'w', encoding='utf-8') as f:
+                f.write(txt)
+            done.append(fname)
+        except Exception:
+            continue
+    return done
 
 def _show_update_dialog(connected, remote_ver=None, error_msg=None, on_update=None,
                         changelog_entries=None):
@@ -401,7 +465,9 @@ def check_for_updates(silent=False, startup=False):
                 with open(tmp_path, 'w', encoding='utf-8') as f: f.write(new_content)
                 if os.path.exists(py_path): os.remove(py_path)
                 os.rename(tmp_path, py_path)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu.")
+                _extra = _update_companion_files(os.path.dirname(sys.executable))
+                _txt_extra = ("\nAktualizované moduly: " + ", ".join(_extra)) if _extra else ""
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.{_txt_extra}\nSpusť program znovu.")
             else:
                 req2 = urllib.request.Request(UPDATE_URL, headers={'User-Agent': 'SMCJournal-Updater/1.0'})
                 with urllib.request.urlopen(req2, timeout=30) as r:
@@ -418,7 +484,9 @@ def check_for_updates(silent=False, startup=False):
                 current_path = os.path.abspath(__file__)
                 shutil.copy2(current_path, current_path + f'.backup_{VERSION}')
                 with open(current_path, 'w', encoding='utf-8') as f: f.write(new_content)
-                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.\nSpusť program znovu.")
+                _extra = _update_companion_files(os.path.dirname(current_path))
+                _txt_extra = ("\nAktualizované moduly: " + ", ".join(_extra)) if _extra else ""
+                messagebox.showinfo("✅ Hotovo", f"Aktualizováno na verzi {remote_ver}.{_txt_extra}\nSpusť program znovu.")
             try: root.destroy()
             except: pass
             sys.exit(0)
@@ -13265,6 +13333,7 @@ def show_main_screen(p_name):
         'yt':          (tab_yt,      '  📥 YT DOWNLOADER  '),
         'ctrader':     (tab_ct,      '  📡 cTRADER  '),
         'tradingview': (tab_tv,      '  TRADINGVIEW GRAF  '),
+        'replay':      (tab_replay,  '  🔁 REPLAY  '),
     }
     apply_tab_order(nb, _main_tab_frames)
 
