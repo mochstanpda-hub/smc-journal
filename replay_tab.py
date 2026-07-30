@@ -5,7 +5,7 @@ Více XLSX souborů se sčítá do jednoho konzistentního přehledu.
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import os, json, math, uuid
+import os, json, math, uuid, shutil
 from datetime import datetime
 
 # ── Optional deps ─────────────────────────────────────────────────────────────
@@ -22,6 +22,8 @@ try:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     import matplotlib.patches as mpatches
     import matplotlib.ticker as mticker
+    import matplotlib.gridspec as mgridspec
+    from matplotlib.lines import Line2D
     _HAS_MPL = True
 except ImportError:
     _HAS_MPL = False
@@ -49,6 +51,17 @@ FNS  = ('Segoe UI', 9)
 FNXL = ('Segoe UI', 18, 'bold')
 FNLG = ('Segoe UI', 12, 'bold')
 
+# Stránky analýzy
+PAGES = [
+    ('overview', '  Přehled  '),
+    ('equity',   '  Equity & Drawdown  '),
+    ('trades',   '  Obchody  '),
+    ('dist',     '  Rozdělení  '),
+    ('time',     '  Čas  '),
+    ('stats',    '  Statistiky  '),
+]
+WDAYS = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne']
+
 # ── Global state ──────────────────────────────────────────────────────────────
 _APP_DIR = None
 
@@ -56,6 +69,32 @@ _APP_DIR = None
 def _data_path():
     d = _APP_DIR or os.getcwd()
     return os.path.join(d, 'replay_data.json')
+
+
+def _archive_dir():
+    """Složka pro archivaci nahraných XLSX (uvnitř složky programu)."""
+    d = os.path.join(_APP_DIR or os.getcwd(), 'replay_soubory')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _archive_xlsx(src, symbol):
+    """Zkopíruje XLSX do archivu. Vrací cestu ke kopii, nebo None."""
+    try:
+        base = os.path.basename(src)
+        stem, ext = os.path.splitext(base)
+        stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        name  = f'{stamp}_{symbol}_{stem}{ext}'
+        # Windows: ošetři nepovolené znaky
+        for ch in '<>:"/\\|?*':
+            name = name.replace(ch, '-')
+        dst = os.path.join(_archive_dir(), name)
+        if os.path.abspath(src) == os.path.abspath(dst):
+            return dst
+        shutil.copy2(src, dst)
+        return dst
+    except Exception:
+        return None
 
 
 def _load():
@@ -205,6 +244,62 @@ def _compute(trades):
 
     pcts = [t.get('pnl_pct', 0) for t in trades]
 
+    # Série drawdownu (underwater)
+    dd_series = []
+    _pk = 0.0
+    for v in equity:
+        _pk = max(_pk, v)
+        dd_series.append(v - _pk)
+
+    # Nejdelší série výher / proher
+    cur_w = cur_l = max_cw = max_cl = 0
+    for p in pnls:
+        if p > 0:
+            cur_w += 1; cur_l = 0
+        elif p < 0:
+            cur_l += 1; cur_w = 0
+        else:
+            cur_w = cur_l = 0
+        max_cw = max(max_cw, cur_w)
+        max_cl = max(max_cl, cur_l)
+
+    # Long / Short rozpad
+    def _side(ts):
+        if not ts:
+            return {'n': 0, 'pnl': 0.0, 'wr': 0.0, 'avg': 0.0}
+        ps = [t['pnl'] for t in ts]
+        return {'n': len(ps), 'pnl': sum(ps),
+                'wr': len([p for p in ps if p > 0]) / len(ps) * 100,
+                'avg': sum(ps) / len(ps)}
+    st_long  = _side([t for t in trades if t.get('type') == 'long'])
+    st_short = _side([t for t in trades if t.get('type') == 'short'])
+
+    # Sortino (downside deviation)
+    downside = [p for p in pnls if p < 0]
+    if downside and total > 1:
+        dstd = math.sqrt(sum(p * p for p in downside) / total)
+        sortino = (tot_pnl / total) / dstd * math.sqrt(total) if dstd > 0 else 0.0
+    else:
+        sortino = 0.0
+
+    recovery = (tot_pnl / max_dd) if max_dd > 0 else (float('inf') if tot_pnl > 0 else 0.0)
+
+    # Časové agregace podle času výstupu
+    by_hour, by_wday, by_month = {}, {}, {}
+    for t in trades:
+        try:
+            d = datetime.strptime((t.get('exit_time') or '')[:16], '%Y-%m-%d %H:%M')
+        except Exception:
+            continue
+        by_hour.setdefault(d.hour, []).append(t['pnl'])
+        by_wday.setdefault(d.weekday(), []).append(t['pnl'])
+        by_month.setdefault(d.strftime('%Y-%m-%d'), []).append(t['pnl'])
+
+    # Rozpad podle důvodu výstupu
+    by_signal = {}
+    for t in trades:
+        by_signal.setdefault((t.get('signal') or '—').strip() or '—', []).append(t['pnl'])
+
     return {
         'total': total,
         'tot_pnl': tot_pnl,
@@ -222,10 +317,27 @@ def _compute(trades):
         'largest_l': min(pnls),
         'avg_bars': sum(t.get('bars', 0) for t in trades) / total,
         'max_dd': max_dd,
+        'max_dd_pct': (max_dd / max(equity) * 100) if max(equity) > 0 else 0.0,
         'sharpe': sharpe,
+        'sortino': sortino,
+        'recovery': recovery,
         'equity': equity,
+        'dd_series': dd_series,
         'pnls': pnls,
         'pcts': pcts,
+        'max_cw': max_cw,
+        'max_cl': max_cl,
+        'long': st_long,
+        'short': st_short,
+        'by_hour': by_hour,
+        'by_wday': by_wday,
+        'by_month': by_month,
+        'by_signal': by_signal,
+        'mfe': [t.get('fav_excursion', 0) for t in trades],
+        'mae': [t.get('adv_excursion', 0) for t in trades],
+        'bars_list': [t.get('bars', 0) for t in trades],
+        'ratio_wl': (gross_p / len(winners)) / (gross_l / len(losers))
+                    if winners and losers else 0.0,
     }
 
 
@@ -236,15 +348,32 @@ class ReplayUI:
         self._data    = _load()
         self._fig     = None
         self._canvas  = None
-        self._sv      = {}   # session enable BooleanVars  {sid: BooleanVar}
-        self._kpis    = {}   # kpi label StringVars
-        self._build(parent)
-        self._refresh()
+        self._sv      = {}
+        self._kpis    = {}
+        try:
+            self._build(parent)
+        except Exception as _e:
+            import traceback as _tb
+            tk.Label(parent,
+                     text=f'❌ _build() selhalo:\n{_e}\n\n{_tb.format_exc()}',
+                     bg='#0f172a', fg='#ef4444', font=('Segoe UI', 9),
+                     justify='left', wraplength=900).pack(expand=True, padx=20)
+            return
+        try:
+            self._refresh()
+        except Exception as _e:
+            import traceback as _tb
+            tk.Label(parent,
+                     text=f'❌ _refresh() selhalo:\n{_e}\n\n{_tb.format_exc()}',
+                     bg='#0f172a', fg='#ef4444', font=('Segoe UI', 9),
+                     justify='left', wraplength=900).pack(expand=True, padx=20)
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
-    def _build(self, parent):
-        parent.configure(bg=BG)
+    def _build(self, outer):
+        # outer může být ttk.Frame (nezná -bg) → vlastní tk kontejner
+        parent = tk.Frame(outer, bg=BG)
+        parent.pack(fill='both', expand=True)
 
         # ── Toolbar ──────────────────────────────────────────────────────────
         tb = tk.Frame(parent, bg=SURF2, height=44)
@@ -281,6 +410,10 @@ class ReplayUI:
         hdr.pack_propagate(False)
         tk.Label(hdr, text='Relace', bg=SURF2, fg=SUB, font=FNS
                  ).pack(side='left', padx=12, pady=8)
+        tk.Button(hdr, text='📁', bg=SURF2, fg=SUB, relief='flat', bd=0,
+                  font=FNS, cursor='hand2', activebackground=SURF,
+                  activeforeground=TEXT, command=self._open_archive
+                  ).pack(side='right', padx=8)
 
         # Scrollable list
         self._sess_canvas = tk.Canvas(self._left, bg=PANEL, highlightthickness=0)
@@ -296,6 +429,13 @@ class ReplayUI:
         self._sess_frame.bind('<Configure>', self._on_sess_configure)
         self._sess_canvas.bind('<Configure>',
             lambda e: self._sess_canvas.itemconfig(self._sess_win, width=e.width))
+
+    def _open_archive(self):
+        d = _archive_dir()
+        try:
+            os.startfile(d)
+        except Exception:
+            messagebox.showinfo('Archiv XLSX', f'Nahrané soubory se ukládají do:\n{d}')
 
     def _on_sess_configure(self, _evt):
         self._sess_canvas.configure(
@@ -368,6 +508,7 @@ class ReplayUI:
 
         self._kpi_frame = kpi_row
         self._kpi_vars  = {}
+        self._kpi_lbls  = {}
 
         kpi_defs = [
             ('tot_pnl',  'Total PnL',        '$0.00'),
@@ -385,8 +526,26 @@ class ReplayUI:
             tk.Label(cell, text=lbl, bg=PANEL, fg=SUB, font=FNS).pack(pady=(12, 0))
             var = tk.StringVar(value=default)
             self._kpi_vars[key] = var
-            tk.Label(cell, textvariable=var, bg=PANEL, fg=TEXT,
-                     font=FNLG).pack()
+            vlbl = tk.Label(cell, textvariable=var, bg=PANEL, fg=TEXT,
+                            font=FNLG)
+            vlbl.pack()
+            self._kpi_lbls[key] = vlbl
+
+        # ── Přepínač stránek ─────────────────────────────────────────────────
+        navbar = tk.Frame(parent, bg=SURF2, height=38)
+        navbar.pack(fill='x')
+        navbar.pack_propagate(False)
+
+        self._page = 'overview'
+        self._page_btns = {}
+        for key, lbl in PAGES:
+            b = tk.Button(navbar, text=lbl, bg=SURF2, fg=SUB,
+                          relief='flat', font=FNS, padx=14, pady=6,
+                          cursor='hand2', bd=0,
+                          activebackground=SURF, activeforeground=TEXT,
+                          command=lambda k=key: self._set_page(k))
+            b.pack(side='left', padx=1, pady=4)
+            self._page_btns[key] = b
 
         # ── Chart canvas ─────────────────────────────────────────────────────
         chart_frame = tk.Frame(parent, bg=BG)
@@ -401,6 +560,23 @@ class ReplayUI:
             tk.Label(chart_frame,
                      text='Chybí matplotlib. pip install matplotlib',
                      bg=BG, fg=RED, font=FN).pack(expand=True)
+
+        # Textová tabulka statistik (schovaná, střídá se s grafem)
+        self._stats_frame = tk.Frame(chart_frame, bg=BG)
+
+        self._paint_page_btns()
+
+    def _set_page(self, key):
+        self._page = key
+        self._paint_page_btns()
+        self._refresh_charts()
+
+    def _paint_page_btns(self):
+        for k, b in self._page_btns.items():
+            if k == self._page:
+                b.config(bg=ACCENT, fg='white', font=FNB)
+            else:
+                b.config(bg=SURF2, fg=SUB, font=FNS)
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -429,6 +605,8 @@ class ReplayUI:
                         sym = p
                         break
 
+                archived = _archive_xlsx(path, sym)
+
                 session = {
                     'id':       str(uuid.uuid4()),
                     'filename': fname,
@@ -437,6 +615,8 @@ class ReplayUI:
                     'enabled':  True,
                     'initial_capital': parsed['initial_capital'],
                     'trades':   parsed['trades'],
+                    'archive':  archived or '',
+                    'source':   path,
                 }
                 self._data.setdefault('sessions', []).append(session)
                 added += 1
@@ -469,6 +649,9 @@ class ReplayUI:
 
     def _refresh(self):
         self._rebuild_sessions_list()
+        self._refresh_charts()
+
+    def _refresh_charts(self):
         trades = _active_trades(self._data)
         stats  = _compute(trades)
         self._update_kpis(stats)
@@ -491,16 +674,14 @@ class ReplayUI:
         ep_sign = '+' if st['epayoff'] >= 0 else ''
         self._kpi_vars['epayoff'].set(f"{ep_sign}${st['epayoff']:.2f}")
 
-        # Colour total PnL label
-        for w in self._kpi_frame.winfo_children():
-            if isinstance(w, tk.Frame):
-                for c in w.winfo_children():
-                    if isinstance(c, tk.Label) and c.cget('textvariable'):
-                        tv = str(self._kpi_frame.tk.call(
-                            c.cget('textvariable'), 'get'))
-                        if tv == self._kpi_vars['tot_pnl'].get():
-                            col = GREEN if st['tot_pnl'] >= 0 else RED
-                            c.config(fg=col)
+        # Obarvení hodnot podle znaménka
+        self._kpi_lbls['tot_pnl'].config(
+            fg=GREEN if st['tot_pnl'] >= 0 else RED)
+        self._kpi_lbls['max_dd'].config(fg=RED if st['max_dd'] > 0 else TEXT)
+        self._kpi_lbls['pf'].config(
+            fg=GREEN if st['pf'] >= 1 else RED)
+        self._kpi_lbls['epayoff'].config(
+            fg=GREEN if st['epayoff'] >= 0 else RED)
 
     # ── Charts ────────────────────────────────────────────────────────────────
 
@@ -518,44 +699,115 @@ class ReplayUI:
         if ylabel:
             ax.set_ylabel(ylabel, fontsize=8)
 
-    def _draw_charts(self, st, trades):
+    def _show_canvas(self):
+        """Zobrazí matplotlib plátno, schová textovou tabulku."""
+        self._stats_frame.pack_forget()
+        w = self._canvas.get_tk_widget()
+        if not w.winfo_ismapped():
+            w.pack(fill='both', expand=True)
+
+    def _show_stats_table(self):
+        self._canvas.get_tk_widget().pack_forget()
+        if not self._stats_frame.winfo_ismapped():
+            self._stats_frame.pack(fill='both', expand=True)
+
+    def _msg(self, text, color=None):
+        """Vykreslí zprávu přes celé plátno."""
+        self._show_canvas()
         self._fig.clf()
-
-        if st is None:
-            ax = self._fig.add_subplot(111)
-            ax.set_facecolor(MAXES)
-            self._fig.patch.set_facecolor(MFIG)
-            ax.text(0.5, 0.5, 'Načti XLSX soubor pro zobrazení analýzy',
-                    transform=ax.transAxes, ha='center', va='center',
-                    color=SUB, fontsize=12)
-            ax.set_xticks([]); ax.set_yticks([])
-            ax.spines[:].set_color(MGRID)
-            self._canvas.draw()
-            return
-
-        # Grid: top row = equity curve (full width)
-        #        bottom row = 3 panels
-        import matplotlib.gridspec as gs
-        grid = gs.GridSpec(2, 3,
-                           figure=self._fig,
-                           height_ratios=[2, 1],
-                           hspace=0.45, wspace=0.35,
-                           left=0.06, right=0.97,
-                           top=0.94, bottom=0.08)
-
-        ax_eq  = self._fig.add_subplot(grid[0, :])   # full width
-        ax_prs = self._fig.add_subplot(grid[1, 0])   # profit structure
-        ax_dn  = self._fig.add_subplot(grid[1, 1])   # donut
-        ax_his = self._fig.add_subplot(grid[1, 2])   # histogram
-
-        self._draw_equity(ax_eq, st, trades)
-        self._draw_profit_structure(ax_prs, st)
-        self._draw_donut(ax_dn, st)
-        self._draw_histogram(ax_his, st)
-
+        self._fig.patch.set_facecolor(MFIG)
+        ax = self._fig.add_subplot(111)
+        ax.set_facecolor(MAXES)
+        ax.text(0.5, 0.5, text, transform=ax.transAxes,
+                ha='center', va='center', color=color or SUB,
+                fontsize=10, linespacing=1.6, family='monospace'
+                if color else 'sans-serif')
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.spines[:].set_color(MGRID)
         self._canvas.draw()
 
-    def _draw_equity(self, ax, st, trades):
+    def _draw_charts(self, st, trades):
+        if st is None:
+            self._msg('Načti XLSX soubor pro zobrazení analýzy')
+            return
+
+        if self._page == 'stats':
+            self._show_stats_table()
+            try:
+                self._build_stats_table(st)
+            except Exception as e:
+                import traceback as tb
+                for w in self._stats_frame.winfo_children():
+                    w.destroy()
+                tk.Label(self._stats_frame, text=f'{e}\n\n{tb.format_exc()}',
+                         bg=BG, fg=RED, font=FNS, justify='left',
+                         wraplength=900).pack(padx=20, pady=20)
+            return
+
+        self._show_canvas()
+        self._fig.clf()
+        self._fig.patch.set_facecolor(MFIG)
+        try:
+            {
+                'overview': self._page_overview,
+                'equity':   self._page_equity,
+                'trades':   self._page_trades,
+                'dist':     self._page_dist,
+                'time':     self._page_time,
+            }[self._page](st, trades)
+            self._canvas.draw()
+        except Exception as e:
+            import traceback as tb
+            self._msg(f'Chyba vykreslení ({self._page}):\n\n'
+                      f'{tb.format_exc()}', color=RED)
+
+    # ── Stránky ───────────────────────────────────────────────────────────────
+
+    def _grid(self, rows, cols, **kw):
+        gs = mgridspec
+        opts = dict(figure=self._fig, hspace=0.45, wspace=0.30,
+                    left=0.07, right=0.97, top=0.92, bottom=0.10)
+        opts.update(kw)
+        return gs.GridSpec(rows, cols, **opts)
+
+    def _page_overview(self, st, trades):
+        grid = self._grid(2, 3, height_ratios=[2, 1])
+        self._draw_equity(self._fig.add_subplot(grid[0, :]), st, trades)
+        self._draw_profit_structure(self._fig.add_subplot(grid[1, 0]), st)
+        self._draw_donut(self._fig.add_subplot(grid[1, 1]), st)
+        self._draw_histogram(self._fig.add_subplot(grid[1, 2]), st)
+
+    def _page_equity(self, st, trades):
+        grid = self._grid(2, 1, height_ratios=[2.2, 1], hspace=0.28, bottom=0.12)
+        ax_eq = self._fig.add_subplot(grid[0, 0])
+        ax_dd = self._fig.add_subplot(grid[1, 0], sharex=ax_eq)
+        self._draw_equity(ax_eq, st, trades, big=True)
+        self._draw_underwater(ax_dd, st, trades)
+        ax_eq.tick_params(labelbottom=False)   # popisky jen na spodní ose
+        ax_eq.set_xlabel('')
+        ax_dd.set_xlabel('Čas výstupu', fontsize=8)
+
+    def _page_trades(self, st, trades):
+        grid = self._grid(2, 2)
+        self._draw_pertrade(self._fig.add_subplot(grid[0, 0]), st)
+        self._draw_mae_mfe(self._fig.add_subplot(grid[0, 1]), st)
+        self._draw_duration(self._fig.add_subplot(grid[1, 0]), st)
+        self._draw_long_short(self._fig.add_subplot(grid[1, 1]), st)
+
+    def _page_dist(self, st, trades):
+        grid = self._grid(2, 2)
+        self._draw_histogram(self._fig.add_subplot(grid[0, 0]), st)
+        self._draw_pnl_hist(self._fig.add_subplot(grid[0, 1]), st)
+        self._draw_streaks(self._fig.add_subplot(grid[1, 0]), st)
+        self._draw_signals(self._fig.add_subplot(grid[1, 1]), st)
+
+    def _page_time(self, st, trades):
+        grid = self._grid(2, 2, height_ratios=[1, 1])
+        self._draw_by_hour(self._fig.add_subplot(grid[0, :]), st)
+        self._draw_by_wday(self._fig.add_subplot(grid[1, 0]), st)
+        self._draw_by_day(self._fig.add_subplot(grid[1, 1]), st)
+
+    def _draw_equity(self, ax, st, trades, big=False):
         self._ax_style(ax, title='Equity křivka — kumulativní P&L')
         pnls   = st['pnls']
         equity = st['equity']
@@ -565,8 +817,20 @@ class ReplayUI:
         colors = [GREEN if p >= 0 else RED for p in pnls]
         ax.bar(xs, pnls, color=colors, alpha=0.6, width=0.7, zorder=2)
 
-        ax.plot(xs, equity[1:], color='#38bdf8', linewidth=2,
+        eq = equity[1:]
+        ax.plot(xs, eq, color='#38bdf8', linewidth=2,
                 zorder=3, marker='o', markersize=3.5, markerfacecolor='#38bdf8')
+        ax.fill_between(xs, 0, eq, color='#38bdf8', alpha=0.10, zorder=1)
+
+        if big:
+            # Běžící maximum (peak) — vizualizace drawdownu
+            peaks, pk = [], float('-inf')
+            for v in eq:
+                pk = max(pk, v)
+                peaks.append(pk)
+            ax.plot(xs, peaks, color=SUB, linewidth=1, linestyle='--',
+                    zorder=2, label='Peak')
+            ax.fill_between(xs, eq, peaks, color=RED, alpha=0.14, zorder=1)
 
         # Zero line
         ax.axhline(0, color=MGRID, linewidth=0.8, linestyle='-')
@@ -598,7 +862,6 @@ class ReplayUI:
         el = ax.lines[0] if ax.lines else None
         handles = [pw, lw]
         if el:
-            from matplotlib.lines import Line2D
             handles.append(Line2D([0], [0], color='#38bdf8', lw=2, label='Kumulativní P&L'))
         ax.legend(handles=handles, loc='upper left', fontsize=7,
                   facecolor=MFIG, edgecolor=MGRID, labelcolor=MTEXT)
@@ -687,6 +950,287 @@ class ReplayUI:
         ax.legend(fontsize=7, facecolor=MFIG, edgecolor=MGRID,
                   labelcolor=MTEXT, loc='upper right')
 
+    # ── Nové grafy ────────────────────────────────────────────────────────────
+
+    def _draw_underwater(self, ax, st, trades):
+        self._ax_style(ax, title='Drawdown (underwater)')
+        dd = st['dd_series'][1:]
+        xs = list(range(1, len(dd) + 1))
+        ax.fill_between(xs, dd, 0, color=RED, alpha=0.45, zorder=2)
+        ax.plot(xs, dd, color=RED, linewidth=1.2, zorder=3)
+        ax.axhline(0, color=MGRID, linewidth=0.8)
+        if dd:
+            worst = min(dd)
+            wi    = dd.index(worst) + 1
+            ax.annotate(f'max DD ${abs(worst):.2f}',
+                        xy=(wi, worst), xytext=(wi, worst),
+                        color=RED, fontsize=8, ha='center', va='top')
+        ax.set_ylabel('USD pod peakem', fontsize=8)
+        ax.set_xlabel('Obchod #', fontsize=8)
+
+    def _draw_pertrade(self, ax, st):
+        self._ax_style(ax, title='P&L jednotlivých obchodů')
+        pnls = st['pnls']
+        xs   = list(range(1, len(pnls) + 1))
+        ax.bar(xs, pnls, color=[GREEN if p >= 0 else RED for p in pnls],
+               alpha=0.85, width=0.7)
+        ax.axhline(0, color=MGRID, linewidth=0.8)
+        ep = st['epayoff']
+        ax.axhline(ep, color=ORANGE, linestyle='--', linewidth=1.1,
+                   label=f'Průměr ${ep:.2f}')
+        ax.set_xlabel('Obchod #', fontsize=8)
+        ax.set_ylabel('USD', fontsize=8)
+        ax.legend(fontsize=7, facecolor=MFIG, edgecolor=MGRID,
+                  labelcolor=MTEXT, loc='best')
+
+    def _draw_mae_mfe(self, ax, st):
+        self._ax_style(ax, title='MAE / MFE — jak daleko šel obchod')
+        mae  = [abs(v) for v in st['mae']]
+        mfe  = [abs(v) for v in st['mfe']]
+        pnls = st['pnls']
+        if not mae:
+            return
+        cols = [GREEN if p >= 0 else RED for p in pnls]
+        ax.scatter(mae, mfe, c=cols, s=42, alpha=0.85,
+                   edgecolors=MFIG, linewidths=0.8, zorder=3)
+        lim = max(max(mae), max(mfe)) * 1.1 or 1
+        ax.plot([0, lim], [0, lim], color=SUB, linestyle='--',
+                linewidth=0.9, zorder=2, label='MAE = MFE')
+        ax.set_xlim(0, lim); ax.set_ylim(0, lim)
+        ax.set_xlabel('MAE — max proti pozici', fontsize=8)
+        ax.set_ylabel('MFE — max pro pozici', fontsize=8)
+        h = [mpatches.Patch(color=GREEN, label='WIN'),
+             mpatches.Patch(color=RED,   label='LOSS')]
+        ax.legend(handles=h, fontsize=7, facecolor=MFIG,
+                  edgecolor=MGRID, labelcolor=MTEXT, loc='upper left')
+
+    def _draw_duration(self, ax, st):
+        self._ax_style(ax, title='Délka obchodu (počet svíček)')
+        bl = [b for b in st['bars_list'] if b]
+        if not bl:
+            ax.text(0.5, 0.5, 'Žádná data o délce', transform=ax.transAxes,
+                    ha='center', va='center', color=SUB, fontsize=9)
+            return
+        bins = min(20, max(5, len(set(bl))))
+        ax.hist(bl, bins=bins, color=ACCENT, alpha=0.8)
+        avg = sum(bl) / len(bl)
+        ax.axvline(avg, color=ORANGE, linestyle='--', linewidth=1.2,
+                   label=f'Průměr {avg:.1f}')
+        ax.set_xlabel('Svíčky', fontsize=8)
+        ax.set_ylabel('Počet obchodů', fontsize=8)
+        ax.legend(fontsize=7, facecolor=MFIG, edgecolor=MGRID,
+                  labelcolor=MTEXT, loc='upper right')
+
+    def _draw_long_short(self, ax, st):
+        self._ax_style(ax, title='Long vs Short')
+        L, S = st['long'], st['short']
+        labels = ['Long', 'Short']
+        vals   = [L['pnl'], S['pnl']]
+        cols   = [GREEN if v >= 0 else RED for v in vals]
+        bars   = ax.bar(labels, vals, color=cols, alpha=0.85, width=0.45)
+        ax.axhline(0, color=MGRID, linewidth=0.8)
+        for b, v, sd in zip(bars, vals, [L, S]):
+            ax.text(b.get_x() + b.get_width() / 2,
+                    v + (abs(v) * 0.04 if v >= 0 else -abs(v) * 0.04),
+                    f'${v:.1f}\n{sd["n"]} obch. · {sd["wr"]:.0f}% WR',
+                    ha='center', va='bottom' if v >= 0 else 'top',
+                    color=MTEXT, fontsize=8, linespacing=1.4)
+        ax.set_ylabel('USD', fontsize=8)
+        lo, hi = ax.get_ylim()
+        ax.set_ylim(lo * 1.3 if lo < 0 else lo, hi * 1.3 if hi > 0 else hi)
+
+    def _draw_pnl_hist(self, ax, st):
+        self._ax_style(ax, title='Rozdělení P&L (USD)')
+        pnls = st['pnls']
+        if not pnls:
+            return
+        w = [p for p in pnls if p > 0]
+        l = [p for p in pnls if p < 0]
+        if l:
+            ax.hist(l, bins=15, color=RED, alpha=0.75, label='Losers')
+        if w:
+            ax.hist(w, bins=15, color=GREEN, alpha=0.75, label='Winners')
+        ax.axvline(0, color=MTEXT, linewidth=0.6)
+        ax.set_xlabel('USD', fontsize=8)
+        ax.set_ylabel('Počet', fontsize=8)
+        ax.legend(fontsize=7, facecolor=MFIG, edgecolor=MGRID,
+                  labelcolor=MTEXT, loc='upper right')
+
+    def _draw_streaks(self, ax, st):
+        self._ax_style(ax, title='Série za sebou')
+        pnls = st['pnls']
+        runs, cur, sign = [], 0, 0
+        for p in pnls:
+            s = 1 if p > 0 else (-1 if p < 0 else 0)
+            if s == sign and s != 0:
+                cur += 1
+            else:
+                if sign != 0:
+                    runs.append(sign * cur)
+                sign, cur = s, (1 if s != 0 else 0)
+        if sign != 0:
+            runs.append(sign * cur)
+        if not runs:
+            ax.text(0.5, 0.5, 'Žádná data', transform=ax.transAxes,
+                    ha='center', va='center', color=SUB)
+            return
+        xs = list(range(1, len(runs) + 1))
+        ax.bar(xs, runs, color=[GREEN if r > 0 else RED for r in runs],
+               alpha=0.85, width=0.7)
+        ax.axhline(0, color=MGRID, linewidth=0.8)
+        ax.set_xlabel('Pořadí série', fontsize=8)
+        ax.set_ylabel('Délka (+W / −L)', fontsize=8)
+        ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda v, _: f'{abs(int(v))}'))
+        ax.text(0.02, 0.95,
+                f'Max výher v řadě: {st["max_cw"]}\nMax proher v řadě: {st["max_cl"]}',
+                transform=ax.transAxes, va='top', ha='left',
+                color=MTEXT, fontsize=8, linespacing=1.5)
+
+    def _draw_signals(self, ax, st):
+        self._ax_style(ax, title='Důvod výstupu')
+        bs = st['by_signal']
+        if not bs:
+            ax.text(0.5, 0.5, 'Žádná data', transform=ax.transAxes,
+                    ha='center', va='center', color=SUB)
+            return
+        items = sorted(bs.items(), key=lambda kv: sum(kv[1]))
+        names = [k if len(k) <= 22 else k[:20] + '…' for k, _ in items]
+        vals  = [sum(v) for _, v in items]
+        cnts  = [len(v) for _, v in items]
+        ypos  = list(range(len(names)))
+        ax.barh(ypos, vals, color=[GREEN if v >= 0 else RED for v in vals],
+                alpha=0.85, height=0.6)
+        ax.set_yticks(ypos)
+        ax.set_yticklabels(names, fontsize=7)
+        ax.axvline(0, color=MGRID, linewidth=0.8)
+        for y, v, c in zip(ypos, vals, cnts):
+            ax.text(v, y, f'  ${v:.1f} ({c}×)  ',
+                    va='center', ha='left' if v >= 0 else 'right',
+                    color=MTEXT, fontsize=7)
+        ax.set_xlabel('USD', fontsize=8)
+        lo, hi = ax.get_xlim()
+        ax.set_xlim(lo * 1.35 if lo < 0 else lo, hi * 1.35 if hi > 0 else hi)
+
+    def _bucket_bar(self, ax, buckets, labels, title, xlabel):
+        self._ax_style(ax, title=title)
+        if not buckets:
+            ax.text(0.5, 0.5, 'Žádná data', transform=ax.transAxes,
+                    ha='center', va='center', color=SUB)
+            return
+        vals = [sum(buckets[k]) for k in buckets]
+        cnts = [len(buckets[k]) for k in buckets]
+        xs   = list(range(len(labels)))
+        ax.bar(xs, vals, color=[GREEN if v >= 0 else RED for v in vals],
+               alpha=0.85, width=0.6)
+        ax.axhline(0, color=MGRID, linewidth=0.8)
+        ax.set_xticks(xs)
+        ax.set_xticklabels(labels, fontsize=7, rotation=0)
+        for x, v, c in zip(xs, vals, cnts):
+            ax.text(x, v, f'{c}×', ha='center',
+                    va='bottom' if v >= 0 else 'top',
+                    color=SUB, fontsize=7)
+        ax.set_xlabel(xlabel, fontsize=8)
+        ax.set_ylabel('USD', fontsize=8)
+        lo, hi = ax.get_ylim()
+        ax.set_ylim(lo * 1.25 if lo < 0 else lo, hi * 1.25 if hi > 0 else hi)
+
+    def _draw_by_hour(self, ax, st):
+        bh = st['by_hour']
+        ks = sorted(bh.keys())
+        self._bucket_bar(ax, {k: bh[k] for k in ks},
+                         [f'{k:02d}:00' for k in ks],
+                         'P&L podle hodiny výstupu', 'Hodina')
+
+    def _draw_by_wday(self, ax, st):
+        bw = st['by_wday']
+        ks = sorted(bw.keys())
+        self._bucket_bar(ax, {k: bw[k] for k in ks},
+                         [WDAYS[k] for k in ks],
+                         'P&L podle dne v týdnu', 'Den')
+
+    def _draw_by_day(self, ax, st):
+        bm = st['by_month']
+        ks = sorted(bm.keys())
+        self._bucket_bar(ax, {k: bm[k] for k in ks},
+                         [k[5:] for k in ks],
+                         'P&L podle dne', 'Datum')
+
+    # ── Tabulka statistik ─────────────────────────────────────────────────────
+
+    def _build_stats_table(self, st):
+        for w in self._stats_frame.winfo_children():
+            w.destroy()
+
+        def money(v):
+            return ('+' if v > 0 else '') + f'${v:,.2f}'
+
+        def num(v, d=3):
+            return '∞' if math.isinf(v) else f'{v:.{d}f}'
+
+        L, S = st['long'], st['short']
+        groups = [
+            ('Výkonnost', [
+                ('Čistý zisk (Net P&L)',   money(st['tot_pnl']), st['tot_pnl']),
+                ('Hrubý zisk',             money(st['gross_p']), 1),
+                ('Hrubá ztráta',           money(-st['gross_l']), -1),
+                ('Profit factor',          num(st['pf']), st['pf'] - 1),
+                ('Expected payoff',        money(st['epayoff']), st['epayoff']),
+                ('Recovery factor',        num(st['recovery'], 2), st['recovery'] - 1),
+            ]),
+            ('Riziko', [
+                ('Max drawdown',           f"${st['max_dd']:,.2f}", -1),
+                ('Max drawdown %',         f"{st['max_dd_pct']:.2f} %", -1),
+                ('Sharpe ratio',           num(st['sharpe']), st['sharpe']),
+                ('Sortino ratio',          num(st['sortino']), st['sortino']),
+            ]),
+            ('Obchody', [
+                ('Celkem obchodů',         str(st['total']), 0),
+                ('Ziskových',              f"{st['winners']}  ({st['win_rate']:.1f} %)", 1),
+                ('Ztrátových',             f"{st['losers']}  ({st['losers']/st['total']*100:.1f} %)", -1),
+                ('Breakeven',              str(st['bes']), 0),
+                ('Průměrný zisk',          money(st['avg_w']), 1),
+                ('Průměrná ztráta',        money(-st['avg_l']), -1),
+                ('Poměr avg W / avg L',    num(st['ratio_wl'], 2), st['ratio_wl'] - 1),
+                ('Největší zisk',          money(st['largest_w']), 1),
+                ('Největší ztráta',        money(st['largest_l']), -1),
+                ('Max výher v řadě',       str(st['max_cw']), 1),
+                ('Max proher v řadě',      str(st['max_cl']), -1),
+                ('Průměrná délka (svíčky)', f"{st['avg_bars']:.1f}", 0),
+            ]),
+            ('Long vs Short', [
+                ('Long — počet / P&L',     f"{L['n']}  ·  {money(L['pnl'])}", L['pnl']),
+                ('Long — úspěšnost',       f"{L['wr']:.1f} %", L['wr'] - 50),
+                ('Short — počet / P&L',    f"{S['n']}  ·  {money(S['pnl'])}", S['pnl']),
+                ('Short — úspěšnost',      f"{S['wr']:.1f} %", S['wr'] - 50),
+            ]),
+        ]
+
+        wrap = tk.Frame(self._stats_frame, bg=BG)
+        wrap.pack(fill='both', expand=True, padx=10, pady=10)
+
+        for i, (title, rows) in enumerate(groups):
+            col = tk.Frame(wrap, bg=PANEL)
+            col.grid(row=i // 2, column=i % 2, sticky='nsew', padx=6, pady=6)
+
+            tk.Label(col, text=title, bg=SURF2, fg=TEXT, font=FNB,
+                     anchor='w', padx=12, pady=7).pack(fill='x')
+
+            for j, (lbl, val, sign) in enumerate(rows):
+                bgc = PANEL if j % 2 == 0 else SURF2
+                r = tk.Frame(col, bg=bgc)
+                r.pack(fill='x')
+                tk.Label(r, text=lbl, bg=bgc, fg=SUB, font=FNS,
+                         anchor='w', padx=12, pady=5).pack(side='left')
+                fg = TEXT if sign == 0 else (GREEN if sign > 0 else RED)
+                tk.Label(r, text=val, bg=bgc, fg=fg, font=FNB,
+                         anchor='e', padx=12, pady=5).pack(side='right')
+
+        wrap.grid_columnconfigure(0, weight=1)
+        wrap.grid_columnconfigure(1, weight=1)
+        for r in range((len(groups) + 1) // 2):
+            wrap.grid_rowconfigure(r, weight=1)
+
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
@@ -702,13 +1246,48 @@ def setup_replay_tab(parent, app_dir):
         missing.append('matplotlib')
 
     if missing:
+        import subprocess as _sp
         frame = tk.Frame(parent, bg=BG)
         frame.pack(expand=True)
         tk.Label(frame,
-                 text=f'❌ Chybí knihovny: {", ".join(missing)}\n\n'
-                      f'Nainstaluj: pip install {" ".join(missing)}',
-                 bg=BG, fg=RED, font=('Segoe UI', 12), justify='center'
-                 ).pack(expand=True)
+                 text=f'❌ Chybí knihovny: {", ".join(missing)}',
+                 bg=BG, fg=RED, font=('Segoe UI', 13, 'bold')).pack(pady=(40, 8))
+        tk.Label(frame,
+                 text='Klikni na tlačítko níže pro instalaci, pak restartuj program.',
+                 bg=BG, fg=TEXT, font=('Segoe UI', 10)).pack(pady=(0, 20))
+
+        def _install():
+            import sys as _s
+            # Hledej Python.exe (ne exe programu)
+            import shutil as _sh
+            py = _sh.which('python') or _sh.which('python3')
+            if not py:
+                from tkinter import messagebox as _mb
+                _mb.showerror('Chyba', 'Python nenalezen v PATH.\nNainstaluj ručně:\npip install ' + ' '.join(missing))
+                return
+            btn.config(state='disabled', text='⏳ Instaluji…')
+            try:
+                _sp.check_call([py, '-m', 'pip', 'install', '--quiet'] + missing,
+                               creationflags=0x08000000)  # CREATE_NO_WINDOW
+                from tkinter import messagebox as _mb
+                _mb.showinfo('Hotovo', 'Instalace dokončena.\nRestartuj program.')
+            except Exception as _e:
+                from tkinter import messagebox as _mb
+                _mb.showerror('Chyba', f'Instalace selhala:\n{_e}\n\nZkus ručně:\npip install {" ".join(missing)}')
+            btn.config(state='normal', text='📦  Nainstalovat a restartovat')
+
+        btn = tk.Button(frame, text='📦  Nainstalovat a restartovat',
+                        bg=ACCENT, fg='white', relief='flat',
+                        font=('Segoe UI', 11, 'bold'), padx=20, pady=10,
+                        cursor='hand2', command=_install)
+        btn.pack()
         return
 
-    ReplayUI(parent)
+    try:
+        ReplayUI(parent)
+    except Exception as _e:
+        import traceback as _tb
+        tk.Label(parent,
+                 text=f'❌ Chyba inicializace Replay:\n{_e}\n\n{_tb.format_exc()}',
+                 bg='#0f172a', fg='#ef4444', font=('Segoe UI', 9),
+                 justify='left', wraplength=900).pack(expand=True, padx=20)
