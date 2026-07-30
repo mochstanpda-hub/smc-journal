@@ -17,8 +17,12 @@ try:
     import matplotlib
     matplotlib.use('TkAgg')
     import matplotlib.pyplot as plt
+    import matplotlib.figure, matplotlib.patches, matplotlib.ticker
+    import matplotlib.gridspec
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     from matplotlib.colors import TwoSlopeNorm
+except ImportError: pass
+try: import openpyxl
 except ImportError: pass
 try: import cv2
 except ImportError: pass
