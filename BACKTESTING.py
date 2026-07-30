@@ -60,7 +60,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.189"
+VERSION = "1.5.190"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -2177,7 +2177,7 @@ TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1W", "1M"]
 FIBO_OPTIONS = [
     "ON VAH", "ON VAL", "ON POC", "ON High", "ON Low",
     "RTH VAH", "RTH VAL", "RTH POC", "RTH High", "RTH Low",
-    "PDH", "PDL",
+    "PDH", "PDL", "Mon High",
     "VWAP", "VWAP +1σ", "VWAP -1σ", "VWAP +2σ", "VWAP -2σ",
     "pod VWAP", "nad VWAP",
     "pod VWAP +1σ", "nad VWAP +1σ",
