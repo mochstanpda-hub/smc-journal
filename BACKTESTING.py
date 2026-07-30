@@ -11,9 +11,14 @@ import sys
 import traceback
 import calendar
 import webbrowser
-import zipfile 
-import random 
+import zipfile
+import random
 import math
+try:
+    from replay_tab import setup_replay_tab as _setup_replay_tab
+    _HAS_REPLAY = True
+except Exception:
+    _HAS_REPLAY = False
 
 # === KONTROLA KNIHOVEN ===
 try:
@@ -60,7 +65,7 @@ except:
 # ==============================================================================
 # VERZE A AUTO-UPDATE
 # ==============================================================================
-VERSION = "1.5.191"
+VERSION = "1.5.192"
 
 # CHANGELOG — co je nového v každé verzi (parsováno při aktualizaci)
 # Formát: verze | Změna 1; Změna 2; Změna 3
@@ -1972,6 +1977,7 @@ ALL_MAIN_TABS = [
     ('yt',          '  📥 YT DOWNLOADER  ',False),
     ('ctrader',     '  📡 cTRADER  ',      False),
     ('tradingview', '  TRADINGVIEW GRAF  ',False),
+    ('replay',      '  🔁 REPLAY  ',       False),
 ]
 
 def get_tab_config():
@@ -13231,6 +13237,15 @@ def show_main_screen(p_name):
     tab_ct = ttk.Frame(nb)
     nb.add(tab_ct, text='  📡 cTRADER  ')
     setup_ctrader_tab(tab_ct, nb)
+
+    # TAB REPLAY
+    tab_replay = ttk.Frame(nb)
+    nb.add(tab_replay, text='  🔁 REPLAY  ')
+    if _HAS_REPLAY:
+        _setup_replay_tab(tab_replay, _APP_DIR)
+    else:
+        tk.Label(tab_replay, text='❌ replay_tab.py nenalezen',
+                 bg='#0f172a', fg='#ef4444').pack(expand=True)
 
     # TAB TRADINGVIEW
     tab_tv = ttk.Frame(nb)
